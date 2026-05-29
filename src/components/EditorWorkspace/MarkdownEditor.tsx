@@ -12,6 +12,7 @@ interface Props {
 export function MarkdownEditor({ initialContent, onChange }: Props) {
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const isProgrammaticChange = useRef(false);
 
   useEffect(() => {
     if (!editorRef.current) return;
@@ -24,7 +25,7 @@ export function MarkdownEditor({ initialContent, onChange }: Props) {
         markdown({ base: markdownLanguage }),
         keymap.of([...defaultKeymap, ...historyKeymap]),
         EditorView.updateListener.of((update) => {
-          if (update.docChanged) {
+          if (update.docChanged && !isProgrammaticChange.current) {
             onChange(update.state.doc.toString());
           }
         }),
@@ -48,13 +49,15 @@ export function MarkdownEditor({ initialContent, onChange }: Props) {
     if (!viewRef.current) return;
     const currentContent = viewRef.current.state.doc.toString();
     if (currentContent !== initialContent) {
+      isProgrammaticChange.current = true;
       viewRef.current.dispatch({
         changes: { from: 0, to: currentContent.length, insert: initialContent },
       });
+      isProgrammaticChange.current = false;
     }
   }, [initialContent]);
 
   return (
-    <div ref={editorRef} style={{ flex: 1, height: "100%", overflow: "auto" }} />
+    <div ref={editorRef} style={{ flex: 1, minWidth: 0, height: "100%", overflow: "auto" }} />
   );
 }

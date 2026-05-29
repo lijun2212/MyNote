@@ -1,6 +1,6 @@
 use crate::domain::note::{CreateNoteInput, NoteDetail, NoteTreeNode, SaveNoteInput, SaveNoteResult};
 use crate::error::AppError;
-use crate::services::note::{create_note_service, get_note_by_path_service, get_note_tree_service, save_note_service};
+use crate::services::note::{create_note_service, get_note_by_path_service, get_note_tree_service, import_note_service, save_note_service};
 use crate::state::AppState;
 use tauri::State;
 
@@ -36,4 +36,13 @@ pub async fn get_note_tree(
     state: State<'_, AppState>,
 ) -> Result<Vec<NoteTreeNode>, AppError> {
     get_note_tree_service(&state)
+}
+
+#[tauri::command]
+pub async fn import_note(
+    state: State<'_, AppState>,
+    src_path: String,
+    dest_directory: String,
+) -> Result<crate::domain::note::Note, AppError> {
+    import_note_service(&state, &src_path, &dest_directory)
 }

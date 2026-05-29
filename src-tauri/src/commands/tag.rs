@@ -9,7 +9,7 @@ pub fn list_tags(state: State<AppState>) -> Result<Vec<TagSummary>, String> {
 
     let mut stmt = conn
         .prepare(
-            "SELECT t.id, t.name, COUNT(nt.note_id) as note_count
+            "SELECT t.id, t.name, COUNT(n.id) as note_count
              FROM tags t
              LEFT JOIN note_tags nt ON nt.tag_id = t.id
              LEFT JOIN notes n ON n.id = nt.note_id AND n.deleted_at IS NULL

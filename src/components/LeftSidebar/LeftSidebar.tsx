@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { FileTreePanel } from "./FileTreePanel";
 import { TagPanel } from "./TagPanel";
+import { useAppStore } from "../../store/useAppStore";
 
 type Tab = "files" | "tags";
 
 export function LeftSidebar() {
   const [activeTab, setActiveTab] = useState<Tab>("files");
+  const setSelectedTagIds = useAppStore((s) => s.setSelectedTagIds);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -19,7 +21,10 @@ export function LeftSidebar() {
         {(["files", "tags"] as Tab[]).map((tab) => (
           <button
             key={tab}
-            onClick={() => setActiveTab(tab)}
+            onClick={() => {
+              if (tab === "files") setSelectedTagIds([]);
+              setActiveTab(tab);
+            }}
             style={{
               flex: 1,
               padding: "7px 0",

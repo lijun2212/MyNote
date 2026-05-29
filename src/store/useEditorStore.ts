@@ -8,6 +8,7 @@ interface EditorState {
   isSaving: boolean;
   saveError: string | null;
   saveStatus: "saved" | "saving" | "unsaved" | "error";
+  showPreview: boolean;
 
   setCurrentNote: (note: Note | null) => void;
   setContent: (content: string) => void;
@@ -15,6 +16,7 @@ interface EditorState {
   markSaved: (note: Note) => void;
   setSaving: (saving: boolean) => void;
   setSaveError: (error: string | null) => void;
+  togglePreview: () => void;
 }
 
 export const useEditorStore = create<EditorState>((set) => ({
@@ -24,6 +26,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   isSaving: false,
   saveError: null,
   saveStatus: "saved",
+  showPreview: true,
 
   setCurrentNote: (note) =>
     set({ currentNote: note, isDirty: false, saveStatus: "saved", saveError: null }),
@@ -35,4 +38,5 @@ export const useEditorStore = create<EditorState>((set) => ({
     set({ isSaving: saving, saveStatus: saving ? "saving" : "saved" }),
   setSaveError: (error) =>
     set({ saveError: error, saveStatus: "error" }),
+  togglePreview: () => set((s) => ({ showPreview: !s.showPreview })),
 }));

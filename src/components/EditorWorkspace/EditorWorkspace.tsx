@@ -1,12 +1,11 @@
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import { useEditorStore } from "../../store/useEditorStore";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { useAutoSave } from "../../hooks/useAutoSave";
 
 export function EditorWorkspace() {
-  const { currentNote, content, setContent, markDirty } = useEditorStore();
-  const [showPreview, setShowPreview] = useState(true);
+  const { currentNote, content, setContent, markDirty, showPreview, togglePreview } = useEditorStore();
   useAutoSave();
 
   const handleChange = useCallback((newContent: string) => {
@@ -38,7 +37,7 @@ export function EditorWorkspace() {
         <span style={{ fontWeight: 500 }}>{currentNote.title}</span>
         <div style={{ flex: 1 }} />
         <button
-          onClick={() => setShowPreview((p) => !p)}
+          onClick={() => togglePreview()}
           style={{ fontSize: 12, padding: "2px 8px", cursor: "pointer", borderRadius: 4, border: "1px solid #ccc" }}
         >
           {showPreview ? "隐藏预览" : "显示预览"}

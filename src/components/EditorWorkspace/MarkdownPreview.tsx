@@ -16,18 +16,24 @@ export function MarkdownPreview({ content }: Props) {
   }, [content]);
 
   return (
-    <div
-      ref={containerRef}
-      style={{
-        flex: 1,
-        height: "100%",
-        overflowY: "auto",
-        padding: "20px 40px",
-        maxWidth: 720,
-        margin: "0 auto",
-        fontSize: 15,
-        lineHeight: 1.7,
-      }}
-    />
+    <div style={{
+      flex: 1,
+      minWidth: 0,
+      height: "100%",
+      overflowY: "auto",
+      borderLeft: "1px solid #e0e2e7",
+      background: "#fff",
+    }}>
+      <div
+        ref={containerRef}
+        style={{
+          maxWidth: 720,
+          margin: "0 auto",
+          padding: "20px 40px",
+          fontSize: 15,
+          lineHeight: 1.7,
+        }}
+      />
+    </div>
   );
 }
