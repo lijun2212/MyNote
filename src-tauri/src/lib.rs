@@ -10,6 +10,7 @@ use state::AppState;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
@@ -19,6 +20,9 @@ pub fn run() {
             commands::note::get_note_by_path,
             commands::note::save_note,
             commands::note::get_note_tree,
+            commands::note::import_note,
+            commands::tag::list_tags,
+            commands::tag::list_notes_by_tag,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

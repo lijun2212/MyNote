@@ -1,14 +1,49 @@
+import { useEffect, useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useAppStore } from "../../store/useAppStore";
 import { useEditorStore } from "../../store/useEditorStore";
 import { useKnowledgeBase } from "../../hooks/useKnowledgeBase";
 import { FileTreeNode } from "./FileTreeNode";
+import { ImportDialog } from "./ImportDialog";
 import { api } from "../../api/commands";
 import type { NoteTreeNode } from "../../types";
 
 export function FileTreePanel() {
-  const { tree, selectedNodePath, setSelectedNodePath } = useAppStore();
+  const { tree, selectedNodePath, setSelectedNodePath, refreshTree, setTree, selectedTagIds } = useAppStore();
   const { setCurrentNote, setContent } = useEditorStore();
   const { createNote } = useKnowledgeBase();
+  const [inputVisible, setInputVisible] = useState(false);
+  const [inputValue, setInputValue] = useState("");
+  const [importFiles, setImportFiles] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    if (selectedTagIds.length > 0) {
+      api.listNotesByTag(selectedTagIds)
+        .then((notes) => {
+          const flatTree = notes.map((n) => ({
+            id: n.id,
+            name: n.title,
+            path: n.path,
+            is_dir: false,
+            children: [],
+          }));
+          setTree(flatTree);
+        })
+        .catch(console.error);
+    } else {
+      refreshTree();
+    }
+  }, [selectedTagIds]);
+
+  // Collect unique directories from tree
+  const existingDirs = tree
+    .filter(n => n.is_dir)
+    .map(n => n.path)
+    .concat(tree.filter(n => !n.is_dir).map(n => {
+      const parts = n.path.split("/");
+      return parts.length > 1 ? parts.slice(0, -1).join("/") : "";
+    }).filter(Boolean));
+  const uniqueDirs = [...new Set(existingDirs.length ? existingDirs : ["notes"])];
 
   async function handleSelect(node: NoteTreeNode) {
     if (node.is_dir) return;
@@ -22,10 +57,32 @@ export function FileTreePanel() {
     }
   }
 
-  async function handleNewNote() {
-    const title = prompt("笔记标题：");
+  function handleNewNote() {
+    setInputValue("");
+    setInputVisible(true);
+  }
+
+  async function handleInputConfirm() {
+    const title = inputValue.trim();
+    setInputVisible(false);
     if (!title) return;
     await createNote("notes", title);
+  }
+
+  function handleInputKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Enter") handleInputConfirm();
+    if (e.key === "Escape") setInputVisible(false);
+  }
+
+  async function handleImport() {
+    const selected = await open({
+      multiple: true,
+      filters: [{ name: "Markdown", extensions: ["md"] }],
+    });
+    if (!selected) return;
+    const files = Array.isArray(selected) ? selected : [selected];
+    if (files.length === 0) return;
+    setImportFiles(files);
   }
 
   return (
@@ -40,14 +97,43 @@ export function FileTreePanel() {
         <span style={{ fontSize: 11, fontWeight: 600, color: "#6e7681", textTransform: "uppercase" }}>
           文件
         </span>
-        <button
-          onClick={handleNewNote}
-          style={{ fontSize: 18, background: "none", border: "none", cursor: "pointer", lineHeight: 1, color: "#555" }}
-          title="新建笔记"
-        >
-          +
-        </button>
+        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          <button
+            onClick={handleImport}
+            style={{ fontSize: 14, background: "none", border: "none", cursor: "pointer", lineHeight: 1, color: "#555", padding: "2px 4px" }}
+            title="导入 Markdown 文件"
+          >
+            ↓
+          </button>
+          <button
+            onClick={handleNewNote}
+            style={{ fontSize: 18, background: "none", border: "none", cursor: "pointer", lineHeight: 1, color: "#555", padding: "0 2px" }}
+            title="新建笔记"
+          >
+            +
+          </button>
+        </div>
       </div>
+      {inputVisible && (
+        <div style={{ padding: "6px 8px", borderBottom: "1px solid #e0e2e7" }}>
+          <input
+            autoFocus
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyDown={handleInputKeyDown}
+            onBlur={handleInputConfirm}
+            placeholder="笔记标题…"
+            style={{
+              width: "100%",
+              fontSize: 13,
+              padding: "4px 6px",
+              border: "1px solid #0969da",
+              borderRadius: 4,
+              outline: "none",
+            }}
+          />
+        </div>
+      )}
       <div style={{ flex: 1, overflowY: "auto", paddingTop: 4 }}>
         {tree.map((node) => (
           <FileTreeNode
@@ -59,6 +145,18 @@ export function FileTreePanel() {
           />
         ))}
       </div>
+
+      {importFiles && (
+        <ImportDialog
+          files={importFiles}
+          existingDirs={uniqueDirs}
+          onClose={() => setImportFiles(null)}
+          onDone={async () => {
+            setImportFiles(null);
+            await refreshTree();
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -47,3 +47,9 @@ export interface SaveNoteInput {
   content: string;
   expected_hash?: string;
 }
+
+export interface Tag {
+  id: string;
+  name: string;
+  note_count?: number;
+}

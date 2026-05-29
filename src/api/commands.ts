@@ -5,6 +5,7 @@ import type {
   NoteDetail,
   NoteTreeNode,
   SaveNoteResult,
+  Tag,
 } from "../types";
 
 export const api = {
@@ -25,4 +26,13 @@ export const api = {
 
   getNoteTree: () =>
     invoke<NoteTreeNode[]>("get_note_tree"),
+
+  importNote: (srcPath: string, destDirectory: string) =>
+    invoke<Note>("import_note", { srcPath, destDirectory }),
+
+  listTags: () =>
+    invoke<Tag[]>("list_tags"),
+
+  listNotesByTag: (tagIds: string[]) =>
+    invoke<Note[]>("list_notes_by_tag", { tagIds }),
 };
