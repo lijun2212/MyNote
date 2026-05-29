@@ -3,6 +3,7 @@
   flex-direction: column;
   height: 100vh;
   width: 100vw;
+  overflow: hidden;
 }
 
 .app-header {
@@ -20,28 +21,88 @@
   flex: 1;
   display: flex;
   overflow: hidden;
+  position: relative;
+}
+
+.sidebar-container {
+  flex-shrink: 0;
+  overflow: hidden;
+  transition: width 0.0s; /* no animation, instant */
+}
+
+.left-sidebar,
+.right-sidebar {
+  height: 100%;
+  background: var(--bg-sidebar);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .left-sidebar {
-  width: var(--sidebar-width);
-  background: var(--bg-sidebar);
   border-right: 1px solid var(--border);
-  overflow-y: auto;
-  flex-shrink: 0;
+}
+
+.right-sidebar {
+  border-left: 1px solid var(--border);
 }
 
 .editor-workspace {
   flex: 1;
   display: flex;
   overflow: hidden;
+  min-width: 0;
 }
 
-.right-sidebar {
-  width: var(--right-sidebar-width);
-  background: var(--bg-sidebar);
-  border-left: 1px solid var(--border);
-  overflow-y: auto;
+/* Resize handle strip */
+.resize-handle {
   flex-shrink: 0;
+  width: 8px;
+  position: relative;
+  cursor: col-resize;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.resize-handle:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.resize-handle.hidden {
+  cursor: default;
+  pointer-events: none; /* disable drag when sidebar hidden */
+}
+
+/* Toggle button inside the handle */
+.sidebar-toggle {
+  position: absolute;
+  width: 20px;
+  height: 36px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--text-secondary);
+  pointer-events: all;
+  z-index: 11;
+}
+
+.sidebar-toggle:hover {
+  background: var(--bg-hover, #e8eaed);
+}
+
+/* Re-enable pointer events on the toggle even when handle is "hidden" */
+.resize-handle.hidden .sidebar-toggle {
+  pointer-events: all;
+  cursor: pointer;
 }
 
 .status-bar {
