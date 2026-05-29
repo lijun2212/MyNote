@@ -20,17 +20,19 @@ pub async fn search_notes(
 
     let fts_query = format!("\"{}\"*", query.replace('"', "\"\""));
 
+    let _ = kb_id;
+
     let mut stmt = conn.prepare(
         "SELECT n.id, n.title, n.path, snippet(note_fts, 2, '<mark>', '</mark>', '...', 20) as snippet
          FROM note_fts
-         JOIN notes n ON note_fts.note_id = n.id AND n.deleted_at IS NULL AND n.kb_id = ?2
+         JOIN notes n ON note_fts.note_id = n.id AND n.deleted_at IS NULL
          WHERE note_fts MATCH ?1
          ORDER BY rank
          LIMIT 20",
     )?;
 
     let results = stmt
-        .query_map(rusqlite::params![fts_query, kb_id], |row| {
+        .query_map(rusqlite::params![fts_query], |row| {
             Ok(SearchResult {
                 note_id: row.get(0)?,
                 title: row.get(1)?,
