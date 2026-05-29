@@ -1,8 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   KnowledgeBase,
+  LinkItem,
   Note,
   NoteDetail,
+  NoteLinks,
   NoteTreeNode,
   SaveNoteResult,
   Tag,
@@ -35,4 +37,13 @@ export const api = {
 
   listNotesByTag: (tagIds: string[]) =>
     invoke<Note[]>("list_notes_by_tag", { tagIds }),
+
+  getNoteLinks: (noteId: string) =>
+    invoke<NoteLinks>("get_note_links", { noteId }),
+
+  getNoteByTitle: (title: string) =>
+    invoke<Note | null>("get_note_by_title", { title }),
 };
+
+// suppress unused import warning for LinkItem (used via NoteLinks)
+export type { LinkItem };

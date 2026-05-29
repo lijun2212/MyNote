@@ -53,3 +53,19 @@ export interface Tag {
   name: string;
   note_count?: number;
 }
+
+export interface LinkItem {
+  id: number;
+  note_id: string;
+  note_title: string;
+  note_path: string;
+  link_text: string;
+  link_url: string;
+  link_type: string;
+  resolved: boolean;
+}
+
+export interface NoteLinks {
+  outgoing: LinkItem[];
+  incoming: LinkItem[];
+}
