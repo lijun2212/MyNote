@@ -18,7 +18,7 @@ pub async fn search_notes(
         .as_ref()
         .ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
 
-    let fts_query = format!("{}*", query);
+    let fts_query = format!("\"{}\"*", query.replace('"', "\"\""));
 
     let mut stmt = conn.prepare(
         "SELECT n.id, n.title, n.path, snippet(note_fts, 2, '<mark>', '</mark>', '...', 20) as snippet

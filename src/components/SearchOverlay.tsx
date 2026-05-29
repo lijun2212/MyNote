@@ -4,6 +4,15 @@ import { useSearch } from "../hooks/useSearch";
 import { useAppStore } from "../store/useAppStore";
 import { api } from "../api/commands";
 
+function safeSnippet(raw: string): string {
+  return raw
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/&lt;mark&gt;/g, '<mark>')
+    .replace(/&lt;\/mark&gt;/g, '</mark>');
+}
+
 interface SearchOverlayProps {
   onClose: () => void;
 }
@@ -78,7 +87,7 @@ export function SearchOverlay({ onClose }: SearchOverlayProps) {
               <div style={styles.resultTitle}>{r.title}</div>
               <div
                 style={styles.resultSnippet}
-                dangerouslySetInnerHTML={{ __html: r.snippet }}
+                dangerouslySetInnerHTML={{ __html: safeSnippet(r.snippet) }}
               />
               <div style={styles.resultPath}>{r.path}</div>
             </div>

@@ -7,23 +7,26 @@ export function useSearch(query: string) {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const kb = useAppStore((s) => s.kb);
+  const kbRef = useRef(kb);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const doSearch = useCallback(
-    async (q: string) => {
-      if (!kb) return;
-      setIsLoading(true);
-      try {
-        const res = await api.searchNotes(q, kb.id);
-        setResults(res);
-      } catch {
-        setResults([]);
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [kb]
-  );
+  useEffect(() => {
+    kbRef.current = kb;
+  }, [kb]);
+
+  const doSearch = useCallback(async (q: string) => {
+    const currentKb = kbRef.current;
+    if (!currentKb) { setResults([]); return; }
+    setIsLoading(true);
+    try {
+      const res = await api.searchNotes(q, currentKb.id);
+      setResults(res);
+    } catch {
+      setResults([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
