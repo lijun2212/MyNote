@@ -115,6 +115,194 @@ pub fn render_note(fm: &FrontMatter, body: &str) -> AppResult<String> {
     Ok(format!("---\n{}---\n\n{}", fm_str, body))
 }
 
+/// 从正文提取内联标签（#标签），跳过代码块和 URL 片段
+pub fn extract_inline_tags(body: &str) -> Vec<String> {
+    let mut tags = Vec::new();
+    let mut in_code_block = false;
+    let mut in_inline_code = false;
+
+    for line in body.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") {
+            in_code_block = !in_code_block;
+            continue;
+        }
+        if in_code_block {
+            continue;
+        }
+
+        // Scan character by character
+        let chars: Vec<char> = line.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            // Toggle inline code
+            if chars[i] == '`' {
+                in_inline_code = !in_inline_code;
+                i += 1;
+                continue;
+            }
+            if in_inline_code {
+                i += 1;
+                continue;
+            }
+            // Check for URL scheme before #
+            if chars[i] == '#' {
+                // Not a tag if preceded by '/' or part of URL (look back for "://")
+                let prefix: String = chars[..i].iter().collect();
+                if prefix.ends_with("://") || prefix.ends_with('/') {
+                    i += 1;
+                    continue;
+                }
+                // Must be at start of line or preceded by whitespace
+                let preceded_by_space = i == 0 || chars[i - 1].is_whitespace();
+                if !preceded_by_space {
+                    i += 1;
+                    continue;
+                }
+                // Collect tag name
+                let start = i + 1;
+                let mut end = start;
+                while end < chars.len() {
+                    let c = chars[end];
+                    if c.is_alphanumeric() || c == '-' || c == '_' || ('\u{4e00}' <= c && c <= '\u{9fff}') {
+                        end += 1;
+                    } else {
+                        break;
+                    }
+                }
+                if end > start {
+                    let tag: String = chars[start..end].iter().collect();
+                    tags.push(tag);
+                    i = end;
+                    continue;
+                }
+            }
+            i += 1;
+        }
+    }
+    tags.sort();
+    tags.dedup();
+    tags
+}
+
+#[derive(Debug, Clone)]
+pub struct RawLink {
+    pub target_raw: String,
+    pub display_text: Option<String>,
+    pub link_type: String, // "wiki" | "markdown" | "asset"
+    pub anchor: Option<String>,
+    pub start_offset: usize,
+    pub end_offset: usize,
+}
+
+/// 从正文提取所有链接（wiki 链接和 markdown 链接）
+pub fn extract_links(body: &str) -> Vec<RawLink> {
+    let mut links = Vec::new();
+    let mut in_code_block = false;
+
+    let mut offset = 0usize;
+    for line in body.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") {
+            in_code_block = !in_code_block;
+            offset += line.len() + 1;
+            continue;
+        }
+        if in_code_block {
+            offset += line.len() + 1;
+            continue;
+        }
+
+        // Extract wiki links: [[target]], [[target|text]], [[target#anchor]]
+        let mut search_from = 0;
+        while let Some(start) = line[search_from..].find("[[") {
+            let abs_start = offset + search_from + start;
+            let rest = &line[search_from + start + 2..];
+            if let Some(end) = rest.find("]]") {
+                let inner = &rest[..end];
+                let abs_end = abs_start + 2 + end + 2;
+                let (target_part, display) = if let Some(pipe) = inner.find('|') {
+                    (&inner[..pipe], Some(inner[pipe + 1..].to_string()))
+                } else {
+                    (inner, None)
+                };
+                let (target_raw, anchor) = if let Some(hash) = target_part.find('#') {
+                    (target_part[..hash].to_string(), Some(target_part[hash + 1..].to_string()))
+                } else {
+                    (target_part.to_string(), None)
+                };
+                links.push(RawLink {
+                    target_raw,
+                    display_text: display,
+                    link_type: "wiki".to_string(),
+                    anchor,
+                    start_offset: abs_start,
+                    end_offset: abs_end,
+                });
+                search_from = search_from + start + 2 + end + 2;
+            } else {
+                break;
+            }
+        }
+
+        // Extract markdown links: [text](path) and ![alt](path)
+        search_from = 0;
+        while search_from < line.len() {
+            // Find [ or ![
+            let is_image = line[search_from..].starts_with("![");
+            let bracket_offset = if is_image {
+                line[search_from..].find("![").map(|p| p)
+            } else {
+                line[search_from..].find('[').map(|p| p)
+            };
+            let Some(b_start) = bracket_offset else { break };
+            let actual_start = search_from + b_start + if is_image { 2 } else { 1 };
+            let rest = &line[actual_start..];
+            let Some(bracket_end) = rest.find(']') else {
+                search_from = search_from + b_start + 1;
+                continue;
+            };
+            let text = &rest[..bracket_end];
+            let after_bracket = &rest[bracket_end + 1..];
+            if !after_bracket.starts_with('(') {
+                search_from = actual_start + bracket_end + 1;
+                continue;
+            }
+            let paren_rest = &after_bracket[1..];
+            let Some(paren_end) = paren_rest.find(')') else {
+                search_from = actual_start + bracket_end + 1;
+                continue;
+            };
+            let href = &paren_rest[..paren_end];
+            // Only relative .md links or relative asset links
+            if href.starts_with("http://") || href.starts_with("https://") {
+                search_from = actual_start + bracket_end + paren_end + 3;
+                continue;
+            }
+            let link_type = if is_image { "asset" } else { "markdown" };
+            let (target_raw, anchor) = if let Some(hash) = href.rfind('#') {
+                (href[..hash].to_string(), Some(href[hash + 1..].to_string()))
+            } else {
+                (href.to_string(), None)
+            };
+            let abs_start = offset + search_from + b_start;
+            let abs_end = actual_start + bracket_end + 1 + paren_end + 2;
+            links.push(RawLink {
+                target_raw,
+                display_text: Some(text.to_string()),
+                link_type: link_type.to_string(),
+                anchor,
+                start_offset: abs_start,
+                end_offset: offset + abs_end,
+            });
+            search_from = actual_start + bracket_end + 1 + paren_end + 2;
+        }
+
+        offset += line.len() + 1;
+    }
+    links
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,5 +363,47 @@ mod tests {
         let parsed = parse_note(&rendered, "test").unwrap();
         assert_eq!(parsed.title, "Test");
         assert_eq!(parsed.front_matter.tags.unwrap(), vec!["tag1"]);
+    }
+
+    #[test]
+    fn test_extract_inline_tags_basic() {
+        let body = "Hello #rust and #tauri are great.\nNo tag in `#code` block.";
+        let tags = extract_inline_tags(body);
+        assert!(tags.contains(&"rust".to_string()));
+        assert!(tags.contains(&"tauri".to_string()));
+    }
+
+    #[test]
+    fn test_extract_inline_tags_skips_code_block() {
+        let body = "```\n#notag\n```\n#realtag";
+        let tags = extract_inline_tags(body);
+        assert!(!tags.contains(&"notag".to_string()));
+        assert!(tags.contains(&"realtag".to_string()));
+    }
+
+    #[test]
+    fn test_extract_links_wiki() {
+        let body = "See [[另一篇笔记]] and [[笔记标题|显示文本]] and [[标题#章节]].";
+        let links = extract_links(body);
+        assert_eq!(links.len(), 3);
+        assert_eq!(links[0].target_raw, "另一篇笔记");
+        assert_eq!(links[0].link_type, "wiki");
+        assert_eq!(links[1].display_text, Some("显示文本".to_string()));
+        assert_eq!(links[2].anchor, Some("章节".to_string()));
+    }
+
+    #[test]
+    fn test_extract_links_markdown() {
+        let body = "See [relative](../notes/foo.md) and [section](bar.md#heading).";
+        let links = extract_links(body);
+        assert_eq!(links.iter().filter(|l| l.link_type == "markdown").count(), 2);
+        assert_eq!(links[1].anchor, Some("heading".to_string()));
+    }
+
+    #[test]
+    fn test_extract_links_skips_http() {
+        let body = "Visit [google](https://google.com) for more.";
+        let links = extract_links(body);
+        assert_eq!(links.len(), 0);
     }
 }
