@@ -1,8 +1,8 @@
 use crate::domain::note::{CreateNoteInput, Note, NoteDetail, NoteTreeNode, SaveNoteInput, SaveNoteResult};
 use crate::error::{AppError, AppResult};
 use crate::infrastructure::fs::{abs_path, atomic_write, safe_filename};
-use crate::infrastructure::hash::sha256_str;
-use crate::infrastructure::markdown::{parse_note, render_note, FrontMatter};
+use crate::infrastructure::markdown::{render_note, FrontMatter};
+use crate::services::index::index_note_full;
 use crate::state::AppState;
 use rusqlite::params;
 use std::path::Path;
@@ -35,29 +35,11 @@ pub fn create_note_service(state: &State<AppState>, input: CreateNoteInput) -> A
         ..Default::default()
     };
     let content = render_note(&fm, &format!("# {}\n\n", input.title))?;
-    let hash = sha256_str(&content);
 
     atomic_write(&abs, &content)?;
 
-    let word_count = parse_note(&content, &safe_title)?.word_count as i64;
-
-    conn.execute(
-        "INSERT INTO notes (id, path, title, content_hash, word_count, front_matter_json, created_at, updated_at, indexed_at) VALUES (?1, ?2, ?3, ?4, ?5, '{}', ?6, ?7, ?8)",
-        params![id, rel_path, input.title, hash, word_count, now, now, now],
-    )?;
-
-    Ok(Note {
-        id,
-        path: rel_path,
-        title: input.title,
-        summary: None,
-        content_hash: hash,
-        word_count,
-        created_at: now.clone(),
-        updated_at: now.clone(),
-        indexed_at: now,
-        deleted_at: None,
-    })
+    let note = index_note_full(conn, root, &rel_path, &content)?;
+    Ok(note)
 }
 
 pub fn get_note_by_path_service(state: &State<AppState>, rel_path: &str) -> AppResult<NoteDetail> {
@@ -116,17 +98,7 @@ pub fn save_note_service(state: &State<AppState>, input: SaveNoteInput) -> AppRe
     let abs = abs_path(root, &path);
     atomic_write(&abs, &input.content)?;
 
-    let new_hash = sha256_str(&input.content);
-    let now = chrono::Utc::now().to_rfc3339();
-    let stem = Path::new(&path).file_stem().unwrap_or_default().to_string_lossy().to_string();
-    let parsed = parse_note(&input.content, &stem)?;
-
-    conn.execute(
-        "UPDATE notes SET title = ?1, content_hash = ?2, word_count = ?3, updated_at = ?4, indexed_at = ?5 WHERE id = ?6",
-        params![parsed.title, new_hash, parsed.word_count as i64, now, now, input.note_id],
-    )?;
-
-    let note = get_note_by_path_service_inner(conn, root, &path)?;
+    let note = index_note_full(conn, root, &path, &input.content)?;
     Ok(SaveNoteResult { note, conflict: false })
 }
 
@@ -237,32 +209,63 @@ pub fn index_note_from_file(state: &State<AppState>, rel_path: &str) -> AppResul
 
     let abs = abs_path(root, rel_path);
     let content = std::fs::read_to_string(&abs)?;
-    let stem = Path::new(rel_path).file_stem().unwrap_or_default().to_string_lossy().to_string();
-    let parsed = parse_note(&content, &stem)?;
-    let hash = sha256_str(&content);
-    let now = chrono::Utc::now().to_rfc3339();
 
-    let id = parsed.front_matter.id.clone().unwrap_or_else(|| Ulid::new().to_string());
-    let title = parsed.title;
-    let word_count = parsed.word_count as i64;
+    let note = index_note_full(conn, root, rel_path, &content)?;
+    Ok(note)
+}
 
-    conn.execute(
-        "INSERT INTO notes (id, path, title, content_hash, word_count, front_matter_json, created_at, updated_at, indexed_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, '{}', ?6, ?7, ?8)
-         ON CONFLICT(path) DO UPDATE SET title=excluded.title, content_hash=excluded.content_hash, word_count=excluded.word_count, updated_at=excluded.updated_at, indexed_at=excluded.indexed_at",
-        params![id, rel_path, title, hash, word_count, now, now, now],
-    )?;
+pub fn import_note_service(
+    state: &State<AppState>,
+    src_path: &str,
+    dest_directory: &str,
+) -> AppResult<Note> {
+    let root_guard = state.kb_root.lock().unwrap();
+    let root = root_guard
+        .as_ref()
+        .ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?
+        .clone();
+    let mut db_guard = state.db.lock().unwrap();
+    let conn = db_guard
+        .as_mut()
+        .ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
 
-    Ok(Note {
-        id,
-        path: rel_path.to_string(),
-        title: parsed.front_matter.title.unwrap_or_else(|| stem.clone()),
-        summary: parsed.front_matter.summary,
-        content_hash: hash,
-        word_count,
-        created_at: now.clone(),
-        updated_at: now.clone(),
-        indexed_at: now,
-        deleted_at: None,
-    })
+    let src = Path::new(src_path);
+    let filename = src
+        .file_name()
+        .ok_or_else(|| AppError::InvalidInput(format!("Invalid path: {}", src_path)))?
+        .to_string_lossy()
+        .to_string();
+
+    if !filename.to_lowercase().ends_with(".md") {
+        return Err(AppError::InvalidInput("Only .md files can be imported".into()));
+    }
+
+    let content = std::fs::read_to_string(src_path)?;
+    let dir = if dest_directory.is_empty() { "notes" } else { dest_directory };
+
+    // Ensure destination directory exists
+    let abs_dir = abs_path(&root, dir);
+    std::fs::create_dir_all(&abs_dir)?;
+
+    // Handle filename conflicts
+    let base_rel = format!("{}/{}", dir, filename);
+    let final_rel = if abs_path(&root, &base_rel).exists() {
+        let stem = src.file_stem().unwrap_or_default().to_string_lossy();
+        let mut i = 1;
+        loop {
+            let candidate = format!("{}/{}-{}.md", dir, stem, i);
+            if !abs_path(&root, &candidate).exists() {
+                break candidate;
+            }
+            i += 1;
+        }
+    } else {
+        base_rel
+    };
+
+    let abs_dest = abs_path(&root, &final_rel);
+    atomic_write(&abs_dest, &content)?;
+
+    let note = index_note_full(conn, &root, &final_rel, &content)?;
+    Ok(note)
 }
