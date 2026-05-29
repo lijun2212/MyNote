@@ -1,0 +1,49 @@
+export interface KnowledgeBase {
+  id: string;
+  name: string;
+  root_path: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Note {
+  id: string;
+  path: string;
+  title: string;
+  summary: string | null;
+  content_hash: string;
+  word_count: number;
+  created_at: string;
+  updated_at: string;
+  indexed_at: string;
+  deleted_at: string | null;
+}
+
+export interface NoteDetail {
+  note: Note;
+  content: string;
+}
+
+export interface NoteTreeNode {
+  id: string | null;
+  name: string;
+  path: string;
+  is_dir: boolean;
+  children: NoteTreeNode[];
+}
+
+export interface SaveNoteResult {
+  note: Note;
+  conflict: boolean;
+}
+
+export interface CreateNoteInput {
+  directory: string;
+  title: string;
+}
+
+export interface SaveNoteInput {
+  note_id: string;
+  content: string;
+  expected_hash?: string;
+}
