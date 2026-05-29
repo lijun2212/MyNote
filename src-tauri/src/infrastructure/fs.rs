@@ -7,7 +7,11 @@ pub fn atomic_write(path: &Path, content: &str) -> AppResult<()> {
         .parent()
         .ok_or_else(|| AppError::InvalidInput(format!("No parent dir for {:?}", path)))?;
     std::fs::create_dir_all(parent)?;
-    let tmp_path = path.with_extension("tmp");
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| AppError::InvalidInput(format!("No file name in {:?}", path)))?
+        .to_string_lossy();
+    let tmp_path = parent.join(format!(".{}.tmp", file_name));
     std::fs::write(&tmp_path, content)?;
     std::fs::rename(&tmp_path, path)?;
     Ok(())
@@ -23,14 +27,20 @@ pub fn normalize_relative(root: &Path, abs_path: &Path) -> AppResult<String> {
 
 /// 安全文件名：移除路径中非法字符
 pub fn safe_filename(name: &str) -> String {
-    name.chars()
+    let result = name
+        .chars()
         .map(|c| match c {
             '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '-',
             c => c,
         })
         .collect::<String>()
         .trim()
-        .to_string()
+        .to_string();
+    if result.is_empty() {
+        "unnamed".to_string()
+    } else {
+        result
+    }
 }
 
 /// 从根目录和相对路径构造绝对路径
@@ -56,6 +66,19 @@ mod tests {
         let path = dir.path().join("test.md");
         atomic_write(&path, "hello").unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello");
+    }
+
+    #[test]
+    fn test_safe_filename_empty_returns_unnamed() {
+        assert_eq!(safe_filename(""), "unnamed");
+        assert_eq!(safe_filename("   "), "unnamed");
+    }
+
+    #[test]
+    fn test_abs_path() {
+        let root = Path::new("/home/user/kb");
+        let result = abs_path(root, "notes/a.md");
+        assert!(result.ends_with("a.md"));
     }
 
     #[test]

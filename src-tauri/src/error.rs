@@ -33,7 +33,7 @@ impl From<rusqlite::Error> for AppError {
 
 impl From<anyhow::Error> for AppError {
     fn from(e: anyhow::Error) -> Self {
-        AppError::Io(e.to_string())
+        AppError::InvalidInput(e.to_string())
     }
 }
 
