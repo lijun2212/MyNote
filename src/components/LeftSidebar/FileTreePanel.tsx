@@ -37,8 +37,10 @@ export function FileTreePanel() {
   }, [selectedTagIds]);
 
   useEffect(() => {
+    let isMounted = true;
     let unlisten: (() => void) | undefined;
     listen("note:index_updated", () => {
+      if (!isMounted) return;
       if (selectedTagIds.length > 0) {
         api.listNotesByTag(selectedTagIds).then((notes) => {
           setTree(notes.map((n) => ({
@@ -48,8 +50,14 @@ export function FileTreePanel() {
       } else {
         refreshTree();
       }
-    }).then((fn) => { unlisten = fn; });
-    return () => { unlisten?.(); };
+    }).then((fn) => {
+      unlisten = fn;
+      if (!isMounted) fn();
+    });
+    return () => {
+      isMounted = false;
+      unlisten?.();
+    };
   }, [selectedTagIds]);
 
   // Collect unique directories from tree

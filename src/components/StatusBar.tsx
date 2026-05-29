@@ -14,13 +14,19 @@ export function StatusBar() {
   const indexTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    let isMounted = true;
     let unlisten: (() => void) | undefined;
     listen("note:index_updated", () => {
+      if (!isMounted) return;
       setIndexing(true);
       if (indexTimerRef.current) clearTimeout(indexTimerRef.current);
       indexTimerRef.current = setTimeout(() => setIndexing(false), 2000);
-    }).then((fn) => { unlisten = fn; });
+    }).then((fn) => {
+      unlisten = fn;
+      if (!isMounted) fn();
+    });
     return () => {
+      isMounted = false;
       unlisten?.();
       if (indexTimerRef.current) clearTimeout(indexTimerRef.current);
     };
