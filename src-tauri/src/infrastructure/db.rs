@@ -93,6 +93,69 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
             tokenize = 'unicode61'
         );",
     ),
+    (
+        5,
+        "create_tags",
+        "CREATE TABLE IF NOT EXISTS tags (
+            id              TEXT PRIMARY KEY,
+            name            TEXT NOT NULL UNIQUE,
+            normalized_name TEXT NOT NULL UNIQUE,
+            created_at      TEXT NOT NULL,
+            updated_at      TEXT NOT NULL
+        );",
+    ),
+    (
+        6,
+        "create_note_tags",
+        "CREATE TABLE IF NOT EXISTS note_tags (
+            note_id TEXT NOT NULL,
+            tag_id  TEXT NOT NULL,
+            source  TEXT NOT NULL,
+            PRIMARY KEY (note_id, tag_id, source),
+            FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE,
+            FOREIGN KEY (tag_id)  REFERENCES tags(id)  ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_note_tags_note ON note_tags(note_id);
+        CREATE INDEX IF NOT EXISTS idx_note_tags_tag  ON note_tags(tag_id);",
+    ),
+    (
+        7,
+        "create_links",
+        "CREATE TABLE IF NOT EXISTS links (
+            id             TEXT PRIMARY KEY,
+            source_note_id TEXT NOT NULL,
+            target_note_id TEXT,
+            target_raw     TEXT NOT NULL,
+            display_text   TEXT,
+            link_type      TEXT NOT NULL,
+            anchor         TEXT,
+            resolved       INTEGER NOT NULL DEFAULT 0,
+            start_offset   INTEGER,
+            end_offset     INTEGER,
+            created_at     TEXT NOT NULL,
+            updated_at     TEXT NOT NULL,
+            FOREIGN KEY (source_note_id) REFERENCES notes(id) ON DELETE CASCADE,
+            FOREIGN KEY (target_note_id) REFERENCES notes(id) ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_links_source   ON links(source_note_id);
+        CREATE INDEX IF NOT EXISTS idx_links_target   ON links(target_note_id);
+        CREATE INDEX IF NOT EXISTS idx_links_resolved ON links(resolved);",
+    ),
+    (
+        8,
+        "create_file_events",
+        "CREATE TABLE IF NOT EXISTS file_events (
+            id           TEXT PRIMARY KEY,
+            event_type   TEXT NOT NULL,
+            path         TEXT NOT NULL,
+            old_path     TEXT,
+            content_hash TEXT,
+            processed    INTEGER NOT NULL DEFAULT 0,
+            error        TEXT,
+            created_at   TEXT NOT NULL,
+            processed_at TEXT
+        );",
+    ),
 ];
 
 #[cfg(test)]
@@ -113,7 +176,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(count, 4);
+        assert_eq!(count, 8);
 
         conn.execute_batch("INSERT INTO notes (id,path,title,content_hash,word_count,front_matter_json,created_at,updated_at,indexed_at) VALUES ('x','a.md','T','h',0,'{}','2024','2024','2024')").unwrap();
     }
