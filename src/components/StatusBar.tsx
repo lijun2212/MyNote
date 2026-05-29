@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { useEditorStore } from "../store/useEditorStore";
 
 export function StatusBar() {
@@ -8,6 +10,22 @@ export function StatusBar() {
     saveStatus === "error" ? "保存失败" :
     saveStatus === "unsaved" ? "未保存" : "已保存";
 
+  const [indexing, setIndexing] = useState(false);
+  const indexTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen("note:index_updated", () => {
+      setIndexing(true);
+      if (indexTimerRef.current) clearTimeout(indexTimerRef.current);
+      indexTimerRef.current = setTimeout(() => setIndexing(false), 2000);
+    }).then((fn) => { unlisten = fn; });
+    return () => {
+      unlisten?.();
+      if (indexTimerRef.current) clearTimeout(indexTimerRef.current);
+    };
+  }, []);
+
   return (
     <footer className="status-bar">
       {currentNote && (
@@ -17,6 +35,7 @@ export function StatusBar() {
           <span>{statusLabel}</span>
         </>
       )}
+      {indexing && <span style={{ color: "#0969da" }}>● 索引同步中</span>}
     </footer>
   );
 }

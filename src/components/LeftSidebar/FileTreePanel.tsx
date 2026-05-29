@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useAppStore } from "../../store/useAppStore";
 import { useEditorStore } from "../../store/useEditorStore";
@@ -33,6 +34,22 @@ export function FileTreePanel() {
     } else {
       refreshTree();
     }
+  }, [selectedTagIds]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen("note:index_updated", () => {
+      if (selectedTagIds.length > 0) {
+        api.listNotesByTag(selectedTagIds).then((notes) => {
+          setTree(notes.map((n) => ({
+            id: n.id, name: n.title, path: n.path, is_dir: false, children: [],
+          })));
+        }).catch(console.error);
+      } else {
+        refreshTree();
+      }
+    }).then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
   }, [selectedTagIds]);
 
   // Collect unique directories from tree
