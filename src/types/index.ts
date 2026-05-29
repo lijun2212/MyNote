@@ -69,3 +69,10 @@ export interface NoteLinks {
   outgoing: LinkItem[];
   incoming: LinkItem[];
 }
+
+export interface SearchResult {
+  note_id: string;
+  title: string;
+  path: string;
+  snippet: string;
+}

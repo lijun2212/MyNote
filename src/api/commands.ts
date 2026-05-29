@@ -7,6 +7,7 @@ import type {
   NoteLinks,
   NoteTreeNode,
   SaveNoteResult,
+  SearchResult,
   Tag,
 } from "../types";
 
@@ -43,6 +44,9 @@ export const api = {
 
   getNoteByTitle: (title: string) =>
     invoke<Note | null>("get_note_by_title", { title }),
+
+  searchNotes: (query: string, kbId: string) =>
+    invoke<SearchResult[]>("search_notes", { query, kbId }),
 };
 
 // suppress unused import warning for LinkItem (used via NoteLinks)
