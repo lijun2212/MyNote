@@ -119,10 +119,9 @@ pub fn render_note(fm: &FrontMatter, body: &str) -> AppResult<String> {
 pub fn extract_inline_tags(body: &str) -> Vec<String> {
     let mut tags = Vec::new();
     let mut in_code_block = false;
-    let mut in_inline_code = false;
 
     for line in body.lines() {
-        in_inline_code = false;
+        let mut in_inline_code = false;
         let trimmed = line.trim_start();
         if trimmed.starts_with("```") {
             in_code_block = !in_code_block;
