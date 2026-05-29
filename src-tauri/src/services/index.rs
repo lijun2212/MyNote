@@ -52,11 +52,11 @@ pub fn index_note_full(
         params![note_id, rel_path, title, summary, hash, word_count, now, now, now],
     )?;
 
-    // Re-fetch actual id in case of conflict (the existing row keeps its id)
-    let actual_id: String = tx.query_row(
-        "SELECT id FROM notes WHERE path = ?1",
+    // Re-fetch actual id and created_at in case of conflict (the existing row keeps its values)
+    let (actual_id, actual_created_at): (String, String) = tx.query_row(
+        "SELECT id, created_at FROM notes WHERE path = ?1",
         params![rel_path],
-        |r| r.get(0),
+        |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
 
     // 2. Rebuild note_tags
@@ -121,7 +121,7 @@ pub fn index_note_full(
         summary,
         content_hash: hash,
         word_count,
-        created_at: now.clone(),
+        created_at: actual_created_at,
         updated_at: now.clone(),
         indexed_at: now,
         deleted_at: None,
