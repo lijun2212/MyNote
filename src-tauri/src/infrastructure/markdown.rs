@@ -122,6 +122,7 @@ pub fn extract_inline_tags(body: &str) -> Vec<String> {
     let mut in_inline_code = false;
 
     for line in body.lines() {
+        in_inline_code = false;
         let trimmed = line.trim_start();
         if trimmed.starts_with("```") {
             in_code_block = !in_code_block;
@@ -164,7 +165,7 @@ pub fn extract_inline_tags(body: &str) -> Vec<String> {
                 let mut end = start;
                 while end < chars.len() {
                     let c = chars[end];
-                    if c.is_alphanumeric() || c == '-' || c == '_' || ('\u{4e00}' <= c && c <= '\u{9fff}') {
+                    if c.is_alphanumeric() || c == '-' || c == '_' {
                         end += 1;
                     } else {
                         break;
