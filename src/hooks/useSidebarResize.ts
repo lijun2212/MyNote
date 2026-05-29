@@ -20,7 +20,9 @@ export function useSidebarResize({
 
   const [width, setWidth] = useState<number>(() => {
     const saved = localStorage.getItem(storageKeyWidth);
-    return saved ? parseInt(saved, 10) : defaultWidth;
+    if (!saved) return defaultWidth;
+    const parsed = parseInt(saved, 10);
+    return !isNaN(parsed) ? parsed : defaultWidth;
   });
   const [isVisible, setIsVisible] = useState<boolean>(() => {
     const saved = localStorage.getItem(storageKeyVisible);
@@ -30,13 +32,15 @@ export function useSidebarResize({
   const isDragging = useRef(false);
   const startX = useRef(0);
   const startWidth = useRef(0);
+  const widthRef = useRef(width);
+  useEffect(() => { widthRef.current = width; }, [width]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     isDragging.current = true;
     startX.current = e.clientX;
-    startWidth.current = width;
-  }, [width]);
+    startWidth.current = widthRef.current;
+  }, []);
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
