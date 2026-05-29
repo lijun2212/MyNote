@@ -13,7 +13,7 @@ pub async fn get_note_links(
     let conn = db_guard.as_ref().ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
 
     let mut outgoing_stmt = conn.prepare(
-        "SELECT l.id, l.target_note_id, n.title, n.path, l.link_text, l.link_url, l.link_type, l.resolved
+        "SELECT l.id, l.target_note_id, n.title, n.path, l.display_text, l.target_raw, l.link_type, l.resolved
          FROM links l
          LEFT JOIN notes n ON n.id = l.target_note_id AND n.deleted_at IS NULL
          WHERE l.source_note_id = ?1 AND l.resolved = 1
@@ -35,7 +35,7 @@ pub async fn get_note_links(
         .collect::<Result<Vec<_>, _>>()?;
 
     let mut incoming_stmt = conn.prepare(
-        "SELECT l.id, l.source_note_id, n.title, n.path, l.link_text, l.link_url, l.link_type, l.resolved
+        "SELECT l.id, l.source_note_id, n.title, n.path, l.display_text, l.target_raw, l.link_type, l.resolved
          FROM links l
          JOIN notes n ON n.id = l.source_note_id AND n.deleted_at IS NULL
          WHERE l.target_note_id = ?1

@@ -16,11 +16,16 @@ export function BacklinksPanel({ noteId }: Props) {
       setLinks(null);
       return;
     }
+
+    let isMounted = true;
     setLoading(true);
+
     api.getNoteLinks(noteId)
-      .then(setLinks)
-      .catch(() => setLinks(null))
-      .finally(() => setLoading(false));
+      .then(data => { if (isMounted) setLinks(data); })
+      .catch(() => { if (isMounted) setLinks(null); })
+      .finally(() => { if (isMounted) setLoading(false); });
+
+    return () => { isMounted = false; };
   }, [noteId]);
 
   const handleNoteClick = async (notePath: string) => {

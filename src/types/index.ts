@@ -55,7 +55,7 @@ export interface Tag {
 }
 
 export interface LinkItem {
-  id: number;
+  id: string;
   note_id: string;
   note_title: string;
   note_path: string;

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LinkItem {
-    pub id: i64,
+    pub id: String,
     pub note_id: String,
     pub note_title: String,
     pub note_path: String,
