@@ -1,5 +1,5 @@
 use crate::error::{AppError, AppResult};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// 原子写入：先写临时文件，再 rename 替换
 pub fn atomic_write(path: &Path, content: &str) -> AppResult<()> {
@@ -48,6 +48,46 @@ pub fn abs_path(root: &Path, relative: &str) -> PathBuf {
     root.join(relative.replace('/', std::path::MAIN_SEPARATOR_STR))
 }
 
+/// 校验并规范化知识库内相对路径，拒绝绝对路径和 `..` 逃逸。
+pub fn normalize_kb_relative_path(relative: &str) -> AppResult<String> {
+    let normalized = relative.replace('\\', "/");
+    let path = Path::new(&normalized);
+    if path.is_absolute() {
+        return Err(AppError::InvalidInput(format!("Path must be relative: {}", relative)));
+    }
+
+    let mut parts = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(part) => {
+                let part = part.to_string_lossy();
+                if part.is_empty() {
+                    continue;
+                }
+                parts.push(part.to_string());
+            }
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(AppError::InvalidInput(format!(
+                    "Path escapes knowledge base: {}",
+                    relative
+                )));
+            }
+        }
+    }
+
+    if parts.is_empty() {
+        return Err(AppError::InvalidInput("Path cannot be empty".into()));
+    }
+
+    Ok(parts.join("/"))
+}
+
+/// 从知识库根目录安全构造绝对路径。
+pub fn resolve_kb_path(root: &Path, relative: &str) -> AppResult<PathBuf> {
+    Ok(abs_path(root, &normalize_kb_relative_path(relative)?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -79,6 +119,19 @@ mod tests {
         let root = Path::new("/home/user/kb");
         let result = abs_path(root, "notes/a.md");
         assert!(result.ends_with("a.md"));
+    }
+
+    #[test]
+    fn test_normalize_kb_relative_path_rejects_escape() {
+        assert!(normalize_kb_relative_path("../outside.md").is_err());
+        assert!(normalize_kb_relative_path("notes/../../outside.md").is_err());
+        assert!(normalize_kb_relative_path("/tmp/outside.md").is_err());
+    }
+
+    #[test]
+    fn test_normalize_kb_relative_path_normalizes_separators() {
+        assert_eq!(normalize_kb_relative_path("notes\\daily\\a.md").unwrap(), "notes/daily/a.md");
+        assert_eq!(normalize_kb_relative_path("./notes/a.md").unwrap(), "notes/a.md");
     }
 
     #[test]

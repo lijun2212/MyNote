@@ -1,6 +1,6 @@
 use crate::domain::note::{CreateNoteInput, Note, NoteDetail, NoteTreeNode, SaveNoteInput, SaveNoteResult};
 use crate::error::{AppError, AppResult};
-use crate::infrastructure::fs::{abs_path, atomic_write, safe_filename};
+use crate::infrastructure::fs::{atomic_write, normalize_kb_relative_path, resolve_kb_path, safe_filename};
 use crate::infrastructure::markdown::{render_note, FrontMatter};
 use crate::services::index::index_note_full;
 use crate::state::AppState;
@@ -16,9 +16,9 @@ pub fn create_note_service(state: &State<AppState>, input: CreateNoteInput) -> A
     let conn = db_guard.as_mut().ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
 
     let safe_title = safe_filename(&input.title);
-    let dir = if input.directory.is_empty() { "notes".to_string() } else { input.directory.clone() };
+    let dir = normalize_kb_relative_path(if input.directory.is_empty() { "notes" } else { &input.directory })?;
     let rel_path = format!("{}/{}.md", dir, safe_title);
-    let abs = abs_path(root, &rel_path);
+    let abs = resolve_kb_path(root, &rel_path)?;
 
     if abs.exists() {
         return Err(AppError::AlreadyExists(format!("Note already exists: {}", rel_path)));
@@ -43,18 +43,19 @@ pub fn create_note_service(state: &State<AppState>, input: CreateNoteInput) -> A
 }
 
 pub fn get_note_by_path_service(state: &State<AppState>, rel_path: &str) -> AppResult<NoteDetail> {
+    let rel_path = normalize_kb_relative_path(rel_path)?;
     let root_guard = state.kb_root.lock().unwrap();
     let root = root_guard.as_ref().ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?;
     let db_guard = state.db.lock().unwrap();
     let conn = db_guard.as_ref().ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
 
-    let abs = abs_path(root, rel_path);
+    let abs = resolve_kb_path(root, &rel_path)?;
     let content = std::fs::read_to_string(&abs)
         .map_err(|_| AppError::NotFound(format!("File not found: {}", rel_path)))?;
 
     let note = conn.query_row(
         "SELECT id, path, title, summary, content_hash, word_count, created_at, updated_at, indexed_at, deleted_at FROM notes WHERE path = ?1",
-        params![rel_path],
+        params![&rel_path],
         |row| Ok(Note {
             id: row.get(0)?,
             path: row.get(1)?,
@@ -88,14 +89,14 @@ pub fn save_note_service(state: &State<AppState>, input: SaveNoteInput) -> AppRe
     if let Some(expected) = &input.expected_hash {
         if expected != &current_hash {
             let conflict_path = path.replace(".md", ".local-conflict.md");
-            let abs_conflict = abs_path(root, &conflict_path);
+            let abs_conflict = resolve_kb_path(root, &conflict_path)?;
             atomic_write(&abs_conflict, &input.content)?;
             let note = get_note_by_path_service_inner(conn, root, &path)?;
             return Ok(SaveNoteResult { note, conflict: true });
         }
     }
 
-    let abs = abs_path(root, &path);
+    let abs = resolve_kb_path(root, &path)?;
     atomic_write(&abs, &input.content)?;
 
     let note = index_note_full(conn, root, &path, &input.content)?;
@@ -202,15 +203,16 @@ pub fn get_note_tree_service(state: &State<AppState>) -> AppResult<Vec<NoteTreeN
 }
 
 pub fn index_note_from_file(state: &State<AppState>, rel_path: &str) -> AppResult<Note> {
+    let rel_path = normalize_kb_relative_path(rel_path)?;
     let root_guard = state.kb_root.lock().unwrap();
     let root = root_guard.as_ref().ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?;
     let mut db_guard = state.db.lock().unwrap();
     let conn = db_guard.as_mut().ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
 
-    let abs = abs_path(root, rel_path);
+    let abs = resolve_kb_path(root, &rel_path)?;
     let content = std::fs::read_to_string(&abs)?;
 
-    let note = index_note_full(conn, root, rel_path, &content)?;
+    let note = index_note_full(conn, root, &rel_path, &content)?;
     Ok(note)
 }
 
@@ -241,20 +243,20 @@ pub fn import_note_service(
     }
 
     let content = std::fs::read_to_string(src_path)?;
-    let dir = if dest_directory.is_empty() { "notes" } else { dest_directory };
+    let dir = normalize_kb_relative_path(if dest_directory.is_empty() { "notes" } else { dest_directory })?;
 
     // Ensure destination directory exists
-    let abs_dir = abs_path(&root, dir);
+    let abs_dir = resolve_kb_path(&root, &dir)?;
     std::fs::create_dir_all(&abs_dir)?;
 
     // Handle filename conflicts
     let base_rel = format!("{}/{}", dir, filename);
-    let final_rel = if abs_path(&root, &base_rel).exists() {
+    let final_rel = if resolve_kb_path(&root, &base_rel)?.exists() {
         let stem = src.file_stem().unwrap_or_default().to_string_lossy();
         let mut i = 1;
         loop {
             let candidate = format!("{}/{}-{}.md", dir, stem, i);
-            if !abs_path(&root, &candidate).exists() {
+            if !resolve_kb_path(&root, &candidate)?.exists() {
                 break candidate;
             }
             i += 1;
@@ -263,7 +265,7 @@ pub fn import_note_service(
         base_rel
     };
 
-    let abs_dest = abs_path(&root, &final_rel);
+    let abs_dest = resolve_kb_path(&root, &final_rel)?;
     atomic_write(&abs_dest, &content)?;
 
     let note = index_note_full(conn, &root, &final_rel, &content)?;

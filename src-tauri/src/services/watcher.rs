@@ -73,11 +73,8 @@ pub fn start_watching(root: PathBuf, app_handle: AppHandle) -> Result<WatcherHan
                     let rel_str = rel.to_string_lossy().replace('\\', "/");
                     let state = app_clone.state::<AppState>();
                     let db_guard = state.db.lock().unwrap();
-                    let kb_root_guard = state.kb_root.lock().unwrap();
-                    if let (Some(conn), Some(root_path)) =
-                        (db_guard.as_ref(), kb_root_guard.as_ref())
-                    {
-                        match reindex_from_path(conn, root_path, &rel_str) {
+                    if let Some(conn) = db_guard.as_ref() {
+                        match reindex_from_path(conn, &root_clone, &rel_str) {
                             Ok(_) => {
                                 let _ = app_clone.emit("note:index_updated", &rel_str);
                             }
