@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import MarkdownIt from "markdown-it";
 import { api } from "../../api/commands";
-import { useEditorStore } from "../../store/useEditorStore";
+import { useOpenNote } from "../../hooks/useOpenNote";
 
 const md = new MarkdownIt({ html: false, linkify: true, typographer: true });
 
@@ -21,6 +21,7 @@ interface Props {
 
 export function MarkdownPreview({ content }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const { openNote } = useOpenNote();
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -48,9 +49,7 @@ export function MarkdownPreview({ content }: Props) {
       try {
         const note = await api.getNoteByTitle(title);
         if (note) {
-          const detail = await api.getNoteByPath(note.path);
-          useEditorStore.getState().setCurrentNote(detail.note);
-          useEditorStore.getState().setContent(detail.content);
+          await openNote(note.path);
         }
       } catch (e) {
         console.error("Failed to open wiki link:", e);
@@ -59,7 +58,7 @@ export function MarkdownPreview({ content }: Props) {
 
     container.addEventListener("click", handleClick);
     return () => container.removeEventListener("click", handleClick);
-  }, []);
+  }, [openNote]);
 
   return (
     <div style={{

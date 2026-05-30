@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { NoteLinks } from "../../types";
 import { api } from "../../api/commands";
-import { useEditorStore } from "../../store/useEditorStore";
+import { useOpenNote } from "../../hooks/useOpenNote";
 
 interface Props {
   noteId: string | null;
@@ -11,6 +11,7 @@ interface Props {
 export function BacklinksPanel({ noteId }: Props) {
   const [links, setLinks] = useState<NoteLinks | null>(null);
   const [loading, setLoading] = useState(false);
+  const { openNote } = useOpenNote();
 
   useEffect(() => {
     if (!noteId) {
@@ -36,9 +37,7 @@ export function BacklinksPanel({ noteId }: Props) {
         return;
       }
       if (link.note_path) {
-        const detail = await api.getNoteByPath(link.note_path);
-        useEditorStore.getState().setCurrentNote(detail.note);
-        useEditorStore.getState().setContent(detail.content);
+        await openNote(link.note_path);
       }
     } catch (e) {
       console.error("Failed to open link:", e);
