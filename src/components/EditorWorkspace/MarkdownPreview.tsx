@@ -8,17 +8,18 @@ import { useOpenNote } from "../../hooks/useOpenNote";
 const md = new MarkdownIt({ html: false, linkify: true, typographer: true });
 
 const ALLOWED_MARKDOWN_TAGS = [
-  "a", "blockquote", "br", "code", "del", "em", "hr", "h1", "h2", "h3", "h4", "h5", "h6",
+  "a", "blockquote", "br", "code", "del", "em", "hr", "h1", "h2", "h3", "h4", "h5", "h6", "img",
   "li", "ol", "p", "pre", "span", "strong", "table", "tbody", "td", "th", "thead", "tr", "ul",
 ];
 
-const ALLOWED_MARKDOWN_ATTR = ["href", "title", "class", "data-title"];
+const ALLOWED_MARKDOWN_ATTR = ["alt", "href", "src", "title", "class", "data-title"];
+const ALLOWED_MARKDOWN_URI = /^(?:(?:https?):|(?:data:image\/(?:gif|png|jpe?g|webp);base64,)|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i;
 
 function sanitizePreviewHtml(html: string): string {
   return DOMPurify.sanitize(html, {
     ALLOWED_TAGS: ALLOWED_MARKDOWN_TAGS,
     ALLOWED_ATTR: ALLOWED_MARKDOWN_ATTR,
-    ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i,
+    ALLOWED_URI_REGEXP: ALLOWED_MARKDOWN_URI,
   });
 }
 
@@ -88,9 +89,12 @@ export function MarkdownPreview({ content }: Props) {
       const wikiLink = target.closest(".wiki-link") as HTMLElement | null;
       if (!wikiLink) {
         const anchor = target.closest("a") as HTMLAnchorElement | null;
-        if (anchor?.href && /^https?:\/\//.test(anchor.href)) {
+        const href = anchor?.getAttribute("href");
+        if (href) {
           e.preventDefault();
-          await openUrl(anchor.href);
+          if (/^https?:\/\//i.test(href)) {
+            await openUrl(href);
+          }
         }
         return;
       }
