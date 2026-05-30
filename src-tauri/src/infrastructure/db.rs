@@ -207,22 +207,35 @@ fn validate_applied_migrations(conn: &Connection, migrations: &[Migration]) -> A
     Ok(applied_versions)
 }
 
+fn apply_pending_migrations(
+    conn: &mut Connection,
+    migrations: &[Migration],
+    applied_versions: &[i64],
+) -> AppResult<()> {
+    for migration in migrations {
+        if applied_versions.contains(&migration.version) {
+            continue;
+        }
+
+        let tx = conn.transaction()?;
+        tx.execute_batch(migration.sql)?;
+        tx.execute(
+            "INSERT INTO schema_migrations (version, name, checksum, status, applied_at) VALUES (?1, ?2, ?3, 'applied', datetime('now'))",
+            params![migration.version, migration.name, migration_checksum(migration)],
+        )?;
+        tx.commit()?;
+    }
+
+    Ok(())
+}
+
 fn run_migrations(conn: &mut Connection, migrations: &[Migration]) -> AppResult<()> {
     validate_migration_definitions(migrations)?;
     ensure_schema_migrations_table(conn)?;
     ensure_schema_migrations_columns(conn)?;
     backfill_legacy_migration_checksums(conn, migrations)?;
     let applied_versions = validate_applied_migrations(conn, migrations)?;
-
-    for migration in migrations {
-        if !applied_versions.contains(&migration.version) {
-            conn.execute_batch(migration.sql)?;
-            conn.execute(
-                "INSERT INTO schema_migrations (version, name, checksum, status, applied_at) VALUES (?1, ?2, ?3, 'applied', datetime('now'))",
-                params![migration.version, migration.name, migration_checksum(migration)],
-            )?;
-        }
-    }
+    apply_pending_migrations(conn, migrations, &applied_versions)?;
     Ok(())
 }
 
@@ -588,5 +601,107 @@ mod tests {
 
         let message = migration_error_message(open_and_migrate(&db_path));
         assert!(message.contains("Migration 5 has invalid status 'failed'"));
+    }
+
+    #[test]
+    fn test_migration_definition_gap_fails() {
+        let migrations = &[
+            Migration {
+                version: 1,
+                name: "create_first",
+                sql: "CREATE TABLE first_table (id TEXT PRIMARY KEY);",
+            },
+            Migration {
+                version: 3,
+                name: "create_third",
+                sql: "CREATE TABLE third_table (id TEXT PRIMARY KEY);",
+            },
+        ];
+
+        let message = validate_migration_definitions(migrations)
+            .unwrap_err()
+            .to_string();
+        assert!(message.contains("Migration definition gap: expected 2 but found 3"));
+    }
+
+    #[test]
+    fn test_failed_migration_rolls_back_record() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("failed-migration.sqlite");
+        let mut conn = Connection::open(&db_path).unwrap();
+
+        let failing_migrations = &[
+            Migration {
+                version: 1,
+                name: "create_first",
+                sql: "CREATE TABLE first_table (id TEXT PRIMARY KEY);",
+            },
+            Migration {
+                version: 2,
+                name: "create_second_bad",
+                sql: "CREATE TABLE second_table (id TEXT PRIMARY KEY); CREATE TABLE second_table (id TEXT PRIMARY KEY);",
+            },
+        ];
+
+        let result = run_migrations(&mut conn, failing_migrations);
+        assert!(result.is_err());
+
+        let rows = migration_rows(&conn);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].0, 1);
+        assert_eq!(rows[0].1, "create_first");
+
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'second_table'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(exists, 0);
+
+        assert!(rows.iter().all(|(version, _, _, _)| *version != 2));
+    }
+
+    #[test]
+    fn test_failed_pending_migration_can_be_retried_with_same_identity_before_recorded() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("retry-pending.sqlite");
+        let mut conn = Connection::open(&db_path).unwrap();
+
+        let failing_migrations = &[
+            Migration {
+                version: 1,
+                name: "create_first",
+                sql: "CREATE TABLE first_table (id TEXT PRIMARY KEY);",
+            },
+            Migration {
+                version: 2,
+                name: "create_second",
+                sql: "CREATE TABLE second_table (id TEXT PRIMARY KEY); CREATE TABLE second_table (id TEXT PRIMARY KEY);",
+            },
+        ];
+        assert!(run_migrations(&mut conn, failing_migrations).is_err());
+        assert_eq!(migration_rows(&conn).len(), 1);
+
+        let retry_migrations = &[
+            Migration {
+                version: 1,
+                name: "create_first",
+                sql: "CREATE TABLE first_table (id TEXT PRIMARY KEY);",
+            },
+            Migration {
+                version: 2,
+                name: "create_second",
+                sql: "CREATE TABLE second_table (id TEXT PRIMARY KEY);",
+            },
+        ];
+        run_migrations(&mut conn, retry_migrations).unwrap();
+
+        let rows = migration_rows(&conn);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[1].0, 2);
+        assert_eq!(rows[1].1, "create_second");
+        assert_eq!(rows[1].3, "applied");
     }
 }
