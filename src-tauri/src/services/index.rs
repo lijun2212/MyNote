@@ -49,7 +49,8 @@ pub fn index_note_full(
            content_hash=excluded.content_hash,
            word_count=excluded.word_count,
            updated_at=excluded.updated_at,
-           indexed_at=excluded.indexed_at",
+           indexed_at=excluded.indexed_at,
+           deleted_at=NULL",
         params![note_id, rel_path, title, summary, hash, word_count, now, now, now],
     )?;
 
@@ -75,22 +76,7 @@ pub fn index_note_full(
     tx.execute("DELETE FROM links WHERE source_note_id = ?1", params![actual_id])?;
     for raw in &raw_links {
         let link_id = Ulid::new().to_string();
-        // Resolve target_note_id by title match
-        let target_note_id: Option<String> = tx
-            .query_row(
-                "SELECT id FROM notes WHERE title = ?1 AND deleted_at IS NULL LIMIT 1",
-                params![raw.target_raw],
-                |r| r.get(0),
-            )
-            .ok()
-            .or_else(|| {
-                // case-insensitive fallback
-                tx.query_row(
-                    "SELECT id FROM notes WHERE lower(title) = lower(?1) AND deleted_at IS NULL LIMIT 1",
-                    params![raw.target_raw],
-                    |r| r.get(0),
-                ).ok()
-            });
+        let target_note_id = resolve_link_target(&tx, &raw.target_raw)?;
         let resolved: i64 = if target_note_id.is_some() { 1 } else { 0 };
         tx.execute(
             "INSERT INTO links (id, source_note_id, target_note_id, target_raw, display_text, link_type, anchor, resolved, start_offset, end_offset, created_at, updated_at)
@@ -109,6 +95,8 @@ pub fn index_note_full(
         "INSERT INTO note_fts (note_id, title, summary, body) VALUES (?1, ?2, ?3, ?4)",
         params![actual_id, title, summary.as_deref().unwrap_or(""), parsed.body],
     )?;
+
+    reconcile_links_for_note(&tx, &actual_id, &now)?;
 
     tx.commit()?;
 
@@ -129,6 +117,76 @@ pub fn index_note_full(
     })
 }
 
+
+fn resolve_link_target(
+    tx: &rusqlite::Transaction,
+    target_raw: &str,
+) -> AppResult<Option<String>> {
+    let exact = tx
+        .query_row(
+            "SELECT id FROM notes WHERE title = ?1 AND deleted_at IS NULL LIMIT 1",
+            params![target_raw],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    if exact.is_some() {
+        return Ok(exact);
+    }
+
+    Ok(tx
+        .query_row(
+            "SELECT id FROM notes WHERE lower(title) = lower(?1) AND deleted_at IS NULL LIMIT 1",
+            params![target_raw],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
+fn reconcile_links_for_note(
+    tx: &rusqlite::Transaction,
+    note_id: &str,
+    now: &str,
+) -> AppResult<()> {
+    tx.execute(
+        "UPDATE links
+         SET target_note_id = NULL, resolved = 0, updated_at = ?1
+         WHERE target_note_id = ?2
+           AND NOT EXISTS (
+             SELECT 1
+             FROM notes n
+             WHERE n.id = ?2
+               AND n.deleted_at IS NULL
+               AND (n.title = links.target_raw OR lower(n.title) = lower(links.target_raw))
+           )",
+        params![now, note_id],
+    )?;
+
+    let links = {
+        let mut stmt = tx.prepare(
+            "SELECT id, target_raw
+             FROM links
+             WHERE resolved = 0 OR target_note_id IS NULL OR target_note_id = ?1",
+        )?;
+        let rows = stmt.query_map(params![note_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+
+    for (link_id, target_raw) in links {
+        let target_note_id = resolve_link_target(tx, &target_raw)?;
+        let resolved = if target_note_id.is_some() { 1 } else { 0 };
+        tx.execute(
+            "UPDATE links
+             SET target_note_id = ?1, resolved = ?2, updated_at = ?3
+             WHERE id = ?4",
+            params![target_note_id, resolved, now, link_id],
+        )?;
+    }
+
+    Ok(())
+}
 fn upsert_tag_and_link(
     tx: &rusqlite::Transaction,
     note_id: &str,
@@ -202,11 +260,135 @@ pub fn mark_note_deleted_by_path(conn: &Connection, rel_path: &str) -> AppResult
     Ok(())
 }
 
+pub fn reconcile_all_links(conn: &Connection) -> AppResult<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let tx = conn.unchecked_transaction()?;
+
+    let links = {
+        let mut stmt = tx.prepare("SELECT id, target_raw FROM links ORDER BY id")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+
+    for (link_id, target_raw) in links {
+        let target_note_id = resolve_link_target(&tx, &target_raw)?;
+        let resolved = if target_note_id.is_some() { 1 } else { 0 };
+        tx.execute(
+            "UPDATE links
+             SET target_note_id = ?1, resolved = ?2, updated_at = ?3
+             WHERE id = ?4",
+            params![target_note_id, resolved, now, link_id],
+        )?;
+    }
+
+    tx.commit()?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::mark_note_deleted_by_path;
+    use super::{index_note_full, mark_note_deleted_by_path, reconcile_all_links};
     use crate::infrastructure::db::open_and_migrate;
     use tempfile::TempDir;
+
+    fn setup_index_db() -> (TempDir, rusqlite::Connection) {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("test.sqlite");
+        let conn = open_and_migrate(&db_path).unwrap();
+        (dir, conn)
+    }
+
+    fn link_state(
+        conn: &rusqlite::Connection,
+        source_title: &str,
+        target_raw: &str,
+    ) -> (Option<String>, i64) {
+        conn.query_row(
+            "SELECT l.target_note_id, l.resolved
+             FROM links l
+             JOIN notes n ON n.id = l.source_note_id
+             WHERE n.title = ?1 AND l.target_raw = ?2",
+            rusqlite::params![source_title, target_raw],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn indexing_later_target_resolves_existing_unresolved_wiki_link() {
+        let (root, conn) = setup_index_db();
+
+        index_note_full(&conn, root.path(), "notes/a.md", "# A\n\n[[B]]").unwrap();
+        assert_eq!(link_state(&conn, "A", "B"), (None, 0));
+
+        let b = index_note_full(&conn, root.path(), "notes/b.md", "# B\n\n").unwrap();
+
+        assert_eq!(link_state(&conn, "A", "B"), (Some(b.id), 1));
+    }
+
+    #[test]
+    fn renaming_target_unresolves_old_title_and_resolves_new_title() {
+        let (root, conn) = setup_index_db();
+
+        index_note_full(&conn, root.path(), "notes/a.md", "# A\n\n[[B]]").unwrap();
+        index_note_full(&conn, root.path(), "notes/c.md", "# C Source\n\n[[C]]").unwrap();
+        let target = index_note_full(&conn, root.path(), "notes/target.md", "# B\n\n").unwrap();
+
+        assert_eq!(link_state(&conn, "A", "B"), (Some(target.id.clone()), 1));
+        assert_eq!(link_state(&conn, "C Source", "C"), (None, 0));
+
+        let renamed = index_note_full(&conn, root.path(), "notes/target.md", "# C\n\n").unwrap();
+
+        assert_eq!(renamed.id, target.id);
+        assert_eq!(link_state(&conn, "A", "B"), (None, 0));
+        assert_eq!(link_state(&conn, "C Source", "C"), (Some(renamed.id), 1));
+    }
+
+    #[test]
+    fn reconcile_all_links_recomputes_links_from_current_notes() {
+        let (root, conn) = setup_index_db();
+
+        index_note_full(&conn, root.path(), "notes/source.md", "# Source\n\n[[Target]]").unwrap();
+        let target = index_note_full(&conn, root.path(), "notes/target.md", "# Target\n\n").unwrap();
+
+        conn.execute(
+            "UPDATE links SET target_note_id = NULL, resolved = 0 WHERE target_raw = 'Target'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(link_state(&conn, "Source", "Target"), (None, 0));
+
+        reconcile_all_links(&conn).unwrap();
+
+        assert_eq!(link_state(&conn, "Source", "Target"), (Some(target.id), 1));
+    }
+
+    #[test]
+    fn restoring_deleted_target_clears_deleted_at_and_resolves_incoming_link() {
+        let (root, conn) = setup_index_db();
+
+        index_note_full(&conn, root.path(), "notes/a.md", "# A\n\n[[B]]").unwrap();
+        let original = index_note_full(&conn, root.path(), "notes/b.md", "# B\n\n").unwrap();
+        assert_eq!(link_state(&conn, "A", "B"), (Some(original.id.clone()), 1));
+
+        mark_note_deleted_by_path(&conn, "notes/b.md").unwrap();
+        assert_eq!(link_state(&conn, "A", "B"), (None, 0));
+
+        let restored = index_note_full(&conn, root.path(), "notes/b.md", "# B\n\nRestored").unwrap();
+
+        let deleted_at: Option<String> = conn
+            .query_row(
+                "SELECT deleted_at FROM notes WHERE id = ?1",
+                rusqlite::params![restored.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(restored.id, original.id);
+        assert_eq!(deleted_at, None);
+        assert_eq!(link_state(&conn, "A", "B"), (Some(restored.id), 1));
+    }
 
     #[test]
     fn mark_note_deleted_clears_derived_indexes() {
