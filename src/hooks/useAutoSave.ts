@@ -26,7 +26,9 @@ export function useAutoSave() {
         const result = await api.saveNote(noteId, contentToSave, expectedHash);
         const stillCurrent = () => {
           const state = useEditorStore.getState();
-          return requestId === saveRequestIdRef.current && state.currentNote?.id === noteId;
+          return requestId === saveRequestIdRef.current
+            && state.currentNote?.id === noteId
+            && state.content === contentToSave;
         };
 
         if (!stillCurrent()) return;
