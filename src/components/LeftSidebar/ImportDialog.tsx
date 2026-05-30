@@ -6,7 +6,7 @@ interface Props {
   files: string[];
   existingDirs: string[];
   onClose: () => void;
-  onDone: (lastImported?: Note) => void;
+  onDone: (lastImported?: Note) => void | Promise<void>;
 }
 
 export function ImportDialog({ files, existingDirs, onClose, onDone }: Props) {
@@ -30,11 +30,17 @@ export function ImportDialog({ files, existingDirs, onClose, onDone }: Props) {
         errs.push(`${f.split("/").pop()}: ${e}`);
       }
     }
-    setImporting(false);
     if (errs.length > 0) {
+      setImporting(false);
       setErrors(errs);
     } else {
-      onDone(lastImported);
+      try {
+        await onDone(lastImported);
+      } catch (e) {
+        setErrors([`导入完成，但打开笔记失败：${e}`]);
+      } finally {
+        setImporting(false);
+      }
     }
   }
 

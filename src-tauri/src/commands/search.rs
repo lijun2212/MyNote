@@ -31,7 +31,7 @@ fn search_notes_in_conn(conn: &Connection, query: &str) -> Result<Vec<SearchResu
     }
 
     let fts_query = format!("\"{}\"*", trimmed.replace('"', "\"\""));
-    let like_query = format!("%{}%", trimmed);
+    let like_query = escape_like_query(trimmed);
 
     let mut stmt = conn.prepare(
         "WITH fts_matches AS (
@@ -52,10 +52,10 @@ fn search_notes_in_conn(conn: &Connection, query: &str) -> Result<Vec<SearchResu
              LEFT JOIN note_fts ON note_fts.note_id = n.id
              WHERE n.deleted_at IS NULL
                AND (
-                   n.title LIKE ?2
-                   OR n.path LIKE ?2
-                   OR COALESCE(note_fts.summary, '') LIKE ?2
-                   OR COALESCE(note_fts.body, '') LIKE ?2
+                   n.title LIKE ?2 ESCAPE '\\'
+                   OR n.path LIKE ?2 ESCAPE '\\'
+                   OR COALESCE(note_fts.summary, '') LIKE ?2 ESCAPE '\\'
+                   OR COALESCE(note_fts.body, '') LIKE ?2 ESCAPE '\\'
                )
                AND n.id NOT IN (SELECT id FROM fts_matches)
          )
@@ -81,6 +81,19 @@ fn search_notes_in_conn(conn: &Connection, query: &str) -> Result<Vec<SearchResu
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(results)
+}
+
+fn escape_like_query(query: &str) -> String {
+    let mut escaped = String::with_capacity(query.len() + 2);
+    escaped.push('%');
+    for ch in query.chars() {
+        if matches!(ch, '%' | '_' | '\\') {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped.push('%');
+    escaped
 }
 
 #[cfg(test)]
@@ -125,5 +138,31 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].path, "notes/项目扫描汇总报告-1.md");
+    }
+
+    #[test]
+    fn search_notes_treats_like_wildcards_as_literals() {
+        let conn = setup_search_db();
+        conn.execute(
+            "INSERT INTO notes (id, path, title, summary, deleted_at) VALUES (?1, ?2, ?3, NULL, NULL)",
+            rusqlite::params!["n1", "notes/100-percent.md", "100% Plan"],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO notes (id, path, title, summary, deleted_at) VALUES (?1, ?2, ?3, NULL, NULL)",
+            rusqlite::params!["n2", "notes/plain.md", "Plain Plan"],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO note_fts (note_id, title, summary, body) VALUES (?1, ?2, '', '')",
+            rusqlite::params!["n1", "100% Plan"],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO note_fts (note_id, title, summary, body) VALUES (?1, ?2, '', '')",
+            rusqlite::params!["n2", "Plain Plan"],
+        ).unwrap();
+
+        let results = search_notes_in_conn(&conn, "%").unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].note_id, "n1");
     }
 }
