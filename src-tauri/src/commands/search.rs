@@ -165,4 +165,56 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].note_id, "n1");
     }
+
+    #[test]
+    fn search_notes_matches_body_fts_prefix() {
+        let conn = setup_search_db();
+        conn.execute(
+            "INSERT INTO notes (id, path, title, summary, deleted_at) VALUES (?1, ?2, ?3, NULL, NULL)",
+            rusqlite::params!["n1", "notes/neutral.md", "Neutral Note"],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO note_fts (note_id, title, summary, body) VALUES (?1, ?2, '', ?3)",
+            rusqlite::params!["n1", "Neutral Note", "sqlite performance tuning"],
+        ).unwrap();
+
+        let results = search_notes_in_conn(&conn, "perform").unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].note_id, "n1");
+    }
+
+    #[test]
+    fn search_notes_does_not_scan_body_substrings_in_fallback() {
+        let conn = setup_search_db();
+        conn.execute(
+            "INSERT INTO notes (id, path, title, summary, deleted_at) VALUES (?1, ?2, ?3, NULL, NULL)",
+            rusqlite::params!["n1", "notes/neutral.md", "Neutral Note"],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO note_fts (note_id, title, summary, body) VALUES (?1, ?2, '', ?3)",
+            rusqlite::params!["n1", "Neutral Note", "bodyonlysubstring"],
+        ).unwrap();
+
+        let results = search_notes_in_conn(&conn, "onlysub").unwrap();
+
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn search_notes_does_not_scan_summary_substrings_in_fallback() {
+        let conn = setup_search_db();
+        conn.execute(
+            "INSERT INTO notes (id, path, title, summary, deleted_at) VALUES (?1, ?2, ?3, NULL, NULL)",
+            rusqlite::params!["n1", "notes/neutral.md", "Neutral Note"],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO note_fts (note_id, title, summary, body) VALUES (?1, ?2, ?3, '')",
+            rusqlite::params!["n1", "Neutral Note", "summarycontainsneedle"],
+        ).unwrap();
+
+        let results = search_notes_in_conn(&conn, "needle").unwrap();
+
+        assert!(results.is_empty());
+    }
 }
