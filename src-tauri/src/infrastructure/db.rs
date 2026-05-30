@@ -30,6 +30,20 @@ fn migration_error(message: impl Into<String>) -> AppError {
     AppError::Database(message.into())
 }
 
+fn validate_migration_definitions(migrations: &[Migration]) -> AppResult<()> {
+    let mut expected_version = 1;
+    for migration in migrations {
+        if migration.version != expected_version {
+            return Err(migration_error(format!(
+                "Migration definition gap: expected {} but found {}",
+                expected_version, migration.version
+            )));
+        }
+        expected_version += 1;
+    }
+    Ok(())
+}
+
 /// 打开 SQLite 数据库并执行所有 schema 迁移
 pub fn open_and_migrate(db_path: &Path) -> AppResult<Connection> {
     let mut conn = Connection::open(db_path).map_err(|e| AppError::Database(e.to_string()))?;
@@ -144,19 +158,64 @@ fn backfill_legacy_migration_checksums(
     Ok(())
 }
 
+fn validate_applied_migrations(conn: &Connection, migrations: &[Migration]) -> AppResult<Vec<i64>> {
+    let applied = load_applied_migrations(conn)?;
+    let mut applied_versions = Vec::with_capacity(applied.len());
+    let mut expected_version = 1;
+
+    for applied_migration in applied {
+        let migration = migration_by_version(migrations, applied_migration.version).ok_or_else(|| {
+            migration_error(format!(
+                "Migration {} exists in database but not in current code",
+                applied_migration.version
+            ))
+        })?;
+
+        if applied_migration.version != expected_version {
+            return Err(migration_error(format!(
+                "Migration version gap: expected {} but found {}",
+                expected_version, applied_migration.version
+            )));
+        }
+
+        if applied_migration.name != migration.name {
+            return Err(migration_error(format!(
+                "Migration {} name mismatch: database has '{}', code has '{}'",
+                applied_migration.version, applied_migration.name, migration.name
+            )));
+        }
+
+        if applied_migration.status != "applied" {
+            return Err(migration_error(format!(
+                "Migration {} has invalid status '{}'",
+                applied_migration.version, applied_migration.status
+            )));
+        }
+
+        let expected_checksum = migration_checksum(migration);
+        if applied_migration.checksum != expected_checksum {
+            return Err(migration_error(format!(
+                "Migration {} checksum mismatch for '{}'",
+                applied_migration.version, migration.name
+            )));
+        }
+
+        applied_versions.push(applied_migration.version);
+        expected_version += 1;
+    }
+
+    Ok(applied_versions)
+}
+
 fn run_migrations(conn: &mut Connection, migrations: &[Migration]) -> AppResult<()> {
+    validate_migration_definitions(migrations)?;
     ensure_schema_migrations_table(conn)?;
     ensure_schema_migrations_columns(conn)?;
     backfill_legacy_migration_checksums(conn, migrations)?;
-
-    let applied: i64 = conn.query_row(
-        "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
-        [],
-        |r| r.get(0),
-    )?;
+    let applied_versions = validate_applied_migrations(conn, migrations)?;
 
     for migration in migrations {
-        if migration.version > applied {
+        if !applied_versions.contains(&migration.version) {
             conn.execute_batch(migration.sql)?;
             conn.execute(
                 "INSERT INTO schema_migrations (version, name, checksum, status, applied_at) VALUES (?1, ?2, ?3, 'applied', datetime('now'))",
@@ -312,6 +371,13 @@ mod tests {
             .unwrap()
     }
 
+    fn migration_error_message(result: AppResult<Connection>) -> String {
+        match result {
+            Ok(_) => panic!("expected migration error"),
+            Err(error) => error.to_string(),
+        }
+    }
+
     #[test]
     fn test_migration_checksum_is_stable() {
         let migration = Migration {
@@ -408,13 +474,119 @@ mod tests {
         assert!(rows.iter().all(|(_, _, _, status)| status == "applied"));
         assert_eq!(rows[0].0, 1);
         assert_eq!(rows[0].1, "create_knowledge_base_meta");
+        assert_eq!(
+            rows[0].2,
+            migration_checksum(migration_by_version(MIGRATIONS, 1).unwrap())
+        );
     }
 
     #[test]
     fn test_migrations_are_idempotent() {
         let dir = TempDir::new().unwrap();
         let db_path = dir.path().join("idem.sqlite");
-        open_and_migrate(&db_path).unwrap();
-        open_and_migrate(&db_path).unwrap();
+        let conn = open_and_migrate(&db_path).unwrap();
+        let rows_before = migration_rows(&conn);
+        drop(conn);
+
+        let conn = open_and_migrate(&db_path).unwrap();
+        assert_eq!(migration_rows(&conn), rows_before);
+    }
+
+    #[test]
+    fn test_migration_name_mismatch_fails() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("name-mismatch.sqlite");
+        let conn = open_and_migrate(&db_path).unwrap();
+        conn.execute(
+            "UPDATE schema_migrations SET name = 'create_setting' WHERE version = 3",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let message = migration_error_message(open_and_migrate(&db_path));
+        assert!(message.contains("Migration 3 name mismatch"));
+    }
+
+    #[test]
+    fn test_migration_checksum_mismatch_fails() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("checksum-mismatch.sqlite");
+        let conn = open_and_migrate(&db_path).unwrap();
+        conn.execute(
+            "UPDATE schema_migrations SET checksum = 'bad-checksum' WHERE version = 4",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let message = migration_error_message(open_and_migrate(&db_path));
+        assert!(message.contains("Migration 4 checksum mismatch"));
+    }
+
+    #[test]
+    fn test_unknown_migration_version_fails() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("unknown-version.sqlite");
+        let conn = open_and_migrate(&db_path).unwrap();
+        conn.execute(
+            "INSERT INTO schema_migrations (version, name, checksum, status, applied_at) VALUES (999, 'future', 'abc', 'applied', datetime('now'))",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let message = migration_error_message(open_and_migrate(&db_path));
+        assert!(message.contains("Migration 999 exists in database but not in current code"));
+    }
+
+    #[test]
+    fn test_migration_version_gap_fails() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("gap.sqlite");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE schema_migrations (
+                version    INTEGER PRIMARY KEY,
+                name       TEXT    NOT NULL,
+                checksum   TEXT    NOT NULL DEFAULT '',
+                status     TEXT    NOT NULL DEFAULT 'applied',
+                applied_at TEXT    NOT NULL
+            );",
+        )
+        .unwrap();
+
+        let migration_1 = migration_by_version(MIGRATIONS, 1).unwrap();
+        let migration_3 = migration_by_version(MIGRATIONS, 3).unwrap();
+        conn.execute(
+            "INSERT INTO schema_migrations (version, name, checksum, status, applied_at) VALUES (?1, ?2, ?3, 'applied', datetime('now'))",
+            params![migration_1.version, migration_1.name, migration_checksum(migration_1)],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO schema_migrations (version, name, checksum, status, applied_at) VALUES (?1, ?2, ?3, 'applied', datetime('now'))",
+            params![migration_3.version, migration_3.name, migration_checksum(migration_3)],
+        )
+        .unwrap();
+        drop(conn);
+
+        let message = migration_error_message(open_and_migrate(&db_path));
+        assert!(message.contains("Migration version gap: expected 2 but found 3"));
+    }
+
+    #[test]
+    fn test_invalid_migration_status_fails() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("invalid-status.sqlite");
+        let conn = open_and_migrate(&db_path).unwrap();
+        conn.execute(
+            "UPDATE schema_migrations SET status = 'failed' WHERE version = 5",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let message = migration_error_message(open_and_migrate(&db_path));
+        assert!(message.contains("Migration 5 has invalid status 'failed'"));
     }
 }
