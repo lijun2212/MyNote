@@ -43,19 +43,16 @@ fn search_notes_in_conn(conn: &Connection, query: &str) -> Result<Vec<SearchResu
              JOIN notes n ON note_fts.note_id = n.id AND n.deleted_at IS NULL
              WHERE note_fts MATCH ?1
          ),
-         like_matches AS (
+         metadata_matches AS (
              SELECT n.id, n.title, n.path,
                     n.title AS snippet,
                     0.0 AS rank,
                     1 AS source_order
              FROM notes n
-             LEFT JOIN note_fts ON note_fts.note_id = n.id
              WHERE n.deleted_at IS NULL
                AND (
                    n.title LIKE ?2 ESCAPE '\\'
                    OR n.path LIKE ?2 ESCAPE '\\'
-                   OR COALESCE(note_fts.summary, '') LIKE ?2 ESCAPE '\\'
-                   OR COALESCE(note_fts.body, '') LIKE ?2 ESCAPE '\\'
                )
                AND n.id NOT IN (SELECT id FROM fts_matches)
          )
@@ -63,7 +60,7 @@ fn search_notes_in_conn(conn: &Connection, query: &str) -> Result<Vec<SearchResu
          FROM (
              SELECT * FROM fts_matches
              UNION ALL
-             SELECT * FROM like_matches
+             SELECT * FROM metadata_matches
          )
          ORDER BY source_order, rank
          LIMIT 20",
