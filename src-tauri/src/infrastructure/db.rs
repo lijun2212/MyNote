@@ -1,7 +1,34 @@
 // src-tauri/src/infrastructure/db.rs
 use crate::error::{AppError, AppResult};
+use crate::infrastructure::hash::sha256_str;
 use rusqlite::{Connection, params};
 use std::path::Path;
+
+#[derive(Debug, Clone, Copy)]
+struct Migration {
+    version: i64,
+    name: &'static str,
+    sql: &'static str,
+}
+
+#[derive(Debug)]
+struct AppliedMigration {
+    version: i64,
+    name: String,
+    checksum: String,
+    status: String,
+}
+
+fn migration_checksum(migration: &Migration) -> String {
+    sha256_str(&format!(
+        "{}\n{}\n{}",
+        migration.version, migration.name, migration.sql
+    ))
+}
+
+fn migration_error(message: impl Into<String>) -> AppError {
+    AppError::Database(message.into())
+}
 
 /// 打开 SQLite 数据库并执行所有 schema 迁移
 pub fn open_and_migrate(db_path: &Path) -> AppResult<Connection> {
@@ -26,23 +53,23 @@ fn run_migrations(conn: &Connection) -> AppResult<()> {
         |r| r.get(0),
     )?;
 
-    for (version, name, sql) in MIGRATIONS {
-        if *version > applied {
-            conn.execute_batch(sql)?;
+    for migration in MIGRATIONS {
+        if migration.version > applied {
+            conn.execute_batch(migration.sql)?;
             conn.execute(
                 "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?1, ?2, datetime('now'))",
-                params![version, name],
+                params![migration.version, migration.name],
             )?;
         }
     }
     Ok(())
 }
 
-const MIGRATIONS: &[(i64, &str, &str)] = &[
-    (
-        1,
-        "create_knowledge_base_meta",
-        "CREATE TABLE IF NOT EXISTS knowledge_base_meta (
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "create_knowledge_base_meta",
+        sql: "CREATE TABLE IF NOT EXISTS knowledge_base_meta (
             id         TEXT PRIMARY KEY,
             name       TEXT NOT NULL,
             root_path  TEXT NOT NULL,
@@ -50,11 +77,11 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );",
-    ),
-    (
-        2,
-        "create_notes",
-        "CREATE TABLE IF NOT EXISTS notes (
+    },
+    Migration {
+        version: 2,
+        name: "create_notes",
+        sql: "CREATE TABLE IF NOT EXISTS notes (
             id               TEXT PRIMARY KEY,
             path             TEXT NOT NULL UNIQUE,
             title            TEXT NOT NULL,
@@ -70,44 +97,44 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         CREATE INDEX IF NOT EXISTS idx_notes_path ON notes(path);
         CREATE INDEX IF NOT EXISTS idx_notes_title ON notes(title);
         CREATE INDEX IF NOT EXISTS idx_notes_deleted ON notes(deleted_at);",
-    ),
-    (
-        3,
-        "create_settings",
-        "CREATE TABLE IF NOT EXISTS settings (
+    },
+    Migration {
+        version: 3,
+        name: "create_settings",
+        sql: "CREATE TABLE IF NOT EXISTS settings (
             scope      TEXT NOT NULL,
             key        TEXT NOT NULL,
             value      TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             PRIMARY KEY (scope, key)
         );",
-    ),
-    (
-        4,
-        "create_note_fts",
-        "CREATE VIRTUAL TABLE IF NOT EXISTS note_fts USING fts5(
+    },
+    Migration {
+        version: 4,
+        name: "create_note_fts",
+        sql: "CREATE VIRTUAL TABLE IF NOT EXISTS note_fts USING fts5(
             note_id UNINDEXED,
             title,
             summary,
             body,
             tokenize = 'unicode61'
         );",
-    ),
-    (
-        5,
-        "create_tags",
-        "CREATE TABLE IF NOT EXISTS tags (
+    },
+    Migration {
+        version: 5,
+        name: "create_tags",
+        sql: "CREATE TABLE IF NOT EXISTS tags (
             id              TEXT PRIMARY KEY,
             name            TEXT NOT NULL UNIQUE,
             normalized_name TEXT NOT NULL UNIQUE,
             created_at      TEXT NOT NULL,
             updated_at      TEXT NOT NULL
         );",
-    ),
-    (
-        6,
-        "create_note_tags",
-        "CREATE TABLE IF NOT EXISTS note_tags (
+    },
+    Migration {
+        version: 6,
+        name: "create_note_tags",
+        sql: "CREATE TABLE IF NOT EXISTS note_tags (
             note_id TEXT NOT NULL,
             tag_id  TEXT NOT NULL,
             source  TEXT NOT NULL,
@@ -117,11 +144,11 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         );
         CREATE INDEX IF NOT EXISTS idx_note_tags_note ON note_tags(note_id);
         CREATE INDEX IF NOT EXISTS idx_note_tags_tag  ON note_tags(tag_id);",
-    ),
-    (
-        7,
-        "create_links",
-        "CREATE TABLE IF NOT EXISTS links (
+    },
+    Migration {
+        version: 7,
+        name: "create_links",
+        sql: "CREATE TABLE IF NOT EXISTS links (
             id             TEXT PRIMARY KEY,
             source_note_id TEXT NOT NULL,
             target_note_id TEXT,
@@ -140,11 +167,11 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         CREATE INDEX IF NOT EXISTS idx_links_source   ON links(source_note_id);
         CREATE INDEX IF NOT EXISTS idx_links_target   ON links(target_note_id);
         CREATE INDEX IF NOT EXISTS idx_links_resolved ON links(resolved);",
-    ),
-    (
-        8,
-        "create_file_events",
-        "CREATE TABLE IF NOT EXISTS file_events (
+    },
+    Migration {
+        version: 8,
+        name: "create_file_events",
+        sql: "CREATE TABLE IF NOT EXISTS file_events (
             id           TEXT PRIMARY KEY,
             event_type   TEXT NOT NULL,
             path         TEXT NOT NULL,
@@ -155,13 +182,47 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
             created_at   TEXT NOT NULL,
             processed_at TEXT
         );",
-    ),
+    },
 ];
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn test_migration_checksum_is_stable() {
+        let migration = Migration {
+            version: 1,
+            name: "create_example",
+            sql: "CREATE TABLE example (id TEXT PRIMARY KEY);",
+        };
+
+        assert_eq!(migration_checksum(&migration), migration_checksum(&migration));
+        assert_eq!(migration_checksum(&migration).len(), 64);
+    }
+
+    #[test]
+    fn test_migration_checksum_changes_when_name_or_sql_changes() {
+        let base = Migration {
+            version: 1,
+            name: "create_example",
+            sql: "CREATE TABLE example (id TEXT PRIMARY KEY);",
+        };
+        let renamed = Migration {
+            version: 1,
+            name: "create_example_renamed",
+            sql: "CREATE TABLE example (id TEXT PRIMARY KEY);",
+        };
+        let changed_sql = Migration {
+            version: 1,
+            name: "create_example",
+            sql: "CREATE TABLE example (id TEXT PRIMARY KEY, title TEXT);",
+        };
+
+        assert_ne!(migration_checksum(&base), migration_checksum(&renamed));
+        assert_ne!(migration_checksum(&base), migration_checksum(&changed_sql));
+    }
 
     #[test]
     fn test_open_and_migrate_creates_tables() {
