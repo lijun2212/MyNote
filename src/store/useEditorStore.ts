@@ -29,14 +29,17 @@ export const useEditorStore = create<EditorState>((set) => ({
   showPreview: true,
 
   setCurrentNote: (note) =>
-    set({ currentNote: note, isDirty: false, saveStatus: "saved", saveError: null }),
+    set({ currentNote: note, isDirty: false, isSaving: false, saveStatus: "saved", saveError: null }),
   setContent: (content) => set({ content }),
   markDirty: () => set({ isDirty: true, saveStatus: "unsaved" }),
   markSaved: (note) =>
-    set({ currentNote: note, isDirty: false, saveStatus: "saved", saveError: null }),
+    set({ currentNote: note, isDirty: false, isSaving: false, saveStatus: "saved", saveError: null }),
   setSaving: (saving) =>
-    set({ isSaving: saving, saveStatus: saving ? "saving" : "saved" }),
+    set((s) => ({
+      isSaving: saving,
+      saveStatus: saving ? "saving" : s.saveError ? "error" : s.isDirty ? "unsaved" : "saved",
+    })),
   setSaveError: (error) =>
-    set({ saveError: error, saveStatus: "error" }),
+    set({ saveError: error, isSaving: false, saveStatus: "error" }),
   togglePreview: () => set((s) => ({ showPreview: !s.showPreview })),
 }));
