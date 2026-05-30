@@ -3,13 +3,53 @@ import type { SearchResult } from "../types";
 import { useSearch } from "../hooks/useSearch";
 import { useOpenNote } from "../hooks/useOpenNote";
 
-function safeSnippet(raw: string): string {
-  return raw
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/&lt;mark&gt;/g, '<mark>')
-    .replace(/&lt;\/mark&gt;/g, '</mark>');
+type SnippetPart =
+  | { kind: "text"; text: string }
+  | { kind: "mark"; text: string };
+
+function parseSnippet(raw: string): SnippetPart[] {
+  const parts: SnippetPart[] = [];
+  let index = 0;
+
+  while (index < raw.length) {
+    const markStart = raw.indexOf("<mark>", index);
+    if (markStart === -1) {
+      parts.push({ kind: "text", text: raw.slice(index) });
+      break;
+    }
+
+    if (markStart > index) {
+      parts.push({ kind: "text", text: raw.slice(index, markStart) });
+    }
+
+    const contentStart = markStart + "<mark>".length;
+    const markEnd = raw.indexOf("</mark>", contentStart);
+    if (markEnd === -1) {
+      parts.push({ kind: "text", text: raw.slice(markStart) });
+      break;
+    }
+
+    const nestedMarkStart = raw.indexOf("<mark>", contentStart);
+    if (nestedMarkStart !== -1 && nestedMarkStart < markEnd) {
+      parts.push({ kind: "text", text: raw.slice(markStart, markEnd + "</mark>".length) });
+      index = markEnd + "</mark>".length;
+      continue;
+    }
+
+    parts.push({ kind: "mark", text: raw.slice(contentStart, markEnd) });
+    index = markEnd + "</mark>".length;
+  }
+
+  return parts;
+}
+
+function renderSnippet(raw: string) {
+  return parseSnippet(raw).map((part, index) => {
+    if (part.kind === "mark") {
+      return <mark key={index}>{part.text}</mark>;
+    }
+    return <span key={index}>{part.text}</span>;
+  });
 }
 
 interface SearchOverlayProps {
@@ -79,10 +119,7 @@ export function SearchOverlay({ onClose }: SearchOverlayProps) {
               onMouseEnter={() => setSelectedIndex(i)}
             >
               <div style={styles.resultTitle}>{r.title}</div>
-              <div
-                style={styles.resultSnippet}
-                dangerouslySetInnerHTML={{ __html: safeSnippet(r.snippet) }}
-              />
+              <div style={styles.resultSnippet}>{renderSnippet(r.snippet)}</div>
               <div style={styles.resultPath}>{r.path}</div>
             </div>
           ))}
