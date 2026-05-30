@@ -43,19 +43,16 @@ fn search_notes_in_conn(conn: &Connection, query: &str) -> Result<Vec<SearchResu
              JOIN notes n ON note_fts.note_id = n.id AND n.deleted_at IS NULL
              WHERE note_fts MATCH ?1
          ),
-         like_matches AS (
+         metadata_matches AS (
              SELECT n.id, n.title, n.path,
                     n.title AS snippet,
                     0.0 AS rank,
                     1 AS source_order
              FROM notes n
-             LEFT JOIN note_fts ON note_fts.note_id = n.id
              WHERE n.deleted_at IS NULL
                AND (
                    n.title LIKE ?2 ESCAPE '\\'
                    OR n.path LIKE ?2 ESCAPE '\\'
-                   OR COALESCE(note_fts.summary, '') LIKE ?2 ESCAPE '\\'
-                   OR COALESCE(note_fts.body, '') LIKE ?2 ESCAPE '\\'
                )
                AND n.id NOT IN (SELECT id FROM fts_matches)
          )
@@ -63,7 +60,7 @@ fn search_notes_in_conn(conn: &Connection, query: &str) -> Result<Vec<SearchResu
          FROM (
              SELECT * FROM fts_matches
              UNION ALL
-             SELECT * FROM like_matches
+             SELECT * FROM metadata_matches
          )
          ORDER BY source_order, rank
          LIMIT 20",
@@ -164,5 +161,57 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].note_id, "n1");
+    }
+
+    #[test]
+    fn search_notes_matches_body_fts_prefix() {
+        let conn = setup_search_db();
+        conn.execute(
+            "INSERT INTO notes (id, path, title, summary, deleted_at) VALUES (?1, ?2, ?3, NULL, NULL)",
+            rusqlite::params!["n1", "notes/neutral.md", "Neutral Note"],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO note_fts (note_id, title, summary, body) VALUES (?1, ?2, '', ?3)",
+            rusqlite::params!["n1", "Neutral Note", "sqlite performance tuning"],
+        ).unwrap();
+
+        let results = search_notes_in_conn(&conn, "perform").unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].note_id, "n1");
+    }
+
+    #[test]
+    fn search_notes_does_not_scan_body_substrings_in_fallback() {
+        let conn = setup_search_db();
+        conn.execute(
+            "INSERT INTO notes (id, path, title, summary, deleted_at) VALUES (?1, ?2, ?3, NULL, NULL)",
+            rusqlite::params!["n1", "notes/neutral.md", "Neutral Note"],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO note_fts (note_id, title, summary, body) VALUES (?1, ?2, '', ?3)",
+            rusqlite::params!["n1", "Neutral Note", "bodyonlysubstring"],
+        ).unwrap();
+
+        let results = search_notes_in_conn(&conn, "onlysub").unwrap();
+
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn search_notes_does_not_scan_summary_substrings_in_fallback() {
+        let conn = setup_search_db();
+        conn.execute(
+            "INSERT INTO notes (id, path, title, summary, deleted_at) VALUES (?1, ?2, ?3, NULL, NULL)",
+            rusqlite::params!["n1", "notes/neutral.md", "Neutral Note"],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO note_fts (note_id, title, summary, body) VALUES (?1, ?2, ?3, '')",
+            rusqlite::params!["n1", "Neutral Note", "summarycontainsneedle"],
+        ).unwrap();
+
+        let results = search_notes_in_conn(&conn, "needle").unwrap();
+
+        assert!(results.is_empty());
     }
 }
