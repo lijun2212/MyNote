@@ -32,20 +32,122 @@ fn migration_error(message: impl Into<String>) -> AppError {
 
 /// 打开 SQLite 数据库并执行所有 schema 迁移
 pub fn open_and_migrate(db_path: &Path) -> AppResult<Connection> {
-    let conn = Connection::open(db_path).map_err(|e| AppError::Database(e.to_string()))?;
+    let mut conn = Connection::open(db_path).map_err(|e| AppError::Database(e.to_string()))?;
     conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
-    run_migrations(&conn)?;
+    run_migrations(&mut conn, MIGRATIONS)?;
     Ok(conn)
 }
 
-fn run_migrations(conn: &Connection) -> AppResult<()> {
+fn ensure_schema_migrations_table(conn: &Connection) -> AppResult<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS schema_migrations (
             version    INTEGER PRIMARY KEY,
             name       TEXT    NOT NULL,
+            checksum   TEXT    NOT NULL DEFAULT '',
+            status     TEXT    NOT NULL DEFAULT 'applied',
             applied_at TEXT    NOT NULL
         );",
     )?;
+    Ok(())
+}
+
+fn has_schema_migration_column(conn: &Connection, column_name: &str) -> AppResult<bool> {
+    let mut stmt = conn.prepare("PRAGMA table_info(schema_migrations)")?;
+    let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+
+    for column in columns {
+        if column? == column_name {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+fn ensure_schema_migrations_columns(conn: &Connection) -> AppResult<()> {
+    if !has_schema_migration_column(conn, "checksum")? {
+        conn.execute_batch(
+            "ALTER TABLE schema_migrations ADD COLUMN checksum TEXT NOT NULL DEFAULT '';",
+        )?;
+    }
+
+    if !has_schema_migration_column(conn, "status")? {
+        conn.execute_batch(
+            "ALTER TABLE schema_migrations ADD COLUMN status TEXT NOT NULL DEFAULT 'applied';",
+        )?;
+    }
+
+    Ok(())
+}
+
+fn load_applied_migrations(conn: &Connection) -> AppResult<Vec<AppliedMigration>> {
+    let mut stmt = conn.prepare(
+        "SELECT version, name, checksum, status FROM schema_migrations ORDER BY version",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(AppliedMigration {
+            version: row.get(0)?,
+            name: row.get(1)?,
+            checksum: row.get(2)?,
+            status: row.get(3)?,
+        })
+    })?;
+
+    let mut applied = Vec::new();
+    for row in rows {
+        applied.push(row?);
+    }
+
+    Ok(applied)
+}
+
+fn migration_by_version(migrations: &[Migration], version: i64) -> Option<&Migration> {
+    migrations
+        .iter()
+        .find(|migration| migration.version == version)
+}
+
+fn backfill_legacy_migration_checksums(
+    conn: &Connection,
+    migrations: &[Migration],
+) -> AppResult<()> {
+    for applied in load_applied_migrations(conn)? {
+        let migration = migration_by_version(migrations, applied.version).ok_or_else(|| {
+            migration_error(format!(
+                "Migration {} exists in database but not in current code",
+                applied.version
+            ))
+        })?;
+
+        if applied.name != migration.name {
+            return Err(migration_error(format!(
+                "Migration {} name mismatch: database has '{}', code has '{}'",
+                applied.version, applied.name, migration.name
+            )));
+        }
+
+        if applied.status != "applied" {
+            return Err(migration_error(format!(
+                "Migration {} has invalid status '{}'",
+                applied.version, applied.status
+            )));
+        }
+
+        if applied.checksum.is_empty() {
+            conn.execute(
+                "UPDATE schema_migrations SET checksum = ?1 WHERE version = ?2",
+                params![migration_checksum(migration), applied.version],
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+fn run_migrations(conn: &mut Connection, migrations: &[Migration]) -> AppResult<()> {
+    ensure_schema_migrations_table(conn)?;
+    ensure_schema_migrations_columns(conn)?;
+    backfill_legacy_migration_checksums(conn, migrations)?;
 
     let applied: i64 = conn.query_row(
         "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
@@ -53,12 +155,12 @@ fn run_migrations(conn: &Connection) -> AppResult<()> {
         |r| r.get(0),
     )?;
 
-    for migration in MIGRATIONS {
+    for migration in migrations {
         if migration.version > applied {
             conn.execute_batch(migration.sql)?;
             conn.execute(
-                "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?1, ?2, datetime('now'))",
-                params![migration.version, migration.name],
+                "INSERT INTO schema_migrations (version, name, checksum, status, applied_at) VALUES (?1, ?2, ?3, 'applied', datetime('now'))",
+                params![migration.version, migration.name, migration_checksum(migration)],
             )?;
         }
     }
@@ -190,6 +292,26 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    fn migration_rows(conn: &Connection) -> Vec<(i64, String, String, String)> {
+        let mut stmt = conn
+            .prepare("SELECT version, name, checksum, status FROM schema_migrations ORDER BY version")
+            .unwrap();
+        stmt.query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+    }
+
+    fn schema_migration_columns(conn: &Connection) -> Vec<String> {
+        let mut stmt = conn.prepare("PRAGMA table_info(schema_migrations)").unwrap();
+        stmt.query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    }
+
     #[test]
     fn test_migration_checksum_is_stable() {
         let migration = Migration {
@@ -239,7 +361,53 @@ mod tests {
             .unwrap();
         assert_eq!(count, 8);
 
+        let rows = migration_rows(&conn);
+        assert_eq!(rows.len(), 8);
+        assert!(rows.iter().all(|(_, _, checksum, _)| checksum.len() == 64));
+        assert!(rows.iter().all(|(_, _, _, status)| status == "applied"));
+
         conn.execute_batch("INSERT INTO notes (id,path,title,content_hash,word_count,front_matter_json,created_at,updated_at,indexed_at) VALUES ('x','a.md','T','h',0,'{}','2024','2024','2024')").unwrap();
+    }
+
+    #[test]
+    fn test_legacy_migrations_backfill_checksum_and_status() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("legacy.sqlite");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE schema_migrations (
+                version    INTEGER PRIMARY KEY,
+                name       TEXT    NOT NULL,
+                applied_at TEXT    NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS knowledge_base_meta (
+                id         TEXT PRIMARY KEY,
+                name       TEXT NOT NULL,
+                root_path  TEXT NOT NULL,
+                schema_version INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO schema_migrations (version, name, applied_at) VALUES (1, 'create_knowledge_base_meta', datetime('now'))",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let conn = open_and_migrate(&db_path).unwrap();
+        let columns = schema_migration_columns(&conn);
+        assert!(columns.contains(&"checksum".to_string()));
+        assert!(columns.contains(&"status".to_string()));
+
+        let rows = migration_rows(&conn);
+        assert_eq!(rows.len(), 8);
+        assert!(rows.iter().all(|(_, _, checksum, _)| checksum.len() == 64));
+        assert!(rows.iter().all(|(_, _, _, status)| status == "applied"));
+        assert_eq!(rows[0].0, 1);
+        assert_eq!(rows[0].1, "create_knowledge_base_meta");
     }
 
     #[test]
