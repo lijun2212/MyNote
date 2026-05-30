@@ -21,7 +21,7 @@ interface Props {
 
 export function MarkdownPreview({ content }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const { openNote } = useOpenNote();
+  const { openNote, beginOpenNote, isOpenNoteRequestCurrent } = useOpenNote();
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -46,19 +46,21 @@ export function MarkdownPreview({ content }: Props) {
       }
       const title = wikiLink.dataset.title;
       if (!title) return;
+      const requestId = beginOpenNote();
       try {
         const note = await api.getNoteByTitle(title);
-        if (note) {
-          await openNote(note.path);
+        if (note && isOpenNoteRequestCurrent(requestId)) {
+          await openNote(note.path, requestId);
         }
       } catch (e) {
+        if (!isOpenNoteRequestCurrent(requestId)) return;
         console.error("Failed to open wiki link:", e);
       }
     };
 
     container.addEventListener("click", handleClick);
     return () => container.removeEventListener("click", handleClick);
-  }, [openNote]);
+  }, [openNote, beginOpenNote, isOpenNoteRequestCurrent]);
 
   return (
     <div style={{

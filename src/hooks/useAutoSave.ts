@@ -24,19 +24,21 @@ export function useAutoSave() {
       setSaving(true);
       try {
         const result = await api.saveNote(noteId, contentToSave, expectedHash);
-        const stillCurrent = () => {
-          const state = useEditorStore.getState();
-          return requestId === saveRequestIdRef.current
-            && state.currentNote?.id === noteId
-            && state.content === contentToSave;
-        };
+        const state = useEditorStore.getState();
+        const stillSameNote = requestId === saveRequestIdRef.current
+          && state.currentNote?.id === noteId;
 
-        if (!stillCurrent()) return;
+        if (!stillSameNote) return;
+
+        if (!result.conflict) {
+          lastSavedHashRef.current = result.note.content_hash;
+        }
+
+        if (state.content !== contentToSave) return;
 
         if (result.conflict) {
           setSaveError("检测到外部修改，已将当前内容保存为冲突副本");
         } else {
-          lastSavedHashRef.current = result.note.content_hash;
           markSaved(result.note);
         }
       } catch (e) {

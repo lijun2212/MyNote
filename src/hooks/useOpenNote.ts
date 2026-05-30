@@ -11,9 +11,20 @@ export function useOpenNote() {
   const setCurrentNote = useEditorStore((s) => s.setCurrentNote);
   const setContent = useEditorStore((s) => s.setContent);
 
-  const openNote = useCallback(async (path: string) => {
+  const beginOpenNote = useCallback(() => {
     const requestId = ++nextOpenRequestId;
     latestOpenRequestId = requestId;
+    return requestId;
+  }, []);
+
+  const isOpenNoteRequestCurrent = useCallback((requestId: number) => (
+    requestId === latestOpenRequestId
+  ), []);
+
+  const openNote = useCallback(async (path: string, existingRequestId?: number) => {
+    const requestId = existingRequestId ?? beginOpenNote();
+    if (requestId !== latestOpenRequestId) return;
+
     setSelectedNodePath(path);
 
     try {
@@ -25,7 +36,7 @@ export function useOpenNote() {
       if (requestId !== latestOpenRequestId) return;
       console.error("Failed to open note:", e);
     }
-  }, [setSelectedNodePath, setCurrentNote, setContent]);
+  }, [beginOpenNote, setSelectedNodePath, setCurrentNote, setContent]);
 
-  return { openNote };
+  return { openNote, beginOpenNote, isOpenNoteRequestCurrent };
 }
