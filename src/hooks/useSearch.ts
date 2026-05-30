@@ -14,6 +14,10 @@ export function useSearch(query: string) {
   useEffect(() => {
     kbRef.current = kb;
     requestIdRef.current += 1;
+    if (!kb) {
+      setResults([]);
+      setIsLoading(false);
+    }
   }, [kb]);
 
   const doSearch = useCallback(async (q: string) => {
@@ -43,14 +47,17 @@ export function useSearch(query: string) {
   }, []);
 
   useEffect(() => {
+    requestIdRef.current += 1;
+
     if (timerRef.current) clearTimeout(timerRef.current);
 
     if (!query.trim()) {
-      requestIdRef.current += 1;
       setResults([]);
       setIsLoading(false);
       return;
     }
+
+    setIsLoading(true);
 
     timerRef.current = setTimeout(() => {
       doSearch(query);
@@ -59,7 +66,7 @@ export function useSearch(query: string) {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [query, doSearch]);
+  }, [query, kb, doSearch]);
 
   return { results, isLoading };
 }
