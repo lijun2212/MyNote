@@ -15,6 +15,38 @@ function processWikiLinks(html: string): string {
   });
 }
 
+function stripPreviewFrontMatter(content: string): string {
+  const normalizedFirstLineEnd = content.indexOf("\n");
+  const firstLine = normalizedFirstLineEnd === -1 ? content : content.slice(0, normalizedFirstLineEnd);
+
+  if (firstLine.replace(/\r$/, "") !== "---") {
+    return content;
+  }
+
+  let lineStart = normalizedFirstLineEnd + 1;
+  if (normalizedFirstLineEnd === -1) {
+    return content;
+  }
+
+  while (lineStart < content.length) {
+    const nextLineEnd = content.indexOf("\n", lineStart);
+    const lineEnd = nextLineEnd === -1 ? content.length : nextLineEnd;
+    const line = content.slice(lineStart, lineEnd).replace(/\r$/, "");
+
+    if (line === "---") {
+      const bodyStart = nextLineEnd === -1 ? content.length : nextLineEnd + 1;
+      return content.slice(bodyStart).replace(/^\r?\n+/, "");
+    }
+
+    if (nextLineEnd === -1) {
+      break;
+    }
+    lineStart = nextLineEnd + 1;
+  }
+
+  return content;
+}
+
 interface Props {
   content: string;
 }
@@ -25,7 +57,8 @@ export function MarkdownPreview({ content }: Props) {
 
   useEffect(() => {
     if (!containerRef.current) return;
-    const rawHtml = md.render(content);
+    const previewContent = stripPreviewFrontMatter(content);
+    const rawHtml = md.render(previewContent);
     containerRef.current.innerHTML = processWikiLinks(rawHtml);
   }, [content]);
 
