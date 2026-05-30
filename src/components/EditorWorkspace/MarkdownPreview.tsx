@@ -1,10 +1,26 @@
 import { useEffect, useRef } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import DOMPurify from "dompurify";
 import MarkdownIt from "markdown-it";
 import { api } from "../../api/commands";
 import { useOpenNote } from "../../hooks/useOpenNote";
 
 const md = new MarkdownIt({ html: false, linkify: true, typographer: true });
+
+const ALLOWED_MARKDOWN_TAGS = [
+  "a", "blockquote", "br", "code", "del", "em", "hr", "h1", "h2", "h3", "h4", "h5", "h6",
+  "li", "ol", "p", "pre", "span", "strong", "table", "tbody", "td", "th", "thead", "tr", "ul",
+];
+
+const ALLOWED_MARKDOWN_ATTR = ["href", "title", "class", "data-title"];
+
+function sanitizePreviewHtml(html: string): string {
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: ALLOWED_MARKDOWN_TAGS,
+    ALLOWED_ATTR: ALLOWED_MARKDOWN_ATTR,
+    ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i,
+  });
+}
 
 function processWikiLinks(html: string): string {
   // Replace [[Title]] patterns in text nodes by encoding them as spans
@@ -59,7 +75,8 @@ export function MarkdownPreview({ content }: Props) {
     if (!containerRef.current) return;
     const previewContent = stripPreviewFrontMatter(content);
     const rawHtml = md.render(previewContent);
-    containerRef.current.innerHTML = processWikiLinks(rawHtml);
+    const processedHtml = processWikiLinks(rawHtml);
+    containerRef.current.innerHTML = sanitizePreviewHtml(processedHtml);
   }, [content]);
 
   useEffect(() => {
