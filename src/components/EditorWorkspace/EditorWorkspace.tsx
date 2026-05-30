@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useEditorStore } from "../../store/useEditorStore";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { MarkdownPreview } from "./MarkdownPreview";
@@ -8,6 +8,7 @@ import { useEditorSplitResize } from "../../hooks/useEditorSplitResize";
 export function EditorWorkspace() {
   const { currentNote, content, setContent, markDirty, showPreview, togglePreview } = useEditorStore();
   useAutoSave();
+  const [isSeparatorHovered, setIsSeparatorHovered] = useState(false);
 
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const {
@@ -80,6 +81,8 @@ export function EditorWorkspace() {
             aria-valuemax={maxRatio}
             aria-valuenow={Math.round(editorRatio)}
             tabIndex={0}
+            onPointerEnter={() => setIsSeparatorHovered(true)}
+            onPointerLeave={() => setIsSeparatorHovered(false)}
             onPointerDown={startResize}
             onPointerMove={resize}
             onPointerUp={stopResize}
@@ -88,7 +91,7 @@ export function EditorWorkspace() {
               width: 6,
               flexShrink: 0,
               cursor: "col-resize",
-              background: isResizing ? "#d9ddff" : "#eef0f5",
+              background: isResizing || isSeparatorHovered ? "#d9ddff" : "#eef0f5",
               borderLeft: "1px solid #e0e2e7",
               borderRight: "1px solid #e0e2e7",
             }}
