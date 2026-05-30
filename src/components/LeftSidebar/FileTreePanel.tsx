@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useAppStore } from "../../store/useAppStore";
-import { useEditorStore } from "../../store/useEditorStore";
 import { useKnowledgeBase } from "../../hooks/useKnowledgeBase";
+import { useOpenNote } from "../../hooks/useOpenNote";
 import { FileTreeNode } from "./FileTreeNode";
 import { ImportDialog } from "./ImportDialog";
 import { api } from "../../api/commands";
@@ -13,11 +13,10 @@ export function FileTreePanel() {
   const tree = useAppStore((s) => s.tree);
   const selectedNodePath = useAppStore((s) => s.selectedNodePath);
   const selectedTagIds = useAppStore((s) => s.selectedTagIds);
-  const setSelectedNodePath = useAppStore((s) => s.setSelectedNodePath);
   const setTree = useAppStore((s) => s.setTree);
   const refreshTree = useAppStore((s) => s.refreshTree);
-  const { setCurrentNote, setContent } = useEditorStore();
   const { createNote } = useKnowledgeBase();
+  const { openNote } = useOpenNote();
   const [inputVisible, setInputVisible] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [importFiles, setImportFiles] = useState<string[] | null>(null);
@@ -77,14 +76,7 @@ export function FileTreePanel() {
 
   async function handleSelect(node: NoteTreeNode) {
     if (node.is_dir) return;
-    setSelectedNodePath(node.path);
-    try {
-      const detail = await api.getNoteByPath(node.path);
-      setCurrentNote(detail.note);
-      setContent(detail.content);
-    } catch (e) {
-      console.error("Failed to open note:", e);
-    }
+    await openNote(node.path);
   }
 
   function handleNewNote() {
@@ -185,10 +177,7 @@ export function FileTreePanel() {
             setImportFiles(null);
             await refreshTree();
             if (importedNote) {
-              setSelectedNodePath(importedNote.path);
-              const detail = await api.getNoteByPath(importedNote.path);
-              setCurrentNote(detail.note);
-              setContent(detail.content);
+              await openNote(importedNote.path);
             }
           }}
         />
