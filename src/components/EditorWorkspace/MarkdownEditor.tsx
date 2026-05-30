@@ -58,6 +58,6 @@ export function MarkdownEditor({ initialContent, onChange }: Props) {
   }, [initialContent]);
 
   return (
-    <div ref={editorRef} style={{ flex: 1, minWidth: 0, height: "100%", overflow: "auto" }} />
+    <div ref={editorRef} style={{ width: "100%", height: "100%", overflow: "auto" }} />
   );
 }
