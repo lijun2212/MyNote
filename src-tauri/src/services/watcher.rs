@@ -1,4 +1,4 @@
-use crate::services::index::reindex_from_path;
+use crate::services::index::{mark_note_deleted_by_path, reindex_from_path};
 use crate::state::AppState;
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashMap;
@@ -31,16 +31,16 @@ pub fn start_watching(root: PathBuf, app_handle: AppHandle) -> Result<WatcherHan
         loop {
             match rx.recv_timeout(Duration::from_millis(100)) {
                 Ok(Ok(event)) => {
-                    let is_create_or_modify = matches!(
+                    let should_process = matches!(
                         event.kind,
-                        EventKind::Create(_) | EventKind::Modify(_)
+                        EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
                     );
                     let paths: Vec<PathBuf> = event
                         .paths
                         .into_iter()
                         .filter(|p| p.extension().map(|e| e == "md").unwrap_or(false))
                         .collect();
-                    if paths.is_empty() || !is_create_or_modify {
+                    if paths.is_empty() || !should_process {
                         continue;
                     }
                     let mut map = debounce_clone.lock().unwrap();
@@ -74,11 +74,16 @@ pub fn start_watching(root: PathBuf, app_handle: AppHandle) -> Result<WatcherHan
                     let state = app_clone.state::<AppState>();
                     let db_guard = state.db.lock().unwrap();
                     if let Some(conn) = db_guard.as_ref() {
-                        match reindex_from_path(conn, &root_clone, &rel_str) {
+                        let result = if abs_path.exists() {
+                            reindex_from_path(conn, &root_clone, &rel_str).map(|_| ())
+                        } else {
+                            mark_note_deleted_by_path(conn, &rel_str)
+                        };
+                        match result {
                             Ok(_) => {
                                 let _ = app_clone.emit("note:index_updated", &rel_str);
                             }
-                            Err(e) => eprintln!("[watcher] index error {}: {:?}", rel_str, e),
+                            Err(e) => eprintln!("[watcher] sync error {}: {:?}", rel_str, e),
                         }
                     }
                 }

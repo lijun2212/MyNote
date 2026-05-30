@@ -1,8 +1,9 @@
 use crate::domain::note::Note;
 use crate::error::{AppError, AppResult};
+use crate::infrastructure::fs::{normalize_kb_relative_path, resolve_kb_path};
 use crate::infrastructure::hash::sha256_str;
 use crate::infrastructure::markdown::{extract_inline_tags, extract_links, parse_note};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::path::{Path, PathBuf};
 use ulid::Ulid;
 
@@ -157,8 +158,126 @@ fn upsert_tag_and_link(
 
 /// 从文件路径重新索引（供 watcher 调用）
 pub fn reindex_from_path(conn: &Connection, root: &PathBuf, rel_path: &str) -> AppResult<Note> {
-    let abs = root.join(rel_path);
+    let rel_path = normalize_kb_relative_path(rel_path)?;
+    let abs = resolve_kb_path(root, &rel_path)?;
     let content = std::fs::read_to_string(&abs)
         .map_err(|e| AppError::Io(e.to_string()))?;
-    index_note_full(conn, root, rel_path, &content)
+    index_note_full(conn, root, &rel_path, &content)
+}
+
+/// 软删除一篇笔记并清理派生索引（供 watcher 处理外部删除/重命名旧路径）。
+pub fn mark_note_deleted_by_path(conn: &Connection, rel_path: &str) -> AppResult<()> {
+    let rel_path = normalize_kb_relative_path(rel_path)?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let tx = conn.unchecked_transaction()?;
+
+    let note_id: Option<String> = tx
+        .query_row(
+            "SELECT id FROM notes WHERE path = ?1 AND deleted_at IS NULL",
+            params![rel_path],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    let Some(note_id) = note_id else {
+        tx.commit()?;
+        return Ok(());
+    };
+
+    tx.execute(
+        "UPDATE notes SET deleted_at = ?1, indexed_at = ?1 WHERE id = ?2",
+        params![now, note_id],
+    )?;
+    tx.execute("DELETE FROM note_fts WHERE note_id = ?1", params![note_id])?;
+    tx.execute("DELETE FROM note_tags WHERE note_id = ?1", params![note_id])?;
+    tx.execute("DELETE FROM links WHERE source_note_id = ?1", params![note_id])?;
+    tx.execute(
+        "UPDATE links
+         SET target_note_id = NULL, resolved = 0, updated_at = ?1
+         WHERE target_note_id = ?2",
+        params![now, note_id],
+    )?;
+
+    tx.commit()?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mark_note_deleted_by_path;
+    use crate::infrastructure::db::open_and_migrate;
+    use tempfile::TempDir;
+
+    #[test]
+    fn mark_note_deleted_clears_derived_indexes() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("test.sqlite");
+        let conn = open_and_migrate(&db_path).unwrap();
+
+        conn.execute(
+            "INSERT INTO notes (id,path,title,content_hash,word_count,front_matter_json,created_at,updated_at,indexed_at)
+             VALUES ('target','notes/target.md','Target','h',0,'{}','now','now','now')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO notes (id,path,title,content_hash,word_count,front_matter_json,created_at,updated_at,indexed_at)
+             VALUES ('source','notes/source.md','Source','h',0,'{}','now','now','now')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO note_fts (note_id, title, summary, body) VALUES ('target','Target','','body')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO tags (id,name,normalized_name,created_at,updated_at) VALUES ('tag','tag','tag','now','now')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO note_tags (note_id, tag_id, source) VALUES ('target','tag','inline')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO links (id,source_note_id,target_note_id,target_raw,link_type,resolved,created_at,updated_at)
+             VALUES ('incoming','source','target','Target','wiki',1,'now','now')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO links (id,source_note_id,target_raw,link_type,resolved,created_at,updated_at)
+             VALUES ('outgoing','target','Other','wiki',0,'now','now')",
+            [],
+        ).unwrap();
+
+        mark_note_deleted_by_path(&conn, "notes/target.md").unwrap();
+
+        let deleted_at: Option<String> = conn
+            .query_row("SELECT deleted_at FROM notes WHERE id = 'target'", [], |row| row.get(0))
+            .unwrap();
+        assert!(deleted_at.is_some());
+
+        let fts_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM note_fts WHERE note_id = 'target'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(fts_count, 0);
+
+        let tag_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM note_tags WHERE note_id = 'target'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(tag_count, 0);
+
+        let outgoing_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM links WHERE source_note_id = 'target'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(outgoing_count, 0);
+
+        let incoming: (Option<String>, i64) = conn
+            .query_row(
+                "SELECT target_note_id, resolved FROM links WHERE id = 'incoming'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(incoming, (None, 0));
+
+        assert!(mark_note_deleted_by_path(&conn, "../outside.md").is_err());
+    }
 }
