@@ -10,7 +10,12 @@ import { api } from "../../api/commands";
 import type { NoteTreeNode } from "../../types";
 
 export function FileTreePanel() {
-  const { tree, selectedNodePath, setSelectedNodePath, refreshTree, setTree, selectedTagIds } = useAppStore();
+  const tree = useAppStore((s) => s.tree);
+  const selectedNodePath = useAppStore((s) => s.selectedNodePath);
+  const selectedTagIds = useAppStore((s) => s.selectedTagIds);
+  const setSelectedNodePath = useAppStore((s) => s.setSelectedNodePath);
+  const setTree = useAppStore((s) => s.setTree);
+  const refreshTree = useAppStore((s) => s.refreshTree);
   const { setCurrentNote, setContent } = useEditorStore();
   const { createNote } = useKnowledgeBase();
   const [inputVisible, setInputVisible] = useState(false);
@@ -176,9 +181,15 @@ export function FileTreePanel() {
           files={importFiles}
           existingDirs={uniqueDirs}
           onClose={() => setImportFiles(null)}
-          onDone={async () => {
+          onDone={async (importedNote) => {
             setImportFiles(null);
             await refreshTree();
+            if (importedNote) {
+              setSelectedNodePath(importedNote.path);
+              const detail = await api.getNoteByPath(importedNote.path);
+              setCurrentNote(detail.note);
+              setContent(detail.content);
+            }
           }}
         />
       )}

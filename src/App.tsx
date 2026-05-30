@@ -1,11 +1,15 @@
 import { AppShell } from "./components/AppShell";
 import { WelcomeScreen } from "./components/WelcomeScreen";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { useAppStore } from "./store/useAppStore";
 import "./styles/global.css";
 
 export default function App() {
-  const { kb } = useAppStore();
+  const kb = useAppStore((s) => s.kb);
 
-  if (!kb) return <WelcomeScreen />;
-  return <AppShell />;
+  return (
+    <ErrorBoundary>
+      {kb ? <AppShell /> : <WelcomeScreen />}
+    </ErrorBoundary>
+  );
 }

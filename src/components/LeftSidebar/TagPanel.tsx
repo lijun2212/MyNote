@@ -5,10 +5,8 @@ import { useAppStore } from "../../store/useAppStore";
 
 export function TagPanel() {
   const [tags, setTags] = useState<Tag[]>([]);
-  const { selectedTagIds, setSelectedTagIds } = useAppStore((s) => ({
-    selectedTagIds: s.selectedTagIds,
-    setSelectedTagIds: s.setSelectedTagIds,
-  }));
+  const selectedTagIds = useAppStore((s) => s.selectedTagIds);
+  const setSelectedTagIds = useAppStore((s) => s.setSelectedTagIds);
   const kb = useAppStore((s) => s.kb);
 
   useEffect(() => {

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import MarkdownIt from "markdown-it";
 import { api } from "../../api/commands";
 import { useEditorStore } from "../../store/useEditorStore";
@@ -34,7 +35,14 @@ export function MarkdownPreview({ content }: Props) {
     const handleClick = async (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       const wikiLink = target.closest(".wiki-link") as HTMLElement | null;
-      if (!wikiLink) return;
+      if (!wikiLink) {
+        const anchor = target.closest("a") as HTMLAnchorElement | null;
+        if (anchor?.href && /^https?:\/\//.test(anchor.href)) {
+          e.preventDefault();
+          await openUrl(anchor.href);
+        }
+        return;
+      }
       const title = wikiLink.dataset.title;
       if (!title) return;
       try {
@@ -44,8 +52,8 @@ export function MarkdownPreview({ content }: Props) {
           useEditorStore.getState().setCurrentNote(detail.note);
           useEditorStore.getState().setContent(detail.content);
         }
-      } catch {
-        // ignore
+      } catch (e) {
+        console.error("Failed to open wiki link:", e);
       }
     };
 

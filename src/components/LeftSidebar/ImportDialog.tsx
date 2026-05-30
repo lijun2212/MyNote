@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { api } from "../../api/commands";
+import type { Note } from "../../types";
 
 interface Props {
   files: string[];
   existingDirs: string[];
   onClose: () => void;
-  onDone: () => void;
+  onDone: (lastImported?: Note) => void;
 }
 
 export function ImportDialog({ files, existingDirs, onClose, onDone }: Props) {
@@ -21,9 +22,10 @@ export function ImportDialog({ files, existingDirs, onClose, onDone }: Props) {
     setImporting(true);
     setErrors([]);
     const errs: string[] = [];
+    let lastImported: Note | undefined;
     for (const f of files) {
       try {
-        await api.importNote(f, finalDir);
+        lastImported = await api.importNote(f, finalDir);
       } catch (e) {
         errs.push(`${f.split("/").pop()}: ${e}`);
       }
@@ -32,7 +34,7 @@ export function ImportDialog({ files, existingDirs, onClose, onDone }: Props) {
     if (errs.length > 0) {
       setErrors(errs);
     } else {
-      onDone();
+      onDone(lastImported);
     }
   }
 

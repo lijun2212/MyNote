@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { SearchResult } from "../types";
 import { useSearch } from "../hooks/useSearch";
 import { useAppStore } from "../store/useAppStore";
+import { useEditorStore } from "../store/useEditorStore";
 import { api } from "../api/commands";
 
 function safeSnippet(raw: string): string {
@@ -23,6 +24,8 @@ export function SearchOverlay({ onClose }: SearchOverlayProps) {
   const { results, isLoading } = useSearch(query);
   const inputRef = useRef<HTMLInputElement>(null);
   const setSelectedNodePath = useAppStore((s) => s.setSelectedNodePath);
+  const setCurrentNote = useEditorStore((s) => s.setCurrentNote);
+  const setContent = useEditorStore((s) => s.setContent);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -34,8 +37,10 @@ export function SearchOverlay({ onClose }: SearchOverlayProps) {
 
   const openResult = async (result: SearchResult) => {
     try {
-      await api.getNoteByPath(result.path);
+      const detail = await api.getNoteByPath(result.path);
       setSelectedNodePath(result.path);
+      setCurrentNote(detail.note);
+      setContent(detail.content);
     } catch {
       // ignore
     }

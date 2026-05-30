@@ -38,7 +38,19 @@ pub fn split_front_matter(content: &str) -> (Option<&str>, &str) {
 
 /// 解析 Front Matter YAML
 pub fn parse_front_matter(fm_str: &str) -> AppResult<FrontMatter> {
-    serde_yaml::from_str(fm_str).map_err(|e| AppError::Parse(e.to_string()))
+    let mut value: serde_yaml::Value =
+        serde_yaml::from_str(fm_str).map_err(|e| AppError::Parse(e.to_string()))?;
+
+    if let serde_yaml::Value::Mapping(map) = &mut value {
+        let tags_key = serde_yaml::Value::String("tags".to_string());
+        if let Some(tags) = map.get_mut(&tags_key) {
+            if let serde_yaml::Value::String(tag) = tags {
+                *tags = serde_yaml::Value::Sequence(vec![serde_yaml::Value::String(tag.clone())]);
+            }
+        }
+    }
+
+    serde_yaml::from_value(value).map_err(|e| AppError::Parse(e.to_string()))
 }
 
 /// 从正文提取第一个一级标题
@@ -274,12 +286,13 @@ pub fn extract_links(body: &str) -> Vec<RawLink> {
                 continue;
             };
             let href = &paren_rest[..paren_end];
-            // Only relative .md links or relative asset links
-            if href.starts_with("http://") || href.starts_with("https://") {
-                search_from = actual_start + bracket_end + paren_end + 3;
-                continue;
-            }
-            let link_type = if is_image { "asset" } else { "markdown" };
+            let link_type = if href.starts_with("http://") || href.starts_with("https://") {
+                "external"
+            } else if is_image {
+                "asset"
+            } else {
+                "markdown"
+            };
             let (target_raw, anchor) = if let Some(hash) = href.rfind('#') {
                 (href[..hash].to_string(), Some(href[hash + 1..].to_string()))
             } else {
@@ -329,6 +342,13 @@ mod tests {
         let fm = parse_front_matter(fm_str).unwrap();
         assert_eq!(fm.title.unwrap(), "My Note");
         assert_eq!(fm.tags.unwrap(), vec!["rust", "tauri"]);
+    }
+
+    #[test]
+    fn test_parse_front_matter_accepts_single_tag_string() {
+        let fm_str = "title: My Note\ntags: test\n";
+        let fm = parse_front_matter(fm_str).unwrap();
+        assert_eq!(fm.tags.unwrap(), vec!["test"]);
     }
 
     #[test]
@@ -404,6 +424,9 @@ mod tests {
     fn test_extract_links_skips_http() {
         let body = "Visit [google](https://google.com) for more.";
         let links = extract_links(body);
-        assert_eq!(links.len(), 0);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].target_raw, "https://google.com");
+        assert_eq!(links[0].display_text, Some("google".to_string()));
+        assert_eq!(links[0].link_type, "external");
     }
 }

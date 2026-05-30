@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type { NoteLinks } from "../../types";
 import { api } from "../../api/commands";
 import { useEditorStore } from "../../store/useEditorStore";
@@ -28,14 +29,19 @@ export function BacklinksPanel({ noteId }: Props) {
     return () => { isMounted = false; };
   }, [noteId]);
 
-  const handleNoteClick = async (notePath: string) => {
-    if (!notePath) return;
+  const handleLinkClick = async (link: NoteLinks["outgoing"][number]) => {
     try {
-      const detail = await api.getNoteByPath(notePath);
-      useEditorStore.getState().setCurrentNote(detail.note);
-      useEditorStore.getState().setContent(detail.content);
-    } catch {
-      // ignore
+      if (link.link_type === "external") {
+        await openUrl(link.link_url);
+        return;
+      }
+      if (link.note_path) {
+        const detail = await api.getNoteByPath(link.note_path);
+        useEditorStore.getState().setCurrentNote(detail.note);
+        useEditorStore.getState().setContent(detail.content);
+      }
+    } catch (e) {
+      console.error("Failed to open link:", e);
     }
   };
 
@@ -90,7 +96,7 @@ export function BacklinksPanel({ noteId }: Props) {
             <span
               key={link.id}
               style={itemStyle}
-              onClick={() => handleNoteClick(link.note_path)}
+              onClick={() => handleLinkClick(link)}
               title={link.link_url}
             >
               {link.note_title || link.link_text || link.link_url}
@@ -108,7 +114,7 @@ export function BacklinksPanel({ noteId }: Props) {
             <span
               key={link.id}
               style={itemStyle}
-              onClick={() => handleNoteClick(link.note_path)}
+              onClick={() => handleLinkClick(link)}
               title={link.link_url}
             >
               {link.note_title || link.link_text || link.link_url}

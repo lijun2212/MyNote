@@ -16,8 +16,8 @@ pub async fn get_note_links(
         "SELECT l.id, l.target_note_id, n.title, n.path, l.display_text, l.target_raw, l.link_type, l.resolved
          FROM links l
          LEFT JOIN notes n ON n.id = l.target_note_id AND n.deleted_at IS NULL
-         WHERE l.source_note_id = ?1 AND l.resolved = 1
-         ORDER BY n.title",
+         WHERE l.source_note_id = ?1
+         ORDER BY l.resolved DESC, n.title, l.target_raw",
     )?;
     let outgoing = outgoing_stmt
         .query_map([&note_id], |row| {
