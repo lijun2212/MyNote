@@ -1,10 +1,27 @@
 import { useEffect, useRef } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import DOMPurify from "dompurify";
 import MarkdownIt from "markdown-it";
 import { api } from "../../api/commands";
 import { useOpenNote } from "../../hooks/useOpenNote";
 
 const md = new MarkdownIt({ html: false, linkify: true, typographer: true });
+
+const ALLOWED_MARKDOWN_TAGS = [
+  "a", "blockquote", "br", "code", "del", "em", "hr", "h1", "h2", "h3", "h4", "h5", "h6", "img",
+  "li", "ol", "p", "pre", "span", "strong", "table", "tbody", "td", "th", "thead", "tr", "ul",
+];
+
+const ALLOWED_MARKDOWN_ATTR = ["alt", "href", "src", "title", "class", "data-title"];
+const ALLOWED_MARKDOWN_URI = /^(?:(?:https?):|(?:data:image\/(?:gif|png|jpe?g|webp);base64,)|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i;
+
+function sanitizePreviewHtml(html: string): string {
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: ALLOWED_MARKDOWN_TAGS,
+    ALLOWED_ATTR: ALLOWED_MARKDOWN_ATTR,
+    ALLOWED_URI_REGEXP: ALLOWED_MARKDOWN_URI,
+  });
+}
 
 function processWikiLinks(html: string): string {
   // Replace [[Title]] patterns in text nodes by encoding them as spans
@@ -59,7 +76,8 @@ export function MarkdownPreview({ content }: Props) {
     if (!containerRef.current) return;
     const previewContent = stripPreviewFrontMatter(content);
     const rawHtml = md.render(previewContent);
-    containerRef.current.innerHTML = processWikiLinks(rawHtml);
+    const processedHtml = processWikiLinks(rawHtml);
+    containerRef.current.innerHTML = sanitizePreviewHtml(processedHtml);
   }, [content]);
 
   useEffect(() => {
@@ -71,9 +89,12 @@ export function MarkdownPreview({ content }: Props) {
       const wikiLink = target.closest(".wiki-link") as HTMLElement | null;
       if (!wikiLink) {
         const anchor = target.closest("a") as HTMLAnchorElement | null;
-        if (anchor?.href && /^https?:\/\//.test(anchor.href)) {
+        const href = anchor?.getAttribute("href");
+        if (href) {
           e.preventDefault();
-          await openUrl(anchor.href);
+          if (/^https?:\/\//i.test(href)) {
+            await openUrl(href);
+          }
         }
         return;
       }
