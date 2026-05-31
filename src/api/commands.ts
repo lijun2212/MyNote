@@ -5,7 +5,10 @@ import type {
   Note,
   NoteDetail,
   NoteLinks,
+  NoteRelations,
   NoteTreeNode,
+  Relation,
+  RelationType,
   SaveNoteResult,
   SearchResult,
   Tag,
@@ -47,6 +50,25 @@ export const api = {
 
   searchNotes: (query: string, kbId: string) =>
     invoke<SearchResult[]>("search_notes", { query, kbId }),
+
+  listRelations: (noteId: string) =>
+    invoke<NoteRelations>("list_relations", { noteId }),
+
+  createRelation: (
+    sourceNoteId: string,
+    targetNoteId: string,
+    relationType: RelationType,
+    description?: string,
+  ) =>
+    invoke<Relation>("create_relation", {
+      sourceNoteId,
+      targetNoteId,
+      relationType,
+      description,
+    }),
+
+  deleteRelation: (relationId: string) =>
+    invoke<void>("delete_relation", { relationId }),
 };
 
 // suppress unused import warning for LinkItem (used via NoteLinks)

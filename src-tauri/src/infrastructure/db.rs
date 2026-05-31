@@ -357,6 +357,26 @@ const MIGRATIONS: &[Migration] = &[
             processed_at TEXT
         );",
     },
+    Migration {
+        version: 9,
+        name: "create_relations",
+        sql: "CREATE TABLE IF NOT EXISTS relations (
+            id             TEXT PRIMARY KEY,
+            source_note_id TEXT NOT NULL,
+            target_note_id TEXT NOT NULL,
+            relation_type  TEXT NOT NULL CHECK (relation_type IN ('related', 'prerequisite', 'extension', 'opposes', 'supports', 'similar')),
+            description    TEXT,
+            created_at     TEXT NOT NULL,
+            updated_at     TEXT NOT NULL,
+            FOREIGN KEY (source_note_id) REFERENCES notes(id) ON DELETE CASCADE,
+            FOREIGN KEY (target_note_id) REFERENCES notes(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_relations_source ON relations(source_note_id);
+        CREATE INDEX IF NOT EXISTS idx_relations_target ON relations(target_note_id);
+        CREATE INDEX IF NOT EXISTS idx_relations_type ON relations(relation_type);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_relations_unique_triplet
+        ON relations(source_note_id, target_note_id, relation_type);",
+    },
 ];
 
 #[cfg(test)]
@@ -438,14 +458,101 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(count, 8);
+        assert_eq!(count, 9);
 
         let rows = migration_rows(&conn);
-        assert_eq!(rows.len(), 8);
+        assert_eq!(rows.len(), 9);
         assert!(rows.iter().all(|(_, _, checksum, _)| checksum.len() == 64));
         assert!(rows.iter().all(|(_, _, _, status)| status == "applied"));
 
         conn.execute_batch("INSERT INTO notes (id,path,title,content_hash,word_count,front_matter_json,created_at,updated_at,indexed_at) VALUES ('x','a.md','T','h',0,'{}','2024','2024','2024')").unwrap();
+    }
+
+    #[test]
+    fn test_open_and_migrate_creates_relations_table_and_unique_index() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("relations.sqlite");
+        let conn = open_and_migrate(&db_path).unwrap();
+
+        let table_exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'relations'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(table_exists, 1);
+
+        let mut stmt = conn
+            .prepare("PRAGMA index_list('relations')")
+            .unwrap();
+        let indexes = stmt
+            .query_map([], |row| Ok((row.get::<_, String>(1)?, row.get::<_, i64>(2)?)))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert!(indexes.iter().any(|(name, _)| name == "idx_relations_source"));
+        assert!(indexes.iter().any(|(name, _)| name == "idx_relations_target"));
+        assert!(indexes.iter().any(|(name, _)| name == "idx_relations_type"));
+        assert!(indexes.iter().any(|(name, unique)| {
+            name == "idx_relations_unique_triplet" && *unique == 1
+        }));
+
+        let relation_table_sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'relations'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(relation_table_sql.contains(
+            "CHECK (relation_type IN ('related', 'prerequisite', 'extension', 'opposes', 'supports', 'similar'))"
+        ));
+
+        let mut index_info_stmt = conn
+            .prepare("PRAGMA index_info('idx_relations_unique_triplet')")
+            .unwrap();
+        let unique_index_columns = index_info_stmt
+            .query_map([], |row| row.get::<_, String>(2))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            unique_index_columns,
+            vec!["source_note_id", "target_note_id", "relation_type"]
+        );
+
+        let mut fk_stmt = conn.prepare("PRAGMA foreign_key_list('relations')").unwrap();
+        let foreign_keys = fk_stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(6)?,
+                ))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            foreign_keys,
+            vec![
+                (
+                    "target_note_id".to_string(),
+                    "notes".to_string(),
+                    "id".to_string(),
+                    "CASCADE".to_string(),
+                ),
+                (
+                    "source_note_id".to_string(),
+                    "notes".to_string(),
+                    "id".to_string(),
+                    "CASCADE".to_string(),
+                ),
+            ]
+        );
     }
 
     #[test]
@@ -482,7 +589,7 @@ mod tests {
         assert!(columns.contains(&"status".to_string()));
 
         let rows = migration_rows(&conn);
-        assert_eq!(rows.len(), 8);
+        assert_eq!(rows.len(), 9);
         assert!(rows.iter().all(|(_, _, checksum, _)| checksum.len() == 64));
         assert!(rows.iter().all(|(_, _, _, status)| status == "applied"));
         assert_eq!(rows[0].0, 1);
