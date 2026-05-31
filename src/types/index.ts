@@ -54,6 +54,40 @@ export interface Tag {
   note_count?: number;
 }
 
+export type RelationType =
+  | "related"
+  | "prerequisite"
+  | "extension"
+  | "opposes"
+  | "supports"
+  | "similar";
+
+export interface Relation {
+  id: string;
+  source_note_id: string;
+  target_note_id: string;
+  relation_type: RelationType;
+  description: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RelationItem {
+  id: string;
+  relation_type: RelationType;
+  description: string | null;
+  note_id: string;
+  note_title: string;
+  note_path: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NoteRelations {
+  outgoing: RelationItem[];
+  incoming: RelationItem[];
+}
+
 export interface LinkItem {
   id: string;
   note_id: string;

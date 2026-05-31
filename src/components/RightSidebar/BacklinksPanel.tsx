@@ -3,6 +3,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import type { NoteLinks } from "../../types";
 import { api } from "../../api/commands";
 import { useOpenNote } from "../../hooks/useOpenNote";
+import { ManualRelationsPanel } from "./ManualRelationsPanel";
 
 interface Props {
   noteId: string | null;
@@ -20,6 +21,7 @@ export function BacklinksPanel({ noteId }: Props) {
     }
 
     let isMounted = true;
+    setLinks(null);
     setLoading(true);
 
     api.getNoteLinks(noteId)
@@ -52,10 +54,6 @@ export function BacklinksPanel({ noteId }: Props) {
     );
   }
 
-  if (loading) {
-    return <div style={{ padding: "12px 8px", fontSize: 13, color: "#999" }}>加载中...</div>;
-  }
-
   const sectionStyle: React.CSSProperties = {
     marginBottom: 12,
   };
@@ -86,43 +84,40 @@ export function BacklinksPanel({ noteId }: Props) {
     color: "#aaa",
   };
 
+  const renderAutoLinks = (items: NoteLinks["outgoing"]) => {
+    if (loading) {
+      return <div style={emptyStyle}>加载中...</div>;
+    }
+
+    if (items.length === 0) {
+      return <div style={emptyStyle}>暂无链接</div>;
+    }
+
+    return items.map((link) => (
+      <span
+        key={link.id}
+        style={itemStyle}
+        onClick={() => handleLinkClick(link)}
+        title={link.link_url}
+      >
+        {link.note_title || link.link_text || link.link_url}
+      </span>
+    ));
+  };
+
   return (
     <div style={{ padding: 8, fontSize: 13 }}>
       <div style={sectionStyle}>
         <div style={headingStyle}>传出链接</div>
-        {links && links.outgoing.length > 0 ? (
-          links.outgoing.map((link) => (
-            <span
-              key={link.id}
-              style={itemStyle}
-              onClick={() => handleLinkClick(link)}
-              title={link.link_url}
-            >
-              {link.note_title || link.link_text || link.link_url}
-            </span>
-          ))
-        ) : (
-          <div style={emptyStyle}>暂无链接</div>
-        )}
+        {renderAutoLinks(links?.outgoing ?? [])}
       </div>
 
       <div style={sectionStyle}>
         <div style={headingStyle}>反向链接 (backlinks)</div>
-        {links && links.incoming.length > 0 ? (
-          links.incoming.map((link) => (
-            <span
-              key={link.id}
-              style={itemStyle}
-              onClick={() => handleLinkClick(link)}
-              title={link.link_url}
-            >
-              {link.note_title || link.link_text || link.link_url}
-            </span>
-          ))
-        ) : (
-          <div style={emptyStyle}>暂无链接</div>
-        )}
+        {renderAutoLinks(links?.incoming ?? [])}
       </div>
+
+      <ManualRelationsPanel noteId={noteId} />
     </div>
   );
 }
