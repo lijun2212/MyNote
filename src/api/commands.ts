@@ -12,6 +12,7 @@ import type {
   SaveNoteResult,
   SearchResult,
   Tag,
+  TagContext,
 } from "../types";
 
 export const api = {
@@ -38,6 +39,12 @@ export const api = {
 
   listTags: () =>
     invoke<Tag[]>("list_tags"),
+
+  getTagContext: (tagId: string) =>
+    invoke<TagContext>("get_tag_context", { tagId }),
+
+  deleteTag: (tagId: string) =>
+    invoke<void>("delete_tag", { tagId }),
 
   listNotesByTag: (tagIds: string[]) =>
     invoke<Note[]>("list_notes_by_tag", { tagIds }),

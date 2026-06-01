@@ -1,14 +1,18 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useEditorStore } from "../../store/useEditorStore";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { useAutoSave } from "../../hooks/useAutoSave";
 import { useEditorSplitResize } from "../../hooks/useEditorSplitResize";
+import type { SourceLineSyncSignal, SourceLineSyncSource } from "./sourceLineSync";
 
 export function EditorWorkspace() {
-  const { currentNote, content, setContent, markDirty, showPreview, togglePreview } = useEditorStore();
+  const { currentNote, content, setContent, markDirty, showPreview, togglePreview, tagNavigationTarget } = useEditorStore();
   useAutoSave();
   const [isSeparatorHovered, setIsSeparatorHovered] = useState(false);
+  const [sourceLineSyncSignal, setSourceLineSyncSignal] = useState<SourceLineSyncSignal | null>(null);
+  const pendingSourceLineSyncRef = useRef<{ source: SourceLineSyncSource; line: number } | null>(null);
+  const sourceLineSyncFrameRef = useRef<number | null>(null);
 
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const {
@@ -25,6 +29,31 @@ export function EditorWorkspace() {
     setContent(newContent);
     markDirty();
   }, [setContent, markDirty]);
+
+  const handleSourceLineSync = useCallback((source: SourceLineSyncSource, line: number) => {
+    pendingSourceLineSyncRef.current = { source, line };
+    if (sourceLineSyncFrameRef.current !== null) return;
+
+    sourceLineSyncFrameRef.current = window.requestAnimationFrame(() => {
+      sourceLineSyncFrameRef.current = null;
+      const pending = pendingSourceLineSyncRef.current;
+      if (!pending) return;
+      pendingSourceLineSyncRef.current = null;
+      setSourceLineSyncSignal((current) => ({
+        source: pending.source,
+        line: pending.line,
+        revision: (current?.revision ?? 0) + 1,
+      }));
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (sourceLineSyncFrameRef.current !== null) {
+        window.cancelAnimationFrame(sourceLineSyncFrameRef.current);
+      }
+    };
+  }, []);
 
   if (!currentNote) {
     return (
@@ -71,7 +100,13 @@ export function EditorWorkspace() {
           height: "100%",
           overflow: "hidden",
         }}>
-          <MarkdownEditor initialContent={content} onChange={handleChange} />
+          <MarkdownEditor
+            initialContent={content}
+            onChange={handleChange}
+            tagNavigationTarget={tagNavigationTarget}
+            sourceLineSyncSignal={sourceLineSyncSignal}
+            onTopVisibleLineChange={(line) => handleSourceLineSync("editor", line)}
+          />
         </div>
         {showPreview && (
           <div
@@ -104,7 +139,12 @@ export function EditorWorkspace() {
             height: "100%",
             overflow: "hidden",
           }}>
-            <MarkdownPreview content={content} />
+            <MarkdownPreview
+              content={content}
+              tagNavigationTarget={tagNavigationTarget}
+              sourceLineSyncSignal={sourceLineSyncSignal}
+              onTopVisibleLineChange={(line) => handleSourceLineSync("preview", line)}
+            />
           </div>
         )}
       </div>

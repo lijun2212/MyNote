@@ -2,12 +2,15 @@ use crate::domain::note::Note;
 use crate::error::{AppError, AppResult};
 use crate::infrastructure::fs::{normalize_kb_relative_path, resolve_kb_path};
 use crate::infrastructure::hash::sha256_str;
-use crate::infrastructure::markdown::{extract_inline_tags, extract_links, parse_note};
+use crate::infrastructure::markdown::{
+    InlineTagOccurrence, body_line_offset, extract_inline_tag_occurrences_with_offset,
+    extract_inline_tags, extract_links, parse_note,
+};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::path::{Path, PathBuf};
 use ulid::Ulid;
 
-/// 对一篇笔记执行全量索引：upsert notes + 重建 note_tags + links + note_fts
+/// 对一篇笔记执行全量索引：upsert notes + 重建 note_tags + tag_occurrences + links + note_fts
 /// 全部在同一个 SQLite 事务中完成。
 pub fn index_note_full(
     conn: &Connection,
@@ -34,6 +37,10 @@ pub fn index_note_full(
     let word_count = parsed.word_count as i64;
     let fm_tags = parsed.front_matter.tags.clone().unwrap_or_default();
     let inline_tags = extract_inline_tags(&parsed.body);
+    let inline_occurrences = extract_inline_tag_occurrences_with_offset(
+        &parsed.body,
+        body_line_offset(content),
+    );
     let raw_links = extract_links(&parsed.body);
 
     // ── single transaction ──────────────────────────────────────────────────
@@ -72,7 +79,16 @@ pub fn index_note_full(
         }
     }
 
-    // 3. Rebuild links
+    // 3. Rebuild tag_occurrences
+    tx.execute(
+        "DELETE FROM tag_occurrences WHERE note_id = ?1",
+        params![actual_id],
+    )?;
+    for (index, occurrence) in inline_occurrences.iter().enumerate() {
+        insert_tag_occurrence(&tx, &actual_id, occurrence, (index + 1) as i64, &now)?;
+    }
+
+    // 4. Rebuild links
     tx.execute("DELETE FROM links WHERE source_note_id = ?1", params![actual_id])?;
     for raw in &raw_links {
         let link_id = Ulid::new().to_string();
@@ -89,7 +105,7 @@ pub fn index_note_full(
         )?;
     }
 
-    // 4. Rebuild FTS
+    // 5. Rebuild FTS
     tx.execute("DELETE FROM note_fts WHERE note_id = ?1", params![actual_id])?;
     tx.execute(
         "INSERT INTO note_fts (note_id, title, summary, body) VALUES (?1, ?2, ?3, ?4)",
@@ -187,13 +203,8 @@ fn reconcile_links_for_note(
 
     Ok(())
 }
-fn upsert_tag_and_link(
-    tx: &rusqlite::Transaction,
-    note_id: &str,
-    tag_name: &str,
-    source: &str,
-    now: &str,
-) -> AppResult<()> {
+
+fn upsert_tag(tx: &rusqlite::Transaction, tag_name: &str, now: &str) -> AppResult<String> {
     let normalized = tag_name.to_lowercase();
     let tag_id = Ulid::new().to_string();
     tx.execute(
@@ -202,14 +213,54 @@ fn upsert_tag_and_link(
          ON CONFLICT(normalized_name) DO UPDATE SET updated_at=excluded.updated_at",
         params![tag_id, tag_name, normalized, now, now],
     )?;
-    let actual_tag_id: String = tx.query_row(
+
+    tx.query_row(
         "SELECT id FROM tags WHERE normalized_name = ?1",
         params![normalized],
-        |r| r.get(0),
-    )?;
+        |row| row.get(0),
+    )
+    .map_err(Into::into)
+}
+
+fn upsert_tag_and_link(
+    tx: &rusqlite::Transaction,
+    note_id: &str,
+    tag_name: &str,
+    source: &str,
+    now: &str,
+) -> AppResult<()> {
+    let actual_tag_id = upsert_tag(tx, tag_name, now)?;
     tx.execute(
         "INSERT OR IGNORE INTO note_tags (note_id, tag_id, source) VALUES (?1, ?2, ?3)",
         params![note_id, actual_tag_id, source],
+    )?;
+    Ok(())
+}
+
+fn insert_tag_occurrence(
+    tx: &rusqlite::Transaction,
+    note_id: &str,
+    occurrence: &InlineTagOccurrence,
+    occurrence_order: i64,
+    now: &str,
+) -> AppResult<()> {
+    let tag_id = upsert_tag(tx, &occurrence.tag_name, now)?;
+    tx.execute(
+        "INSERT INTO tag_occurrences (id, note_id, tag_id, source, line_start, line_end, heading_context, context_snippet, occurrence_order, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![
+            Ulid::new().to_string(),
+            note_id,
+            tag_id,
+            "inline",
+            occurrence.line_start,
+            occurrence.line_end,
+            occurrence.heading_context.as_deref(),
+            &occurrence.context_snippet,
+            occurrence_order,
+            now,
+            now,
+        ],
     )?;
     Ok(())
 }
@@ -248,6 +299,7 @@ pub fn mark_note_deleted_by_path(conn: &Connection, rel_path: &str) -> AppResult
     )?;
     tx.execute("DELETE FROM note_fts WHERE note_id = ?1", params![note_id])?;
     tx.execute("DELETE FROM note_tags WHERE note_id = ?1", params![note_id])?;
+    tx.execute("DELETE FROM tag_occurrences WHERE note_id = ?1", params![note_id])?;
     tx.execute("DELETE FROM links WHERE source_note_id = ?1", params![note_id])?;
     tx.execute(
         "UPDATE links
@@ -316,6 +368,35 @@ mod tests {
         .unwrap()
     }
 
+    fn occurrence_rows(
+        conn: &rusqlite::Connection,
+        note_title: &str,
+        tag_name: &str,
+    ) -> Vec<(i64, i64, Option<String>, String, i64)> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT o.line_start, o.line_end, o.heading_context, o.context_snippet, o.occurrence_order
+                 FROM tag_occurrences o
+                 JOIN notes n ON n.id = o.note_id
+                 JOIN tags t ON t.id = o.tag_id
+                 WHERE n.title = ?1 AND t.normalized_name = ?2
+                 ORDER BY o.occurrence_order",
+            )
+            .unwrap();
+        stmt.query_map(rusqlite::params![note_title, tag_name.to_lowercase()], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+            ))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+    }
+
     #[test]
     fn indexing_later_target_resolves_existing_unresolved_wiki_link() {
         let (root, conn) = setup_index_db();
@@ -363,6 +444,41 @@ mod tests {
         reconcile_all_links(&conn).unwrap();
 
         assert_eq!(link_state(&conn, "Source", "Target"), (Some(target.id), 1));
+    }
+
+    #[test]
+    fn index_note_full_rebuilds_tag_occurrences() {
+        let (root, conn) = setup_index_db();
+
+        index_note_full(
+            &conn,
+            root.path(),
+            "notes/source.md",
+            "# Title\n\nAlpha #项目报告 here.\n```md\n#项目报告\n```\n## Section\nBeta #项目报告 again.",
+        )
+        .unwrap();
+
+        let occurrences = occurrence_rows(&conn, "Title", "项目报告");
+        assert_eq!(occurrences.len(), 2);
+        assert_eq!(occurrences[0], (3, 3, Some("Title".to_string()), "Alpha #项目报告 here.".to_string(), 1));
+        assert_eq!(occurrences[1], (8, 8, Some("Section".to_string()), "Beta #项目报告 again.".to_string(), 2));
+    }
+
+    #[test]
+    fn index_note_full_stores_file_relative_occurrence_lines_with_front_matter() {
+        let (root, conn) = setup_index_db();
+
+        index_note_full(
+            &conn,
+            root.path(),
+            "notes/source.md",
+            "---\ntitle: Demo\n---\n\n# Title\n\nAlpha(#项目报告) here.",
+        )
+        .unwrap();
+
+        let occurrences = occurrence_rows(&conn, "Demo", "项目报告");
+        assert_eq!(occurrences.len(), 1);
+        assert_eq!(occurrences[0], (7, 7, Some("Title".to_string()), "Alpha(#项目报告) here.".to_string(), 1));
     }
 
     #[test]
@@ -419,6 +535,12 @@ mod tests {
             [],
         ).unwrap();
         conn.execute(
+            "INSERT INTO tag_occurrences (id, note_id, tag_id, source, line_start, line_end, heading_context, context_snippet, occurrence_order, created_at, updated_at)
+             VALUES ('occ-1','target','tag','inline',2,2,'Target','See #tag',1,'now','now')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
             "INSERT INTO links (id,source_note_id,target_note_id,target_raw,link_type,resolved,created_at,updated_at)
              VALUES ('incoming','source','target','Target','wiki',1,'now','now')",
             [],
@@ -445,6 +567,15 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM note_tags WHERE note_id = 'target'", [], |row| row.get(0))
             .unwrap();
         assert_eq!(tag_count, 0);
+
+        let occurrence_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tag_occurrences WHERE note_id = 'target'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(occurrence_count, 0);
 
         let outgoing_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM links WHERE source_note_id = 'target'", [], |row| row.get(0))

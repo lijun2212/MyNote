@@ -54,6 +54,33 @@ export interface Tag {
   note_count?: number;
 }
 
+export interface TagContextItem {
+  note_id: string;
+  note_path: string;
+  note_title: string;
+  note_updated_at: string;
+  source: "inline" | "front_matter";
+  occurrence_order: number;
+  line_start: number;
+  line_end: number;
+  heading_context: string | null;
+  context_snippet: string;
+}
+
+export interface TagContext {
+  tag_id: string;
+  tag_name: string;
+  total_notes: number;
+  visible_count: number;
+  has_more: boolean;
+  items: TagContextItem[];
+}
+
+export interface TagNavigationTarget extends TagContextItem {
+  tag_name: string;
+  revision: number;
+}
+
 export type RelationType =
   | "related"
   | "prerequisite"

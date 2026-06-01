@@ -1,4 +1,5 @@
-use crate::domain::tag::TagSummary;
+use crate::domain::tag::{TagContext, TagSummary};
+use crate::services::tag::{delete_tag_service, get_tag_context_service};
 use crate::state::AppState;
 use tauri::State;
 
@@ -91,4 +92,14 @@ pub fn list_notes_by_tag(
         .map_err(|e| e.to_string())?;
 
     Ok(notes)
+}
+
+#[tauri::command]
+pub fn delete_tag(tag_id: String, state: State<AppState>) -> Result<(), String> {
+    delete_tag_service(&state, &tag_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_tag_context(tag_id: String, state: State<AppState>) -> Result<TagContext, String> {
+    get_tag_context_service(&state, &tag_id).map_err(|e| e.to_string())
 }

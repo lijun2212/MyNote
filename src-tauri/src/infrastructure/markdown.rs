@@ -128,12 +128,103 @@ pub fn render_note(fm: &FrontMatter, body: &str) -> AppResult<String> {
 }
 
 /// 从正文提取内联标签（#标签），跳过代码块和 URL 片段
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineTagOccurrence {
+    pub tag_name: String,
+    pub line_start: i64,
+    pub line_end: i64,
+    pub heading_context: Option<String>,
+    pub context_snippet: String,
+}
+
+fn is_tag_name_char(ch: char) -> bool {
+    ch.is_alphanumeric() || ch == '-' || ch == '_'
+}
+
+fn is_tag_boundary(previous: Option<char>) -> bool {
+    previous.map(|ch| !is_tag_name_char(ch)).unwrap_or(true)
+}
+
+fn extract_inline_tags_from_line(line: &str) -> Vec<String> {
+    let mut tags = Vec::new();
+    let mut in_inline_code = false;
+    let chars: Vec<char> = line.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        if chars[i] == '`' {
+            in_inline_code = !in_inline_code;
+            i += 1;
+            continue;
+        }
+
+        if in_inline_code {
+            i += 1;
+            continue;
+        }
+
+        if chars[i] == '#' {
+            let prefix: String = chars[..i].iter().collect();
+            if prefix.ends_with("://") || prefix.ends_with('/') {
+                i += 1;
+                continue;
+            }
+
+            let previous = if i == 0 { None } else { Some(chars[i - 1]) };
+            if !is_tag_boundary(previous) {
+                i += 1;
+                continue;
+            }
+
+            let start = i + 1;
+            let mut end = start;
+            while end < chars.len() {
+                let current = chars[end];
+                if is_tag_name_char(current) {
+                    end += 1;
+                } else {
+                    break;
+                }
+            }
+
+            if end > start {
+                tags.push(chars[start..end].iter().collect());
+                i = end;
+                continue;
+            }
+        }
+
+        i += 1;
+    }
+
+    tags
+}
+
+fn extract_heading_text(line: &str) -> Option<String> {
+    let trimmed = line.trim_start();
+    let level = trimmed.chars().take_while(|ch| *ch == '#').count();
+    if level == 0 || level > 6 {
+        return None;
+    }
+
+    let rest = &trimmed[level..];
+    if !rest.starts_with(' ') {
+        return None;
+    }
+
+    let heading = rest.trim();
+    if heading.is_empty() {
+        None
+    } else {
+        Some(heading.to_string())
+    }
+}
+
 pub fn extract_inline_tags(body: &str) -> Vec<String> {
     let mut tags = Vec::new();
     let mut in_code_block = false;
 
     for line in body.lines() {
-        let mut in_inline_code = false;
         let trimmed = line.trim_start();
         if trimmed.starts_with("```") {
             in_code_block = !in_code_block;
@@ -143,58 +234,173 @@ pub fn extract_inline_tags(body: &str) -> Vec<String> {
             continue;
         }
 
-        // Scan character by character
-        let chars: Vec<char> = line.chars().collect();
-        let mut i = 0;
-        while i < chars.len() {
-            // Toggle inline code
-            if chars[i] == '`' {
-                in_inline_code = !in_inline_code;
-                i += 1;
-                continue;
-            }
-            if in_inline_code {
-                i += 1;
-                continue;
-            }
-            // Check for URL scheme before #
-            if chars[i] == '#' {
-                // Not a tag if preceded by '/' or part of URL (look back for "://")
-                let prefix: String = chars[..i].iter().collect();
-                if prefix.ends_with("://") || prefix.ends_with('/') {
-                    i += 1;
-                    continue;
-                }
-                // Must be at start of line or preceded by whitespace
-                let preceded_by_space = i == 0 || chars[i - 1].is_whitespace();
-                if !preceded_by_space {
-                    i += 1;
-                    continue;
-                }
-                // Collect tag name
-                let start = i + 1;
-                let mut end = start;
-                while end < chars.len() {
-                    let c = chars[end];
-                    if c.is_alphanumeric() || c == '-' || c == '_' {
-                        end += 1;
-                    } else {
-                        break;
-                    }
-                }
-                if end > start {
-                    let tag: String = chars[start..end].iter().collect();
-                    tags.push(tag);
-                    i = end;
-                    continue;
-                }
-            }
-            i += 1;
-        }
+        tags.extend(extract_inline_tags_from_line(line));
     }
     tags.sort();
     tags.dedup();
     tags
+}
+
+pub fn body_line_offset(content: &str) -> i64 {
+    if !content.starts_with("---") {
+        return 0;
+    }
+
+    let rest = &content[3..];
+    let Some(end_pos) = rest.find("\n---") else {
+        return 0;
+    };
+
+    let body_start = end_pos + 4;
+    let suffix = rest.get(body_start..).unwrap_or("");
+    let trimmed_newlines = suffix.len() - suffix.trim_start_matches('\n').len();
+    let absolute_body_start = 3 + body_start + trimmed_newlines;
+
+    content[..absolute_body_start]
+        .chars()
+        .filter(|ch| *ch == '\n')
+        .count() as i64
+}
+
+pub fn extract_inline_tag_occurrences(body: &str) -> Vec<InlineTagOccurrence> {
+    extract_inline_tag_occurrences_with_offset(body, 0)
+}
+
+pub fn extract_inline_tag_occurrences_with_offset(
+    body: &str,
+    line_offset: i64,
+) -> Vec<InlineTagOccurrence> {
+    let mut occurrences = Vec::new();
+    let mut in_code_block = false;
+    let mut current_heading: Option<String> = None;
+
+    for (index, line) in body.lines().enumerate() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") {
+            in_code_block = !in_code_block;
+            continue;
+        }
+        if in_code_block {
+            continue;
+        }
+
+        if let Some(heading) = extract_heading_text(line) {
+            current_heading = Some(heading);
+        }
+
+        let line_number = line_offset + (index + 1) as i64;
+        for tag_name in extract_inline_tags_from_line(line) {
+            occurrences.push(InlineTagOccurrence {
+                tag_name,
+                line_start: line_number,
+                line_end: line_number,
+                heading_context: current_heading.clone(),
+                context_snippet: line.trim().to_string(),
+            });
+        }
+    }
+
+    occurrences
+}
+
+fn remove_inline_tag_mentions(body: &str, tag_name: &str) -> String {
+    let mut lines = Vec::new();
+    let mut in_code_block = false;
+
+    for line in body.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") {
+            in_code_block = !in_code_block;
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if in_code_block {
+            lines.push(line.to_string());
+            continue;
+        }
+
+        let chars: Vec<char> = line.chars().collect();
+        let mut result = String::new();
+        let mut in_inline_code = false;
+        let mut i = 0;
+
+        while i < chars.len() {
+            if chars[i] == '`' {
+                in_inline_code = !in_inline_code;
+                result.push(chars[i]);
+                i += 1;
+                continue;
+            }
+
+            if in_inline_code {
+                result.push(chars[i]);
+                i += 1;
+                continue;
+            }
+
+            if chars[i] == '#' {
+                let prefix: String = chars[..i].iter().collect();
+                let previous = if i == 0 { None } else { Some(chars[i - 1]) };
+                if is_tag_boundary(previous) && !prefix.ends_with("://") && !prefix.ends_with('/') {
+                    let start = i + 1;
+                    let mut end = start;
+                    while end < chars.len() {
+                        let c = chars[end];
+                        if is_tag_name_char(c) {
+                            end += 1;
+                        } else {
+                            break;
+                        }
+                    }
+
+                    if end > start {
+                        let current_tag: String = chars[start..end].iter().collect();
+                        if current_tag == tag_name {
+                            let next_char = chars.get(end).copied();
+                            let previous_is_whitespace = result.chars().last().map(|c| c.is_whitespace()).unwrap_or(false);
+                            if (previous_is_whitespace || i == 0) && next_char.map(|c| c.is_whitespace()).unwrap_or(false) {
+                                i = end + 1;
+                            } else {
+                                i = end;
+                            }
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            result.push(chars[i]);
+            i += 1;
+        }
+
+        lines.push(result);
+    }
+
+    lines.join("\n")
+}
+
+pub fn remove_tag_from_note_content(content: &str, tag_name: &str) -> AppResult<String> {
+    let target_tag = tag_name.trim();
+    if target_tag.is_empty() {
+        return Ok(content.to_string());
+    }
+
+    let (fm_str, body) = split_front_matter(content);
+    let updated_body = remove_inline_tag_mentions(body, target_tag);
+
+    if let Some(front_matter_str) = fm_str {
+        let mut front_matter = parse_front_matter(front_matter_str)?;
+        front_matter.tags = front_matter.tags.map(|tags| {
+            tags
+                .into_iter()
+                .filter(|tag| tag.trim() != target_tag)
+                .collect::<Vec<_>>()
+        }).and_then(|tags| if tags.is_empty() { None } else { Some(tags) });
+        return render_note(&front_matter, &updated_body);
+    }
+
+    Ok(updated_body)
 }
 
 #[derive(Debug, Clone)]
@@ -399,6 +605,106 @@ mod tests {
         let tags = extract_inline_tags(body);
         assert!(!tags.contains(&"notag".to_string()));
         assert!(tags.contains(&"realtag".to_string()));
+    }
+
+    #[test]
+    fn test_extract_inline_tags_accepts_punctuation_boundaries() {
+        let body = "Alpha(#项目报告)，还有 [#阶段一]。";
+        let tags = extract_inline_tags(body);
+
+        assert!(tags.contains(&"项目报告".to_string()));
+        assert!(tags.contains(&"阶段一".to_string()));
+    }
+
+    #[test]
+    fn test_extract_inline_tag_occurrences_returns_lines_and_context() {
+        let body = [
+            "# Title",
+            "",
+            "Alpha #项目报告 here.",
+            "```md",
+            "#项目报告",
+            "```",
+            "## Section",
+            "Beta #项目报告 again.",
+        ]
+        .join("\n");
+
+        let occurrences = extract_inline_tag_occurrences(&body);
+
+        assert_eq!(occurrences.len(), 2);
+        assert_eq!(occurrences[0].tag_name, "项目报告");
+        assert_eq!(occurrences[0].line_start, 3);
+        assert_eq!(occurrences[0].line_end, 3);
+        assert_eq!(occurrences[0].heading_context.as_deref(), Some("Title"));
+        assert_eq!(occurrences[0].context_snippet, "Alpha #项目报告 here.");
+        assert_eq!(occurrences[1].heading_context.as_deref(), Some("Section"));
+    }
+
+    #[test]
+    fn test_body_line_offset_counts_front_matter_lines() {
+        let content = [
+            "---",
+            "title: Demo",
+            "tags:",
+            "  - 项目报告",
+            "---",
+            "",
+            "# Title",
+        ]
+        .join("\n");
+
+        assert_eq!(body_line_offset(&content), 6);
+    }
+
+    #[test]
+    fn test_remove_tag_from_note_content_removes_front_matter_and_inline_tags() {
+        let content = [
+            "---",
+            "title: Demo",
+            "tags:",
+            "  - 项目报告",
+            "  - 阶段一",
+            "---",
+            "",
+            "# 标题",
+            "",
+            "这里有 #项目报告 和 #阶段一 两个标签。",
+        ]
+        .join("\n");
+
+        let updated = remove_tag_from_note_content(&content, "项目报告").unwrap();
+
+        assert!(updated.contains("- 阶段一"));
+        assert!(!updated.contains("- 项目报告"));
+        assert!(!updated.contains("#项目报告"));
+        assert!(updated.contains("#阶段一"));
+    }
+
+    #[test]
+    fn test_remove_tag_from_note_content_skips_headings_urls_and_code() {
+        let content = [
+            "# 项目报告",
+            "",
+            "访问 http://example.com/#项目报告",
+            "",
+            "`#项目报告` 应该保留",
+            "",
+            "真实标签 #项目报告 需要删除",
+            "",
+            "```md",
+            "#项目报告",
+            "```",
+        ]
+        .join("\n");
+
+        let updated = remove_tag_from_note_content(&content, "项目报告").unwrap();
+
+        assert!(updated.contains("# 项目报告"));
+        assert!(updated.contains("http://example.com/#项目报告"));
+        assert!(updated.contains("`#项目报告` 应该保留"));
+        assert!(!updated.contains("真实标签 #项目报告 需要删除"));
+        assert!(updated.contains("```md\n#项目报告\n```"));
     }
 
     #[test]

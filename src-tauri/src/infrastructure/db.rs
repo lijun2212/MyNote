@@ -377,6 +377,29 @@ const MIGRATIONS: &[Migration] = &[
         CREATE UNIQUE INDEX IF NOT EXISTS idx_relations_unique_triplet
         ON relations(source_note_id, target_note_id, relation_type);",
     },
+    Migration {
+        version: 10,
+        name: "create_tag_occurrences",
+        sql: "CREATE TABLE IF NOT EXISTS tag_occurrences (
+            id               TEXT PRIMARY KEY,
+            note_id          TEXT NOT NULL,
+            tag_id           TEXT NOT NULL,
+            source           TEXT NOT NULL,
+            line_start       INTEGER NOT NULL,
+            line_end         INTEGER NOT NULL,
+            heading_context  TEXT,
+            context_snippet  TEXT NOT NULL,
+            occurrence_order INTEGER NOT NULL,
+            created_at       TEXT NOT NULL,
+            updated_at       TEXT NOT NULL,
+            FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE,
+            FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_tag_occurrences_note_tag_order
+        ON tag_occurrences(note_id, tag_id, occurrence_order);
+        CREATE INDEX IF NOT EXISTS idx_tag_occurrences_tag_note
+        ON tag_occurrences(tag_id, note_id);",
+    },
 ];
 
 #[cfg(test)]
@@ -458,10 +481,10 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(count, 9);
+        assert_eq!(count, 10);
 
         let rows = migration_rows(&conn);
-        assert_eq!(rows.len(), 9);
+        assert_eq!(rows.len(), 10);
         assert!(rows.iter().all(|(_, _, checksum, _)| checksum.len() == 64));
         assert!(rows.iter().all(|(_, _, _, status)| status == "applied"));
 
@@ -556,6 +579,31 @@ mod tests {
     }
 
     #[test]
+    fn test_open_and_migrate_creates_tag_occurrences_table() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("tag-occurrences.sqlite");
+        let conn = open_and_migrate(&db_path).unwrap();
+
+        let table_exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'tag_occurrences'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(table_exists, 1);
+
+        let index_exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_tag_occurrences_note_tag_order'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(index_exists, 1);
+    }
+
+    #[test]
     fn test_legacy_migrations_backfill_checksum_and_status() {
         let dir = TempDir::new().unwrap();
         let db_path = dir.path().join("legacy.sqlite");
@@ -589,7 +637,7 @@ mod tests {
         assert!(columns.contains(&"status".to_string()));
 
         let rows = migration_rows(&conn);
-        assert_eq!(rows.len(), 9);
+    assert_eq!(rows.len(), 10);
         assert!(rows.iter().all(|(_, _, checksum, _)| checksum.len() == 64));
         assert!(rows.iter().all(|(_, _, _, status)| status == "applied"));
         assert_eq!(rows[0].0, 1);

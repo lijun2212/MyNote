@@ -23,6 +23,8 @@ pub fn run() {
             commands::note::import_note,
             commands::tag::list_tags,
             commands::tag::list_notes_by_tag,
+            commands::tag::delete_tag,
+            commands::tag::get_tag_context,
             commands::link::get_note_links,
             commands::link::get_note_by_title,
             commands::relation::create_relation,
