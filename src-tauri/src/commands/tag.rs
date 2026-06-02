@@ -1,20 +1,30 @@
 use crate::domain::tag::{TagContext, TagSummary};
+use rusqlite::Connection;
 use crate::services::tag::{delete_tag_service, get_tag_context_service};
 use crate::state::AppState;
 use tauri::State;
 
-#[tauri::command]
-pub fn list_tags(state: State<AppState>) -> Result<Vec<TagSummary>, String> {
-    let db_guard = state.db.lock().unwrap();
-    let conn = db_guard.as_ref().ok_or("No database open")?;
-
+fn list_tags_in_conn(conn: &Connection) -> Result<Vec<TagSummary>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT t.id, t.name, COUNT(n.id) as note_count
+            "SELECT t.id,
+                    t.name,
+                    COALESCE((
+                        SELECT COUNT(*)
+                        FROM note_tags nt
+                        JOIN notes n ON n.id = nt.note_id
+                        WHERE nt.tag_id = t.id
+                          AND nt.source = 'front_matter'
+                          AND n.deleted_at IS NULL
+                    ), 0)
+                    + COALESCE((
+                        SELECT COUNT(*)
+                        FROM tag_occurrences o
+                        JOIN notes n ON n.id = o.note_id
+                        WHERE o.tag_id = t.id
+                          AND n.deleted_at IS NULL
+                    ), 0) AS note_count
              FROM tags t
-             LEFT JOIN note_tags nt ON nt.tag_id = t.id
-             LEFT JOIN notes n ON n.id = nt.note_id AND n.deleted_at IS NULL
-             GROUP BY t.id
              ORDER BY note_count DESC, t.name ASC",
         )
         .map_err(|e| e.to_string())?;
@@ -32,6 +42,14 @@ pub fn list_tags(state: State<AppState>) -> Result<Vec<TagSummary>, String> {
         .map_err(|e| e.to_string())?;
 
     Ok(tags)
+}
+
+#[tauri::command]
+pub fn list_tags(state: State<AppState>) -> Result<Vec<TagSummary>, String> {
+    let db_guard = state.db.lock().unwrap();
+    let conn = db_guard.as_ref().ok_or("No database open")?;
+
+    list_tags_in_conn(conn)
 }
 
 #[tauri::command]
@@ -102,4 +120,31 @@ pub fn delete_tag(tag_id: String, state: State<AppState>) -> Result<(), String> 
 #[tauri::command]
 pub fn get_tag_context(tag_id: String, state: State<AppState>) -> Result<TagContext, String> {
     get_tag_context_service(&state, &tag_id).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::list_tags_in_conn;
+    use crate::infrastructure::db::open_and_migrate;
+    use crate::services::index::index_note_full;
+    use tempfile::TempDir;
+
+    #[test]
+    fn list_tags_counts_front_matter_and_each_inline_occurrence() {
+        let root = TempDir::new().unwrap();
+        let conn = open_and_migrate(&root.path().join("index.sqlite")).unwrap();
+
+        index_note_full(
+            &conn,
+            root.path(),
+            "notes/demo.md",
+            "---\ntitle: Demo\ntags:\n  - 测试\n---\n\n# Demo\n\n#测试\n再次出现 #测试",
+        )
+        .unwrap();
+
+        let tags = list_tags_in_conn(&conn).unwrap();
+        let testing = tags.iter().find(|tag| tag.name == "测试").unwrap();
+
+        assert_eq!(testing.note_count, 3);
+    }
 }

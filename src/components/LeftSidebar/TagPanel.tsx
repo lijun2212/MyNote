@@ -4,7 +4,7 @@ import type { Tag } from "../../types";
 import { useAppStore } from "../../store/useAppStore";
 import { useEditorStore } from "../../store/useEditorStore";
 import { useOpenNote } from "../../hooks/useOpenNote";
-import { clearActiveDraggedTagName, setActiveDraggedTagName } from "../EditorWorkspace/tagDragState";
+import { clearActiveDraggedTagName, scheduleClearActiveDraggedTagName, setActiveDraggedTagName } from "../EditorWorkspace/tagDragState";
 
 const INSERT_TAG_EVENT = "mynote:insert-tag";
 
@@ -169,7 +169,7 @@ export function TagPanel() {
               event.dataTransfer.setData("text/plain", `#${tag.name}`);
               event.dataTransfer.effectAllowed = "copy";
             }}
-            onDragEnd={() => clearActiveDraggedTagName()}
+            onDragEnd={() => scheduleClearActiveDraggedTagName()}
             aria-label={`标签 ${tag.name} ${tag.note_count ?? 0}`}
             style={{
               flex: 1,
@@ -228,7 +228,7 @@ export function TagPanel() {
           <div style={{ display: "grid", gap: 6 }}>
             {activeTagContext.items.slice(0, 5).map((item) => (
               <button
-                key={`${item.note_id}:${item.line_start}:${item.line_end}`}
+                key={`${item.note_id}:${item.line_start}:${item.line_end}:${item.occurrence_order}`}
                 type="button"
                 aria-label={`打开标签上下文笔记 ${item.note_title}`}
                 onClick={() => {

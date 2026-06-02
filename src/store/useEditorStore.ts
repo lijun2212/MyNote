@@ -4,6 +4,7 @@ import type { Note, TagNavigationTarget } from "../types";
 interface EditorState {
   currentNote: Note | null;
   content: string;
+  isComposing: boolean;
   isDirty: boolean;
   isSaving: boolean;
   saveError: string | null;
@@ -13,6 +14,7 @@ interface EditorState {
 
   setCurrentNote: (note: Note | null) => void;
   setContent: (content: string) => void;
+  setIsComposing: (isComposing: boolean) => void;
   markDirty: () => void;
   markSaved: (note: Note) => void;
   setSaving: (saving: boolean) => void;
@@ -24,6 +26,7 @@ interface EditorState {
 export const useEditorStore = create<EditorState>((set) => ({
   currentNote: null,
   content: "",
+  isComposing: false,
   isDirty: false,
   isSaving: false,
   saveError: null,
@@ -32,11 +35,12 @@ export const useEditorStore = create<EditorState>((set) => ({
   tagNavigationTarget: null,
 
   setCurrentNote: (note) =>
-    set({ currentNote: note, isDirty: false, isSaving: false, saveStatus: "saved", saveError: null }),
+    set({ currentNote: note, isComposing: false, isDirty: false, isSaving: false, saveStatus: "saved", saveError: null }),
   setContent: (content) => set({ content }),
+  setIsComposing: (isComposing) => set({ isComposing }),
   markDirty: () => set({ isDirty: true, saveStatus: "unsaved" }),
   markSaved: (note) =>
-    set({ currentNote: note, isDirty: false, isSaving: false, saveStatus: "saved", saveError: null }),
+    set({ currentNote: note, isComposing: false, isDirty: false, isSaving: false, saveStatus: "saved", saveError: null }),
   setSaving: (saving) =>
     set((s) => ({
       isSaving: saving,

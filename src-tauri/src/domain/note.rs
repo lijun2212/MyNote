@@ -42,6 +42,11 @@ pub struct CreateNoteInput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateNotebookInput {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SaveNoteInput {
     pub note_id: String,
     pub content: String,

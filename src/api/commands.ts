@@ -25,6 +25,9 @@ export const api = {
   createNote: (directory: string, title: string) =>
     invoke<Note>("create_note", { directory, title }),
 
+  createNotebook: (name: string) =>
+    invoke<string>("create_notebook", { name }),
+
   getNoteByPath: (path: string) =>
     invoke<NoteDetail>("get_note_by_path", { path }),
 
@@ -36,6 +39,9 @@ export const api = {
 
   importNote: (srcPath: string, destDirectory: string) =>
     invoke<Note>("import_note", { srcPath, destDirectory }),
+
+  moveNote: (sourcePath: string, targetDirectory: string) =>
+    invoke<Note>("move_note", { sourcePath, targetDirectory }),
 
   listTags: () =>
     invoke<Tag[]>("list_tags"),

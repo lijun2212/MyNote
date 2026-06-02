@@ -27,34 +27,48 @@ pub fn get_tag_context_in_conn(conn: &Connection, tag_id: &str) -> AppResult<Tag
     let (tag_name, total_notes) = tag_summary
         .ok_or_else(|| AppError::NotFound(format!("tag not found: {tag_id}")))?;
 
-    let mut stmt = conn.prepare(
-        "SELECT n.id, n.path, n.title, n.updated_at,
-            o.source, o.occurrence_order, o.line_start, o.line_end, o.heading_context, o.context_snippet,
-                EXISTS(
-                    SELECT 1
-                    FROM note_tags nt_front_matter
-                    WHERE nt_front_matter.note_id = n.id
-                      AND nt_front_matter.tag_id = ?1
-                      AND nt_front_matter.source = 'front_matter'
-                ) AS has_front_matter
-         FROM notes n
-         LEFT JOIN tag_occurrences o
-           ON o.id = (
-               SELECT o2.id
-               FROM tag_occurrences o2
-               WHERE o2.note_id = n.id AND o2.tag_id = ?1
-               ORDER BY CASE o2.source WHEN 'inline' THEN 0 ELSE 1 END, o2.occurrence_order ASC
-               LIMIT 1
-           )
-         WHERE n.deleted_at IS NULL
-           AND EXISTS (
-               SELECT 1
-               FROM note_tags nt
-               WHERE nt.note_id = n.id AND nt.tag_id = ?1
-           )
-         ORDER BY n.updated_at DESC, n.path ASC
-         LIMIT ?2",
-    )?;
+        let mut stmt = conn.prepare(
+                "WITH latest_notes AS (
+                         SELECT n.id,
+                                        n.path,
+                                        n.title,
+                                        n.updated_at,
+                                        EXISTS(
+                                                SELECT 1
+                                                FROM note_tags nt_front_matter
+                                                WHERE nt_front_matter.note_id = n.id
+                                                    AND nt_front_matter.tag_id = ?1
+                                                    AND nt_front_matter.source = 'front_matter'
+                                        ) AS has_front_matter
+                         FROM notes n
+                         WHERE n.deleted_at IS NULL
+                             AND EXISTS (
+                                     SELECT 1
+                                     FROM note_tags nt
+                                     WHERE nt.note_id = n.id AND nt.tag_id = ?1
+                             )
+                         ORDER BY n.updated_at DESC, n.path ASC
+                         LIMIT ?2
+                 )
+                 SELECT ln.id,
+                                ln.path,
+                                ln.title,
+                                ln.updated_at,
+                                o.source,
+                                o.occurrence_order,
+                                o.line_start,
+                                o.line_end,
+                                o.heading_context,
+                                o.context_snippet,
+                                ln.has_front_matter
+                 FROM latest_notes ln
+                 LEFT JOIN tag_occurrences o
+                     ON o.note_id = ln.id AND o.tag_id = ?1
+                 ORDER BY ln.updated_at DESC,
+                                    ln.path ASC,
+                                    CASE o.source WHEN 'inline' THEN 0 ELSE 1 END,
+                                    COALESCE(o.occurrence_order, 0) ASC",
+        )?;
 
     let mut rows = stmt.query(params![tag_id, TAG_CONTEXT_LIMIT])?;
     let mut items = Vec::new();
@@ -267,7 +281,7 @@ mod tests {
     }
 
         #[test]
-        fn get_tag_context_in_conn_returns_latest_five_notes_with_representative_occurrence() {
+        fn get_tag_context_in_conn_returns_all_occurrences_within_latest_five_notes() {
             let (root, conn) = setup_tag_delete_db();
             let notes = [
                 (
@@ -315,9 +329,9 @@ mod tests {
             assert_eq!(context.tag_id, tag_id);
             assert_eq!(context.tag_name, "项目报告");
             assert_eq!(context.total_notes, 6);
-            assert_eq!(context.visible_count, 5);
+            assert_eq!(context.visible_count, 6);
             assert!(context.has_more);
-            assert_eq!(context.items.len(), 5);
+            assert_eq!(context.items.len(), 6);
 
             let titles = context
                 .items
@@ -327,6 +341,7 @@ mod tests {
             assert_eq!(
                 titles,
                 vec![
+                    "Newest Inline",
                     "Newest Inline",
                     "Front Matter Only",
                     "Recent Three",
@@ -343,7 +358,14 @@ mod tests {
             assert_eq!(newest.heading_context.as_deref(), Some("Newest Inline"));
             assert_eq!(newest.context_snippet, "First #项目报告 hit.");
 
-            let front_matter = &context.items[1];
+            let newest_second = &context.items[1];
+            assert_eq!(newest_second.source, "inline");
+            assert_eq!(newest_second.occurrence_order, 2);
+            assert_eq!(newest_second.line_start, 4);
+            assert_eq!(newest_second.line_end, 4);
+            assert_eq!(newest_second.context_snippet, "Later #项目报告 again.");
+
+            let front_matter = &context.items[2];
             assert_eq!(front_matter.source, "front_matter");
             assert_eq!(front_matter.occurrence_order, 0);
             assert_eq!(front_matter.line_start, 1);

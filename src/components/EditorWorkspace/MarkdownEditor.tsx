@@ -7,6 +7,7 @@ import type { SourceLineSyncSignal } from "./sourceLineSync";
 import { findInlineTagMatches } from "./inlineTags";
 import { clearActiveDraggedTagName, getActiveDraggedTagName } from "./tagDragState";
 import type { TagNavigationTarget } from "../../types";
+import { useEditorStore } from "../../store/useEditorStore";
 
 interface Props {
   initialContent: string;
@@ -141,6 +142,7 @@ function getDropPosition(view: EditorView, x: number, y: number): number | null 
 export function MarkdownEditor({ initialContent, onChange, tagNavigationTarget, sourceLineSyncSignal, onTopVisibleLineChange }: Props) {
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const setIsComposing = useEditorStore((state) => state.setIsComposing);
   const isProgrammaticChange = useRef(false);
   const isProgrammaticScroll = useRef(false);
   const programmaticScrollTimerRef = useRef<number | null>(null);
@@ -181,6 +183,14 @@ export function MarkdownEditor({ initialContent, onChange, tagNavigationTarget, 
         keymap.of([...defaultKeymap, ...historyKeymap]),
         inlineTagPlugin,
         EditorView.domEventHandlers({
+          compositionstart: () => {
+            setIsComposing(true);
+            return false;
+          },
+          compositionend: () => {
+            setIsComposing(false);
+            return false;
+          },
           dragover: (event) => {
             if (!readDraggedTagName(event.dataTransfer)) return false;
             event.preventDefault();
@@ -227,6 +237,7 @@ export function MarkdownEditor({ initialContent, onChange, tagNavigationTarget, 
     viewRef.current = view;
 
     return () => {
+      setIsComposing(false);
       if (navigationHighlightTimerRef.current !== null) {
         window.clearTimeout(navigationHighlightTimerRef.current);
       }
@@ -236,7 +247,7 @@ export function MarkdownEditor({ initialContent, onChange, tagNavigationTarget, 
       view.destroy();
       viewRef.current = null;
     };
-  }, []);
+  }, [setIsComposing]);
 
   useEffect(() => {
     const scroller = viewRef.current?.scrollDOM;

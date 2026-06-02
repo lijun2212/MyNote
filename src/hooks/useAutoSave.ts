@@ -5,12 +5,20 @@ import { api } from "../api/commands";
 const AUTO_SAVE_DELAY_MS = 800;
 
 export function useAutoSave() {
-  const { currentNote, content, isDirty, markSaved, setSaving, setSaveError } = useEditorStore();
+  const { currentNote, content, isComposing, isDirty, markSaved, setSaving, setSaveError } = useEditorStore();
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedHashRef = useRef<string | null>(null);
   const saveRequestIdRef = useRef(0);
 
   useEffect(() => {
+    if (isComposing) {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      return;
+    }
+
     if (!isDirty || !currentNote) return;
 
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -57,7 +65,7 @@ export function useAutoSave() {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [isDirty, content, currentNote, markSaved, setSaving, setSaveError]);
+  }, [isComposing, isDirty, content, currentNote, markSaved, setSaving, setSaveError]);
 
   useEffect(() => {
     if (currentNote) {

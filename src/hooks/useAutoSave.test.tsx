@@ -129,4 +129,34 @@ describe("useAutoSave", () => {
     expect(useEditorStore.getState().currentNote?.content_hash).toBe("new-hash-saved");
     expect(useEditorStore.getState().isDirty).toBe(false);
   });
+
+  it("does not autosave while the editor is in IME composition and saves after composition ends", async () => {
+    vi.useFakeTimers();
+    const note = makeNote({ id: "note1", content_hash: "hash-before" });
+    const savedNote = makeNote({ id: "note1", content_hash: "hash-after" });
+    invokeMock.mockResolvedValueOnce(makeSaveNoteResult({ note: savedNote }));
+    setDirtyNote(note, "# Updated\n\n#技术zhan");
+    useEditorStore.getState().setIsComposing(true);
+
+    renderHook(() => useAutoSave());
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1600);
+    });
+    expect(invokeMock).not.toHaveBeenCalled();
+
+    act(() => {
+      useEditorStore.getState().setIsComposing(false);
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(800);
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith("save_note", {
+      noteId: "note1",
+      content: "# Updated\n\n#技术zhan",
+      expectedHash: "hash-before",
+    });
+  });
 });

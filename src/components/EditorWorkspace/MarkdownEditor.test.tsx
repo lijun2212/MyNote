@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { setActiveDraggedTagName, clearActiveDraggedTagName } from "./tagDragState";
 import type { TagNavigationTarget } from "../../types";
+import { useEditorStore } from "../../store/useEditorStore";
 
 describe("MarkdownEditor", () => {
   beforeEach(() => {
@@ -143,6 +144,23 @@ describe("MarkdownEditor", () => {
     });
 
     expect(onChange.mock.lastCall?.[0]).toContain("#项目报告");
+  });
+
+  it("tracks IME composition state so autosave can wait for committed input", () => {
+    const onChange = vi.fn();
+    const { container } = render(
+      <MarkdownEditor
+        initialContent={"# Title\n\nBody"}
+        onChange={onChange}
+      />,
+    );
+
+    const contentRoot = container.querySelector(".cm-content") as HTMLElement;
+    fireEvent.compositionStart(contentRoot);
+    expect(useEditorStore.getState().isComposing).toBe(true);
+
+    fireEvent.compositionEnd(contentRoot);
+    expect(useEditorStore.getState().isComposing).toBe(false);
   });
 
   it("highlights the navigation target tag when tagNavigationTarget is provided", async () => {
