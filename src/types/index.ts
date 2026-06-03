@@ -131,9 +131,46 @@ export interface NoteLinks {
   incoming: LinkItem[];
 }
 
-export interface SearchResult {
+export type SearchMatchSource = "title" | "body";
+
+interface SearchHitLocation {
   note_id: string;
+  line_start: number;
+  line_end: number;
+  occurrence_order: number;
+  match_text: string;
+  source: SearchMatchSource;
+}
+
+export interface SearchResult extends SearchHitLocation {
   title: string;
   path: string;
   snippet: string;
+  score: number;
+}
+
+export interface SearchNavigationTarget extends SearchHitLocation {
+  note_path: string;
+  note_title: string;
+  context_snippet: string;
+  revision: number;
+}
+
+export interface SearchHistoryHitItem {
+  query: string;
+  note_id: string;
+  note_title: string;
+  note_path: string;
+  line_start: number;
+  line_end: number;
+  occurrence_order: number;
+  snippet: string;
+  source: SearchMatchSource;
+}
+
+export interface SearchSession {
+  query: string;
+  results: SearchResult[];
+  currentIndex: number;
+  active: boolean;
 }

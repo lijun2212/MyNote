@@ -41,7 +41,7 @@ describe("useKnowledgeBase", () => {
     });
   });
 
-  it("creates a notebook through the api and refreshes the tree", async () => {
+  it("creates a notebook with icon and color metadata", async () => {
     const refreshTree = vi.fn().mockResolvedValue(undefined);
     useAppStore.setState({ refreshTree });
     apiMocks.createNotebook.mockResolvedValue("notes/法律");
@@ -49,10 +49,10 @@ describe("useKnowledgeBase", () => {
     const { result } = renderHook(() => useKnowledgeBase());
 
     await act(async () => {
-      await result.current.createNotebook("法律");
+      await result.current.createNotebook("法律", "book", "blue");
     });
 
-    expect(apiMocks.createNotebook).toHaveBeenCalledWith("法律");
+    expect(apiMocks.createNotebook).toHaveBeenCalledWith("法律", "book", "blue");
     expect(refreshTree).toHaveBeenCalledTimes(1);
     expect(openNoteMock).not.toHaveBeenCalled();
   });

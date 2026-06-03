@@ -6,7 +6,7 @@ import { useAppStore } from "../../store/useAppStore";
 import { useEditorStore } from "../../store/useEditorStore";
 import { tauriMocks } from "../../test/setup";
 import { makeNote, makeNoteDetail } from "../../test/testData";
-import type { TagNavigationTarget } from "../../types";
+import type { SearchNavigationTarget, TagNavigationTarget } from "../../types";
 
 const invokeMock = vi.mocked(invoke);
 
@@ -91,6 +91,37 @@ describe("MarkdownPreview", () => {
     expect(columns[2]).toHaveStyle({ width: "33.33%" });
   });
 
+  it("highlights the matched term inside inline-code table cells without highlighting the whole table", async () => {
+    const searchNavigationTarget: SearchNavigationTarget = {
+      note_id: "note-1",
+      note_path: "notes/demo.md",
+      note_title: "Demo",
+      line_start: 3,
+      line_end: 3,
+      occurrence_order: 1,
+      match_text: "ocr",
+      source: "body",
+      context_snippet: "| `ocr/` | OCR 辅助实现 |",
+      revision: 7,
+    };
+
+    const { container } = render(
+      <MarkdownPreview
+        content={[
+          "| 路径 | 说明 |",
+          "| --- | --- |",
+          "| `ocr/` | OCR 辅助实现 |",
+        ].join("\n")}
+        searchNavigationTarget={searchNavigationTarget}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelector("table.search-navigation-target")).toBeNull();
+      expect(container.querySelector("mark.search-navigation-target")).toHaveTextContent("ocr");
+    });
+  });
+
   it("keeps list markers inside the padded preview content area", () => {
     const { container } = render(
       <MarkdownPreview
@@ -159,6 +190,37 @@ describe("MarkdownPreview", () => {
 
     expect(pre).toHaveStyle({ background: "#f6f8fa", padding: "14px 16px", borderRadius: "6px" });
     expect(code).toHaveStyle({ fontFamily: "var(--font-mono)", whiteSpace: "pre" });
+  });
+
+  it("highlights the matched term inside fenced code blocks without highlighting the whole block", async () => {
+    const searchNavigationTarget: SearchNavigationTarget = {
+      note_id: "note-1",
+      note_path: "notes/demo.md",
+      note_title: "Demo",
+      line_start: 2,
+      line_end: 2,
+      occurrence_order: 1,
+      match_text: "nacos",
+      source: "body",
+      context_snippet: 'private.pro.config=<Nacos地址>:<Nacos端口>',
+      revision: 8,
+    };
+
+    const { container } = render(
+      <MarkdownPreview
+        content={[
+          "```properties",
+          "private.pro.config=<Nacos地址>:<Nacos端口>",
+          "```",
+        ].join("\n")}
+        searchNavigationTarget={searchNavigationTarget}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelector("pre.search-navigation-target")).toBeNull();
+      expect(container.querySelector("mark.search-navigation-target")).toHaveTextContent("Nacos");
+    });
   });
 
   it("hides a valid closed opening front matter block while rendering visible Markdown content", () => {
@@ -350,6 +412,285 @@ describe("MarkdownPreview", () => {
     await waitFor(() => {
       const previewContent = container.querySelector(".markdown-preview-content");
       expect(previewContent).toHaveClass("markdown-preview-front-matter-navigation-target");
+    });
+  });
+
+  it("scrolls to the translated preview source line when searchNavigationTarget is provided", async () => {
+    const searchNavigationTarget: SearchNavigationTarget = {
+      note_id: "note-1",
+      note_path: "notes/demo.md",
+      note_title: "Demo",
+      line_start: 9,
+      line_end: 9,
+      occurrence_order: 1,
+      match_text: "alpha",
+      source: "body",
+      context_snippet: "Body alpha target",
+      revision: 1,
+    };
+
+    const { container, rerender } = render(
+      <MarkdownPreview
+        content={[
+          "---",
+          "title: Demo",
+          "tags:",
+          "  - private",
+          "---",
+          "",
+          "# Heading",
+          "",
+          "Body alpha target",
+        ].join("\n")}
+      />,
+    );
+
+    const scrollContainer = container.firstElementChild as HTMLDivElement;
+    scrollContainer.getBoundingClientRect = () => ({
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: 600,
+      bottom: 400,
+      width: 600,
+      height: 400,
+      toJSON: () => ({}),
+    });
+
+    const heading = container.querySelector("h1") as HTMLElement;
+    const paragraph = container.querySelector("p") as HTMLElement;
+    heading.getBoundingClientRect = () => ({
+      x: 0,
+      y: 40,
+      left: 0,
+      top: 40,
+      right: 600,
+      bottom: 80,
+      width: 600,
+      height: 40,
+      toJSON: () => ({}),
+    });
+    paragraph.getBoundingClientRect = () => ({
+      x: 0,
+      y: 180,
+      left: 0,
+      top: 180,
+      right: 600,
+      bottom: 220,
+      width: 600,
+      height: 40,
+      toJSON: () => ({}),
+    });
+
+    rerender(
+      <MarkdownPreview
+        content={[
+          "---",
+          "title: Demo",
+          "tags:",
+          "  - private",
+          "---",
+          "",
+          "# Heading",
+          "",
+          "Body alpha target",
+        ].join("\n")}
+        searchNavigationTarget={searchNavigationTarget}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(scrollContainer.scrollTop).toBe(180);
+    });
+  });
+
+  it("does not scroll preview search navigation when the hit is fully inside stripped front matter", async () => {
+    const searchNavigationTarget: SearchNavigationTarget = {
+      note_id: "note-1",
+      note_path: "notes/demo.md",
+      note_title: "Demo",
+      line_start: 2,
+      line_end: 2,
+      occurrence_order: 1,
+      match_text: "Demo",
+      source: "title",
+      context_snippet: "title: Demo",
+      revision: 2,
+    };
+
+    const { container, rerender } = render(
+      <MarkdownPreview
+        content={[
+          "---",
+          "title: Demo",
+          "tags:",
+          "  - private",
+          "---",
+          "",
+          "Body text",
+        ].join("\n")}
+      />,
+    );
+
+    const scrollContainer = container.firstElementChild as HTMLDivElement;
+    scrollContainer.scrollTop = 0;
+
+    rerender(
+      <MarkdownPreview
+        content={[
+          "---",
+          "title: Demo",
+          "tags:",
+          "  - private",
+          "---",
+          "",
+          "Body text",
+        ].join("\n")}
+        searchNavigationTarget={searchNavigationTarget}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(scrollContainer.scrollTop).toBe(0);
+    });
+  });
+
+  it("highlights the active search navigation target in preview content", async () => {
+    const searchNavigationTarget: SearchNavigationTarget = {
+      note_id: "note-1",
+      note_path: "notes/demo.md",
+      note_title: "Demo",
+      line_start: 3,
+      line_end: 3,
+      occurrence_order: 1,
+      match_text: "alpha",
+      source: "body",
+      context_snippet: "Body alpha target",
+      revision: 3,
+    };
+
+    const { container } = render(
+      <MarkdownPreview
+        content={["# Heading", "", "Body alpha target"].join("\n")}
+        searchNavigationTarget={searchNavigationTarget}
+      />,
+    );
+
+    await waitFor(() => {
+      const highlightedSearchHit = container.querySelector(".search-navigation-target");
+      expect(highlightedSearchHit).toHaveTextContent("alpha");
+    });
+  });
+
+  it("highlights the occurrence selected by occurrence_order in preview content", async () => {
+    const searchNavigationTarget: SearchNavigationTarget = {
+      note_id: "note-1",
+      note_path: "notes/demo.md",
+      note_title: "Demo",
+      line_start: 3,
+      line_end: 3,
+      occurrence_order: 2,
+      match_text: "alpha",
+      source: "body",
+      context_snippet: "alpha middle alpha end",
+      revision: 4,
+    };
+
+    const { container } = render(
+      <MarkdownPreview
+        content={["# Heading", "", "alpha middle alpha end"].join("\n")}
+        searchNavigationTarget={searchNavigationTarget}
+      />,
+    );
+
+    await waitFor(() => {
+      const highlightedSearchHit = container.querySelector(".search-navigation-target");
+      expect(highlightedSearchHit).toHaveTextContent("alpha");
+      expect(highlightedSearchHit?.previousSibling?.textContent).toContain("alpha middle ");
+    });
+  });
+
+  it("matches translated preview highlights case-insensitively for repeated hits after front matter", async () => {
+    const searchNavigationTarget: SearchNavigationTarget = {
+      note_id: "note-1",
+      note_path: "notes/demo.md",
+      note_title: "Demo",
+      line_start: 7,
+      line_end: 7,
+      occurrence_order: 2,
+      match_text: "alpha",
+      source: "body",
+      context_snippet: "Alpha middle alpha end",
+      revision: 5,
+    };
+
+    const { container } = render(
+      <MarkdownPreview
+        content={[
+          "---",
+          "title: Demo",
+          "tags:",
+          "  - private",
+          "---",
+          "",
+          "Alpha middle alpha end",
+        ].join("\n")}
+        searchNavigationTarget={searchNavigationTarget}
+      />,
+    );
+
+    await waitFor(() => {
+      const highlightedSearchHit = container.querySelector(".search-navigation-target");
+      expect(highlightedSearchHit).toHaveTextContent("alpha");
+      expect(highlightedSearchHit?.previousSibling?.textContent).toContain("Alpha middle ");
+    });
+  });
+
+  it("recomputes preview search highlighting when content changes under the same target", async () => {
+    const searchNavigationTarget: SearchNavigationTarget = {
+      note_id: "note-1",
+      note_path: "notes/demo.md",
+      note_title: "Demo",
+      line_start: 3,
+      line_end: 3,
+      occurrence_order: 1,
+      match_text: "alpha",
+      source: "body",
+      context_snippet: "Body alpha target",
+      revision: 6,
+    };
+
+    const { container, rerender } = render(
+      <MarkdownPreview
+        content={["# Heading", "", "Body alpha target"].join("\n")}
+        searchNavigationTarget={searchNavigationTarget}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelector(".search-navigation-target")).toHaveTextContent("alpha");
+    });
+
+    rerender(
+      <MarkdownPreview
+        content={[
+          "---",
+          "title: Demo",
+          "tags:",
+          "  - alpha",
+          "---",
+          "",
+          "# Heading",
+          "",
+          "Body alpha target",
+        ].join("\n")}
+        searchNavigationTarget={searchNavigationTarget}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelector(".search-navigation-target")).toBeNull();
     });
   });
 });

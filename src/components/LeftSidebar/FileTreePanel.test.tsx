@@ -39,6 +39,11 @@ vi.mock("../../api/commands", () => ({
 
 describe("FileTreePanel", () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: undefined,
+    });
     hookMocks.createNote.mockReset();
     hookMocks.createNotebook.mockReset();
     hookMocks.moveNote.mockReset();
@@ -214,6 +219,118 @@ describe("FileTreePanel", () => {
     fireEvent.drop(notebookNode, { dataTransfer: transfer });
 
     await waitFor(() => expect(hookMocks.moveNote).toHaveBeenCalledWith("notes/法律/案例.md", "notes/法律"));
+  });
+
+  it("moves a note through the pointer fallback when native drag events are unavailable", async () => {
+    hookMocks.moveNote.mockResolvedValue(undefined);
+
+    render(<FileTreePanel />);
+
+    const fileNode = screen.getByText("案例.md");
+    const notebookNode = screen.getByText("法律");
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: vi.fn(() => notebookNode),
+    });
+
+    fireEvent.pointerDown(fileNode, { button: 0, pointerType: "mouse", clientX: 20, clientY: 80 });
+    fireEvent.pointerMove(window, { pointerType: "mouse", clientX: 20, clientY: 40 });
+    fireEvent.pointerUp(window, { pointerType: "mouse", clientX: 20, clientY: 40 });
+
+    await waitFor(() => expect(hookMocks.moveNote).toHaveBeenCalledWith("notes/法律/案例.md", "notes/法律"));
+  });
+
+  it("moves a note through the global pointer fallback", async () => {
+    hookMocks.moveNote.mockResolvedValue(undefined);
+
+    render(<FileTreePanel />);
+
+    const fileNode = screen.getByText("案例.md");
+    const notebookNode = screen.getByText("法律");
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: vi.fn(() => notebookNode),
+    });
+
+    fireEvent.pointerDown(fileNode, { button: 0, pointerType: "mouse", clientX: 20, clientY: 80 });
+    fireEvent.pointerMove(window, { pointerType: "mouse", clientX: 20, clientY: 40 });
+    fireEvent.pointerUp(window, { pointerType: "mouse", clientX: 20, clientY: 40 });
+
+    await waitFor(() => expect(hookMocks.moveNote).toHaveBeenCalledWith("notes/法律/案例.md", "notes/法律"));
+  });
+
+  it("moves a note through the global mouse fallback", async () => {
+    hookMocks.moveNote.mockResolvedValue(undefined);
+
+    render(<FileTreePanel />);
+
+    const fileNode = screen.getByText("案例.md");
+    const notebookNode = screen.getByText("法律");
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: vi.fn(() => notebookNode),
+    });
+
+    fireEvent.mouseDown(fileNode, { button: 0, clientX: 20, clientY: 80 });
+    fireEvent.mouseMove(window, { button: 0, clientX: 20, clientY: 40 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 20, clientY: 40 });
+
+    await waitFor(() => expect(hookMocks.moveNote).toHaveBeenCalledWith("notes/法律/案例.md", "notes/法律"));
+  });
+
+  it("highlights a notebook while dragging over it", () => {
+    render(<FileTreePanel />);
+
+    const fileNode = screen.getByText("案例.md");
+    const notebookNode = screen.getByText("法律");
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: vi.fn(() => notebookNode),
+    });
+
+    fireEvent.mouseDown(fileNode, { button: 0, clientX: 20, clientY: 80 });
+    fireEvent.mouseMove(window, { button: 0, clientX: 20, clientY: 40 });
+
+    expect(notebookNode.parentElement).toHaveStyle({ background: "rgb(219, 234, 254)" });
+  });
+
+  it("shows a note-shaped drag preview while dragging a file", () => {
+    render(<FileTreePanel />);
+
+    const fileNode = screen.getByText("案例.md");
+    const notebookNode = screen.getByText("法律");
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: vi.fn(() => notebookNode),
+    });
+
+    fireEvent.mouseDown(fileNode, { button: 0, clientX: 20, clientY: 80 });
+    fireEvent.mouseMove(window, { button: 0, clientX: 92, clientY: 112 });
+
+    const preview = screen.getByTestId("note-drag-preview");
+    expect(preview).toHaveTextContent("案例.md");
+    expect(preview).toHaveStyle({ left: "80px", top: "100px" });
+    expect(preview).toHaveStyle({ background: "rgb(255, 255, 255)" });
+    expect(preview).toHaveStyle({ transform: "translate3d(0, 0, 0) rotate(-1deg)" });
+  });
+
+  it("clears a missed drag so the next directory click does not move the note", () => {
+    hookMocks.moveNote.mockResolvedValue(undefined);
+    render(<FileTreePanel />);
+
+    const fileNode = screen.getByText("案例.md");
+    const notebookNode = screen.getByText("法律");
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: vi.fn(() => null),
+    });
+
+    fireEvent.mouseDown(fileNode, { button: 0, clientX: 20, clientY: 80 });
+    fireEvent.mouseMove(window, { button: 0, clientX: 200, clientY: 200 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 200, clientY: 200 });
+    fireEvent.click(notebookNode);
+
+    expect(hookMocks.moveNote).not.toHaveBeenCalled();
   });
 
   it("does not move a note when dropped on 未归档", () => {

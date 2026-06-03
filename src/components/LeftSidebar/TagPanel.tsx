@@ -4,15 +4,43 @@ import type { Tag } from "../../types";
 import { useAppStore } from "../../store/useAppStore";
 import { useEditorStore } from "../../store/useEditorStore";
 import { useOpenNote } from "../../hooks/useOpenNote";
-import { clearActiveDraggedTagName, scheduleClearActiveDraggedTagName, setActiveDraggedTagName } from "../EditorWorkspace/tagDragState";
+import { scheduleClearActiveDraggedTagName, setActiveDraggedTagName } from "../EditorWorkspace/tagDragState";
 
 const INSERT_TAG_EVENT = "mynote:insert-tag";
+const TAG_DRAG_DEBUG_PREFIX = "[mynote:tag-drag]";
+const TAG_DRAG_SOURCE_SELECTOR = "[data-tag-drag-name]";
+const TAG_DRAG_THRESHOLD_PX = 4;
+
+function logTagDrag(event: string, details: Record<string, unknown>) {
+  console.info(TAG_DRAG_DEBUG_PREFIX, event, details);
+}
+
+function getDataTransferTypes(dataTransfer: DataTransfer): string[] {
+  return Array.from(dataTransfer.types ?? []);
+}
+
+function getEventElement(target: EventTarget | null): Element | null {
+  if (target instanceof Element) return target;
+  if (target instanceof Text) return target.parentElement;
+  return null;
+}
+
+type InternalTagDrag = {
+  tagName: string;
+  startX: number;
+  startY: number;
+  currentX: number;
+  currentY: number;
+  isDragging: boolean;
+};
 
 export function TagPanel() {
   const [tags, setTags] = useState<Tag[]>([]);
   const [isCreatingTag, setIsCreatingTag] = useState(false);
   const [newTagName, setNewTagName] = useState("");
+  const [dragPreview, setDragPreview] = useState<InternalTagDrag | null>(null);
   const latestTagContextRequestId = useRef(0);
+  const internalTagDragRef = useRef<InternalTagDrag | null>(null);
   const selectedTagIds = useAppStore((s) => s.selectedTagIds);
   const activeTagContext = useAppStore((s) => s.activeTagContext);
   const setSelectedTagIds = useAppStore((s) => s.setSelectedTagIds);
@@ -29,6 +57,100 @@ export function TagPanel() {
     if (!kb) return;
     api.listTags().then(setTags).catch(console.error);
   }, [kb, currentNote?.content_hash]);
+
+  useEffect(() => {
+    logTagDrag("global-source-listener-ready", { mode: "pointer+mouse" });
+
+    const setGlobalTagDrag = (drag: InternalTagDrag | null) => {
+      internalTagDragRef.current = drag;
+      setDragPreview(drag?.isDragging ? drag : null);
+    };
+
+    const startGlobalTagDrag = (
+      targetEvent: EventTarget | null,
+      button: number,
+      clientX: number,
+      clientY: number,
+      inputType: string,
+    ) => {
+      if (button !== 0) return;
+      const target = getEventElement(targetEvent)?.closest<HTMLElement>(TAG_DRAG_SOURCE_SELECTOR);
+      const tagName = target?.dataset.tagDragName?.trim() ?? "";
+      if (!tagName) return;
+
+      setActiveDraggedTagName(tagName);
+      setGlobalTagDrag({ tagName, startX: clientX, startY: clientY, currentX: clientX, currentY: clientY, isDragging: false });
+      logTagDrag("global-start", {
+        tagName,
+        inputType,
+        clientX,
+        clientY,
+      });
+    };
+
+    const moveGlobalTagDrag = (clientX: number, clientY: number) => {
+      const drag = internalTagDragRef.current;
+      if (!drag) return;
+      const distance = Math.hypot(clientX - drag.startX, clientY - drag.startY);
+      if (!drag.isDragging && distance < TAG_DRAG_THRESHOLD_PX) return;
+      const nextDrag = { ...drag, currentX: clientX, currentY: clientY, isDragging: true };
+      setGlobalTagDrag(nextDrag);
+      if (!drag.isDragging) {
+        logTagDrag("global-dragging", { tagName: drag.tagName, distance });
+      }
+    };
+
+    const finishGlobalTagDrag = () => {
+      if (!internalTagDragRef.current) return;
+      setGlobalTagDrag(null);
+      scheduleClearActiveDraggedTagName();
+    };
+
+    const handlePointerDown = (event: PointerEvent) => {
+      startGlobalTagDrag(event.target, event.button, event.clientX, event.clientY, `pointer:${event.pointerType}`);
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      moveGlobalTagDrag(event.clientX, event.clientY);
+    };
+
+    const handlePointerUp = () => {
+      finishGlobalTagDrag();
+    };
+
+    const handlePointerCancel = () => {
+      finishGlobalTagDrag();
+    };
+
+    const handleMouseDown = (event: MouseEvent) => {
+      startGlobalTagDrag(event.target, event.button, event.clientX, event.clientY, "mouse");
+    };
+
+    const handleMouseMove = (event: MouseEvent) => {
+      moveGlobalTagDrag(event.clientX, event.clientY);
+    };
+
+    const handleMouseUp = () => {
+      finishGlobalTagDrag();
+    };
+
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("pointermove", handlePointerMove, true);
+    window.addEventListener("pointerup", handlePointerUp, true);
+    window.addEventListener("pointercancel", handlePointerCancel, true);
+    window.addEventListener("mousedown", handleMouseDown, true);
+    window.addEventListener("mousemove", handleMouseMove, true);
+    window.addEventListener("mouseup", handleMouseUp, true);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("pointermove", handlePointerMove, true);
+      window.removeEventListener("pointerup", handlePointerUp, true);
+      window.removeEventListener("pointercancel", handlePointerCancel, true);
+      window.removeEventListener("mousedown", handleMouseDown, true);
+      window.removeEventListener("mousemove", handleMouseMove, true);
+      window.removeEventListener("mouseup", handleMouseUp, true);
+    };
+  }, []);
 
   const reloadTags = () => {
     api.listTags().then(setTags).catch(console.error);
@@ -162,14 +284,39 @@ export function TagPanel() {
           <button
             type="button"
             onClick={(e) => toggleTag(tag, e)}
-            draggable
+            draggable={false}
+            data-tag-drag-name={tag.name}
+            onPointerDown={(event) => {
+              if (event.button !== 0) return;
+              setActiveDraggedTagName(tag.name);
+              logTagDrag("pointer-start", {
+                tagName: tag.name,
+                pointerType: event.pointerType,
+                clientX: event.clientX,
+                clientY: event.clientY,
+              });
+            }}
+            onPointerUp={() => {
+              scheduleClearActiveDraggedTagName();
+            }}
+            onPointerCancel={() => {
+              scheduleClearActiveDraggedTagName();
+            }}
             onDragStart={(event) => {
               setActiveDraggedTagName(tag.name);
               event.dataTransfer.setData("application/x-mynote-tag", tag.name);
               event.dataTransfer.setData("text/plain", `#${tag.name}`);
               event.dataTransfer.effectAllowed = "copy";
+              logTagDrag("dragstart", {
+                tagName: tag.name,
+                dataTypes: getDataTransferTypes(event.dataTransfer),
+                effectAllowed: event.dataTransfer.effectAllowed,
+              });
             }}
-            onDragEnd={() => scheduleClearActiveDraggedTagName()}
+            onDragEnd={() => {
+              logTagDrag("dragend", { tagName: tag.name });
+              scheduleClearActiveDraggedTagName();
+            }}
             aria-label={`标签 ${tag.name} ${tag.note_count ?? 0}`}
             style={{
               flex: 1,
@@ -349,6 +496,57 @@ export function TagPanel() {
           + 新增标签
         </button>
       </div>
+      {dragPreview && (
+        <div
+          aria-hidden="true"
+          data-testid="tag-drag-preview"
+          style={{
+            position: "fixed",
+            left: dragPreview.currentX - 12,
+            top: dragPreview.currentY - 12,
+            zIndex: 9999,
+            pointerEvents: "none",
+            maxWidth: 190,
+            minHeight: 30,
+            padding: "6px 10px",
+            borderRadius: 999,
+            border: "1px solid #93c5fd",
+            background: "#ffffff",
+            color: "#1f2937",
+            fontSize: 13,
+            fontWeight: 600,
+            boxShadow: "0 12px 28px rgba(15, 23, 42, 0.18), 0 0 0 1px rgba(147, 197, 253, 0.25)",
+            transform: "translate3d(0, 0, 0) rotate(-1deg)",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <span
+            style={{
+              width: 18,
+              height: 18,
+              borderRadius: 999,
+              background: "#dbeafe",
+              color: "#2563eb",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flex: "0 0 auto",
+              fontSize: 12,
+              fontWeight: 700,
+            }}
+          >
+            #
+          </span>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+            # {dragPreview.tagName}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

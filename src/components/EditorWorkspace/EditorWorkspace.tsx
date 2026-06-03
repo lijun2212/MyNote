@@ -1,18 +1,52 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useEditorStore } from "../../store/useEditorStore";
+import { useSearchSessionStore } from "../../store/useSearchSessionStore";
+import { useOpenNote } from "../../hooks/useOpenNote";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { useAutoSave } from "../../hooks/useAutoSave";
 import { useEditorSplitResize } from "../../hooks/useEditorSplitResize";
+import { SearchSessionBar } from "./SearchSessionBar";
 import type { SourceLineSyncSignal, SourceLineSyncSource } from "./sourceLineSync";
 
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  return Boolean(target.closest("input, textarea, [contenteditable='true'], .cm-content"));
+}
+
 export function EditorWorkspace() {
-  const { currentNote, content, setContent, markDirty, showPreview, togglePreview, tagNavigationTarget } = useEditorStore();
+  const {
+    currentNote,
+    content,
+    setContent,
+    markDirty,
+    showPreview,
+    togglePreview,
+    searchNavigationTarget,
+    tagNavigationTarget,
+    setSearchNavigationTarget,
+  } = useEditorStore();
+  const session = useSearchSessionStore((state) => state.session);
+  const setCurrentIndex = useSearchSessionStore((state) => state.setCurrentIndex);
+  const clearSession = useSearchSessionStore((state) => state.clearSession);
+  const { openNote, beginOpenNote, isOpenNoteRequestCurrent } = useOpenNote();
+  const activeSearchNavigationTarget = searchNavigationTarget
+    && (searchNavigationTarget.revision > (tagNavigationTarget?.revision ?? -1))
+    ? searchNavigationTarget
+    : null;
+  const activeTagNavigationTarget = tagNavigationTarget
+    && (tagNavigationTarget.revision >= (searchNavigationTarget?.revision ?? -1))
+    ? tagNavigationTarget
+    : null;
   useAutoSave();
   const [isSeparatorHovered, setIsSeparatorHovered] = useState(false);
   const [sourceLineSyncSignal, setSourceLineSyncSignal] = useState<SourceLineSyncSignal | null>(null);
   const pendingSourceLineSyncRef = useRef<{ source: SourceLineSyncSource; line: number } | null>(null);
   const sourceLineSyncFrameRef = useRef<number | null>(null);
+  const navigationRevisionRef = useRef(0);
 
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const {
@@ -46,6 +80,112 @@ export function EditorWorkspace() {
       }));
     });
   }, []);
+
+  const navigateToSessionIndex = useCallback(async (nextIndex: number) => {
+    if (!session || !session.active) {
+      return;
+    }
+
+    const sessionSnapshot = session;
+    const navigationRevision = navigationRevisionRef.current + 1;
+    navigationRevisionRef.current = navigationRevision;
+
+    const result = session.results[nextIndex];
+    if (!result) {
+      return;
+    }
+
+    if (currentNote?.path !== result.path) {
+      const requestId = beginOpenNote();
+      await openNote(result.path, requestId);
+      if (!isOpenNoteRequestCurrent(requestId)) {
+        return;
+      }
+      if (navigationRevisionRef.current !== navigationRevision) {
+        return;
+      }
+      if (useEditorStore.getState().currentNote?.path !== result.path) {
+        return;
+      }
+    }
+
+    if (navigationRevisionRef.current !== navigationRevision) {
+      return;
+    }
+    if (useSearchSessionStore.getState().session !== sessionSnapshot) {
+      return;
+    }
+
+    setCurrentIndex(nextIndex);
+    setSearchNavigationTarget({
+      note_id: result.note_id,
+      note_path: result.path,
+      note_title: result.title,
+      line_start: result.line_start,
+      line_end: result.line_end,
+      occurrence_order: result.occurrence_order,
+      match_text: result.match_text,
+      source: result.source,
+      context_snippet: result.snippet,
+      revision: Date.now(),
+    });
+  }, [beginOpenNote, currentNote?.path, isOpenNoteRequestCurrent, openNote, session, setCurrentIndex, setSearchNavigationTarget]);
+
+  const handlePreviousSearchResult = useCallback(() => {
+    if (!session || !session.active || session.currentIndex <= 0) {
+      return;
+    }
+
+    void navigateToSessionIndex(session.currentIndex - 1);
+  }, [navigateToSessionIndex, session]);
+
+  const handleNextSearchResult = useCallback(() => {
+    if (!session || !session.active || session.currentIndex >= session.results.length - 1) {
+      return;
+    }
+
+    void navigateToSessionIndex(session.currentIndex + 1);
+  }, [navigateToSessionIndex, session]);
+
+  const handleExitSearchSession = useCallback(() => {
+    navigationRevisionRef.current += 1;
+    clearSession();
+    setSearchNavigationTarget(null);
+  }, [clearSession, setSearchNavigationTarget]);
+
+  useEffect(() => {
+    if (!session?.active) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) {
+        return;
+      }
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        handleExitSearchSession();
+        return;
+      }
+
+      if (isEditableTarget(event.target)) {
+        return;
+      }
+
+      const normalizedKey = event.key.toLowerCase();
+      if (normalizedKey === "n") {
+        event.preventDefault();
+        handleNextSearchResult();
+      } else if (normalizedKey === "b") {
+        event.preventDefault();
+        handlePreviousSearchResult();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleExitSearchSession, handleNextSearchResult, handlePreviousSearchResult, session?.active]);
 
   useEffect(() => {
     return () => {
@@ -103,7 +243,8 @@ export function EditorWorkspace() {
           <MarkdownEditor
             initialContent={content}
             onChange={handleChange}
-            tagNavigationTarget={tagNavigationTarget}
+            searchNavigationTarget={activeSearchNavigationTarget}
+            tagNavigationTarget={activeTagNavigationTarget}
             sourceLineSyncSignal={sourceLineSyncSignal}
             onTopVisibleLineChange={(line) => handleSourceLineSync("editor", line)}
           />
@@ -141,13 +282,24 @@ export function EditorWorkspace() {
           }}>
             <MarkdownPreview
               content={content}
-              tagNavigationTarget={tagNavigationTarget}
+              searchNavigationTarget={activeSearchNavigationTarget}
+              tagNavigationTarget={activeTagNavigationTarget}
               sourceLineSyncSignal={sourceLineSyncSignal}
               onTopVisibleLineChange={(line) => handleSourceLineSync("preview", line)}
             />
           </div>
         )}
       </div>
+      {session?.active && (
+        <SearchSessionBar
+          query={session.query}
+          currentIndex={session.currentIndex}
+          total={session.results.length}
+          onPrevious={handlePreviousSearchResult}
+          onNext={handleNextSearchResult}
+          onExit={handleExitSearchSession}
+        />
+      )}
     </div>
   );
 }

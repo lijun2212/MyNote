@@ -61,6 +61,11 @@ pub async fn move_note(
     source_path: String,
     target_directory: String,
 ) -> Result<Note, AppError> {
+    println!(
+        "[mynote:note-drag] command move_note source_path={} target_directory={}",
+        source_path, target_directory
+    );
+
     let root_guard = state.kb_root.lock().unwrap();
     let root = root_guard
         .as_ref()

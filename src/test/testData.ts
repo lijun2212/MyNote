@@ -1,4 +1,11 @@
-import type { KnowledgeBase, Note, NoteDetail, SaveNoteResult, SearchResult } from "../types";
+import type {
+  KnowledgeBase,
+  Note,
+  NoteDetail,
+  SaveNoteResult,
+  SearchHistoryHitItem,
+  SearchResult,
+} from "../types";
 
 export function makeKnowledgeBase(overrides: Partial<KnowledgeBase> = {}): KnowledgeBase {
   return {
@@ -38,6 +45,27 @@ export function makeSearchResult(overrides: Partial<SearchResult> = {}): SearchR
     title: "Note 1",
     path: "notes/note1.md",
     snippet: "A <mark>note</mark> result",
+    line_start: 3,
+    line_end: 3,
+    occurrence_order: 1,
+    match_text: "note",
+    source: "body",
+    score: -1.2,
+    ...overrides,
+  };
+}
+
+export function makeSearchHistoryHit(overrides: Partial<SearchHistoryHitItem> = {}): SearchHistoryHitItem {
+  return {
+    query: "nacos",
+    note_id: "note-1",
+    note_title: "Search Hit",
+    note_path: "notes/search-hit.md",
+    line_start: 3,
+    line_end: 3,
+    occurrence_order: 1,
+    snippet: "A <mark>nacos</mark> result",
+    source: "body",
     ...overrides,
   };
 }

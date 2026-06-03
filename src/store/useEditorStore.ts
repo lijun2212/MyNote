@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Note, TagNavigationTarget } from "../types";
+import type { Note, SearchNavigationTarget, TagNavigationTarget } from "../types";
 
 interface EditorState {
   currentNote: Note | null;
@@ -10,6 +10,7 @@ interface EditorState {
   saveError: string | null;
   saveStatus: "saved" | "saving" | "unsaved" | "error";
   showPreview: boolean;
+  searchNavigationTarget: SearchNavigationTarget | null;
   tagNavigationTarget: TagNavigationTarget | null;
 
   setCurrentNote: (note: Note | null) => void;
@@ -20,6 +21,7 @@ interface EditorState {
   setSaving: (saving: boolean) => void;
   setSaveError: (error: string | null) => void;
   togglePreview: () => void;
+  setSearchNavigationTarget: (target: SearchNavigationTarget | null) => void;
   setTagNavigationTarget: (target: TagNavigationTarget | null) => void;
 }
 
@@ -32,6 +34,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   saveError: null,
   saveStatus: "saved",
   showPreview: true,
+  searchNavigationTarget: null,
   tagNavigationTarget: null,
 
   setCurrentNote: (note) =>
@@ -49,5 +52,6 @@ export const useEditorStore = create<EditorState>((set) => ({
   setSaveError: (error) =>
     set({ saveError: error, isSaving: false, saveStatus: "error" }),
   togglePreview: () => set((s) => ({ showPreview: !s.showPreview })),
+  setSearchNavigationTarget: (target) => set({ searchNavigationTarget: target }),
   setTagNavigationTarget: (target) => set({ tagNavigationTarget: target }),
 }));

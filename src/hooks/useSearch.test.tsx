@@ -26,10 +26,37 @@ describe("useSearch", () => {
     expect(invokeMock).not.toHaveBeenCalled();
   });
 
+  it("does not enter loading for a non-empty query when no knowledge base is open", () => {
+    vi.useFakeTimers();
+    useAppStore.setState({ kb: null });
+
+    const { result } = renderHook(() => useSearch("alpha"));
+
+    expect(result.current.results).toEqual([]);
+    expect(result.current.isLoading).toBe(false);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
   it("debounces a non-empty query for 300ms before invoking search and populating results", async () => {
     vi.useFakeTimers();
     const kb = makeKnowledgeBase({ id: "kb1" });
-    const searchResults = [makeSearchResult({ note_id: "note1", title: "Alpha" })];
+    const searchResults = [
+      makeSearchResult({
+        note_id: "note2",
+        title: "Second hit",
+        line_start: 8,
+        occurrence_order: 2,
+        score: 0.25,
+      }),
+      makeSearchResult({
+        note_id: "note1",
+        title: "Alpha",
+        line_start: 2,
+        occurrence_order: 1,
+        score: -8.5,
+        source: "title",
+      }),
+    ];
     useAppStore.setState({ kb });
     invokeMock.mockResolvedValueOnce(searchResults);
 
@@ -51,6 +78,13 @@ describe("useSearch", () => {
     expect(invokeMock).toHaveBeenCalledWith("search_notes", { query: "alpha", kbId: "kb1" });
     await flushMicrotasks();
     expect(result.current.results).toEqual(searchResults);
+    expect(result.current.results[0]).toMatchObject({
+      line_start: 8,
+      occurrence_order: 2,
+      match_text: "note",
+      source: "body",
+      score: 0.25,
+    });
     expect(result.current.isLoading).toBe(false);
   });
 

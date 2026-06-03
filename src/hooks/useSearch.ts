@@ -32,10 +32,10 @@ export function useSearch(query: string) {
 
     setIsLoading(true);
     try {
-      const res = await api.searchNotes(q, currentKb.id);
+      const searchResults = await api.searchNotes(q, currentKb.id);
       if (requestId !== requestIdRef.current) return;
       if (kbRef.current?.id !== currentKb.id) return;
-      setResults(res);
+      setResults(searchResults);
     } catch {
       if (requestId !== requestIdRef.current) return;
       setResults([]);
@@ -50,6 +50,12 @@ export function useSearch(query: string) {
     requestIdRef.current += 1;
 
     if (timerRef.current) clearTimeout(timerRef.current);
+
+    if (!kb) {
+      setResults([]);
+      setIsLoading(false);
+      return;
+    }
 
     if (!query.trim()) {
       setResults([]);

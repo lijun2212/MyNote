@@ -10,7 +10,7 @@ import {
   scrollPreviewToSourceLine,
   type SourceLineSyncSignal,
 } from "./sourceLineSync";
-import type { TagNavigationTarget } from "../../types";
+import type { SearchNavigationTarget, TagNavigationTarget } from "../../types";
 
 const md = new MarkdownIt({ html: false, linkify: true, typographer: true });
 const SOURCE_LINE_TAGS = new Set(["blockquote", "h1", "h2", "h3", "h4", "h5", "h6", "li", "ol", "p", "table", "tr", "ul"]);
@@ -127,6 +127,73 @@ function translateTagNavigationTarget(
   };
 }
 
+function translateSearchNavigationTarget(
+  searchNavigationTarget: SearchNavigationTarget | null | undefined,
+  lineOffset: number,
+): SearchNavigationTarget | null {
+  if (!searchNavigationTarget) return null;
+
+  const translatedLineEnd = searchNavigationTarget.line_end - lineOffset;
+  if (translatedLineEnd < 1) return null;
+
+  return {
+    ...searchNavigationTarget,
+    line_start: Math.max(1, searchNavigationTarget.line_start - lineOffset),
+    line_end: Math.max(1, translatedLineEnd),
+  };
+}
+
+function findMatchIndexes(text: string, matchText: string): number[] {
+  if (!matchText) {
+    return [];
+  }
+
+  const haystack = text.toLocaleLowerCase();
+  const needle = matchText.toLocaleLowerCase();
+  const indexes: number[] = [];
+  let searchFrom = 0;
+  while (searchFrom <= haystack.length - needle.length) {
+    const matchIndex = haystack.indexOf(needle, searchFrom);
+    if (matchIndex === -1) {
+      break;
+    }
+    indexes.push(matchIndex);
+    searchFrom = matchIndex + needle.length;
+  }
+  return indexes;
+}
+
+interface ActiveSearchNavigationTarget extends SearchNavigationTarget {
+  occurrenceInRange: number | null;
+}
+
+function getOccurrenceIndexWithinTargetRange(content: string, searchNavigationTarget: SearchNavigationTarget): number | null {
+  const matchText = searchNavigationTarget.match_text.trim();
+  if (!matchText) {
+    return null;
+  }
+
+  const lines = content.split(/\r?\n/);
+  let globalOccurrenceOrder = 0;
+  let rangeOccurrenceOrder = 0;
+
+  for (let lineNumber = 1; lineNumber <= lines.length; lineNumber += 1) {
+    const matchIndexes = findMatchIndexes(lines[lineNumber - 1] ?? "", matchText);
+    for (const _matchIndex of matchIndexes) {
+      globalOccurrenceOrder += 1;
+      const isInRange = lineNumber >= searchNavigationTarget.line_start && lineNumber <= searchNavigationTarget.line_end;
+      if (isInRange) {
+        rangeOccurrenceOrder += 1;
+      }
+      if (globalOccurrenceOrder === searchNavigationTarget.occurrence_order) {
+        return isInRange ? rangeOccurrenceOrder : null;
+      }
+    }
+  }
+
+  return null;
+}
+
 function formatColumnWidth(value: number): string {
   return `${Number(value.toFixed(2))}%`;
 }
@@ -203,6 +270,90 @@ function enhanceInlineTags(
   }
 }
 
+function shouldSkipSearchEnhancement(node: Node | null): boolean {
+  if (!(node instanceof HTMLElement)) return false;
+  return Boolean(node.closest("a, .inline-tag-chip, .search-navigation-target"));
+}
+
+function wrapNthSearchMatchInBlocks(blocks: HTMLElement[], matchText: string, targetOccurrence: number): boolean {
+  let occurrenceOrder = 0;
+
+  for (const block of blocks) {
+    const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+    const textNodes: Text[] = [];
+    let currentNode = walker.nextNode();
+
+    while (currentNode) {
+      if (
+        !shouldSkipSearchEnhancement(currentNode.parentNode)
+        && findMatchIndexes(currentNode.textContent ?? "", matchText).length > 0
+      ) {
+        textNodes.push(currentNode as Text);
+      }
+      currentNode = walker.nextNode();
+    }
+
+    for (const textNode of textNodes) {
+      const text = textNode.textContent ?? "";
+      const matchIndexes = findMatchIndexes(text, matchText);
+      for (const matchIndex of matchIndexes) {
+        occurrenceOrder += 1;
+        if (occurrenceOrder !== targetOccurrence) {
+          continue;
+        }
+
+        const fragment = document.createDocumentFragment();
+        if (matchIndex > 0) {
+          fragment.appendChild(document.createTextNode(text.slice(0, matchIndex)));
+        }
+
+        const highlighted = document.createElement("mark");
+        highlighted.className = "search-navigation-target";
+        highlighted.textContent = text.slice(matchIndex, matchIndex + matchText.length);
+        fragment.appendChild(highlighted);
+
+        if (matchIndex + matchText.length < text.length) {
+          fragment.appendChild(document.createTextNode(text.slice(matchIndex + matchText.length)));
+        }
+
+        textNode.parentNode?.replaceChild(fragment, textNode);
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function enhanceSearchNavigationTarget(
+  container: HTMLElement,
+  searchNavigationTarget: ActiveSearchNavigationTarget | null,
+) {
+  if (!searchNavigationTarget) return;
+
+  const targetBlocks = Array.from(container.querySelectorAll<HTMLElement>("[data-source-line]"))
+    .filter((node) => {
+      const sourceLine = Number(node.dataset.sourceLine);
+      const sourceEndLine = Number(node.dataset.sourceEndLine || node.dataset.sourceLine);
+      return sourceLine <= searchNavigationTarget.line_end && sourceEndLine >= searchNavigationTarget.line_start;
+    });
+
+  if (targetBlocks.length === 0) return;
+
+  const matchText = searchNavigationTarget.match_text.trim();
+  let hasHighlightedMatch = false;
+  if (matchText) {
+    const targetOccurrence = searchNavigationTarget.occurrenceInRange ?? 1;
+    if (wrapNthSearchMatchInBlocks(targetBlocks, matchText, targetOccurrence)) {
+      hasHighlightedMatch = true;
+    }
+  }
+
+  if (!hasHighlightedMatch) {
+    targetBlocks[0]?.classList.add("search-navigation-target");
+  }
+}
+
 function enhanceResizableTables(container: HTMLElement) {
   const tables = Array.from(container.querySelectorAll("table"));
 
@@ -248,12 +399,19 @@ function readColumnWidths(cols: HTMLTableColElement[]): number[] {
 
 interface Props {
   content: string;
+  searchNavigationTarget?: SearchNavigationTarget | null;
   tagNavigationTarget?: TagNavigationTarget | null;
   sourceLineSyncSignal?: SourceLineSyncSignal | null;
   onTopVisibleLineChange?: (line: number) => void;
 }
 
-export function MarkdownPreview({ content, tagNavigationTarget, sourceLineSyncSignal, onTopVisibleLineChange }: Props) {
+export function MarkdownPreview({
+  content,
+  searchNavigationTarget,
+  tagNavigationTarget,
+  sourceLineSyncSignal,
+  onTopVisibleLineChange,
+}: Props) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const isProgrammaticScroll = useRef(false);
@@ -261,6 +419,7 @@ export function MarkdownPreview({ content, tagNavigationTarget, sourceLineSyncSi
   const navigationHighlightTimerRef = useRef<number | null>(null);
   const previewLineOffsetRef = useRef(0);
   const [activePreviewNavigationTarget, setActivePreviewNavigationTarget] = useState<TagNavigationTarget | null>(null);
+  const [activeSearchNavigationTarget, setActiveSearchNavigationTarget] = useState<ActiveSearchNavigationTarget | null>(null);
   const [isFrontMatterNavigationActive, setIsFrontMatterNavigationActive] = useState(false);
   const { openNote, beginOpenNote, isOpenNoteRequestCurrent } = useOpenNote();
 
@@ -290,8 +449,9 @@ export function MarkdownPreview({ content, tagNavigationTarget, sourceLineSyncSi
       collectInlineTagLineMatches(previewBody.content),
       activePreviewNavigationTarget,
     );
+    enhanceSearchNavigationTarget(containerRef.current, activeSearchNavigationTarget);
     enhanceResizableTables(containerRef.current);
-  }, [content, activePreviewNavigationTarget, isFrontMatterNavigationActive]);
+  }, [content, activePreviewNavigationTarget, activeSearchNavigationTarget, isFrontMatterNavigationActive]);
 
   useEffect(() => {
     const scrollContainer = scrollContainerRef.current;
@@ -347,6 +507,32 @@ export function MarkdownPreview({ content, tagNavigationTarget, sourceLineSyncSi
       navigationHighlightTimerRef.current = null;
     }, 1600);
   }, [tagNavigationTarget]);
+
+  useEffect(() => {
+    const scrollContainer = scrollContainerRef.current;
+    const contentContainer = containerRef.current;
+    if (!scrollContainer || !contentContainer) return;
+
+    const translatedSearchNavigationTarget = translateSearchNavigationTarget(
+      searchNavigationTarget ?? null,
+      previewLineOffsetRef.current,
+    );
+    setActiveSearchNavigationTarget(
+      translatedSearchNavigationTarget
+        ? {
+          ...translatedSearchNavigationTarget,
+          occurrenceInRange: searchNavigationTarget
+            ? getOccurrenceIndexWithinTargetRange(content, searchNavigationTarget)
+            : null,
+        }
+        : null,
+    );
+    if (!translatedSearchNavigationTarget) return;
+
+    isProgrammaticScroll.current = true;
+    scrollPreviewToSourceLine(scrollContainer, contentContainer, translatedSearchNavigationTarget.line_start);
+    releaseProgrammaticScrollSoon();
+  }, [content, searchNavigationTarget]);
 
   useEffect(() => {
     if (!sourceLineSyncSignal || sourceLineSyncSignal.source === "preview") return;
@@ -639,6 +825,11 @@ export function MarkdownPreview({ content, tagNavigationTarget, sourceLineSyncSi
           background: #dfe8ff;
           color: #2448b8;
           box-shadow: 0 0 0 1px rgba(91, 106, 249, 0.24);
+        }
+        .markdown-preview-content .search-navigation-target {
+          background: rgba(255, 212, 92, 0.55);
+          box-shadow: 0 0 0 1px rgba(217, 154, 0, 0.18);
+          border-radius: 4px;
         }
         .markdown-preview-content.markdown-preview-front-matter-navigation-target {
           box-shadow: inset 0 0 0 2px rgba(91, 106, 249, 0.22);

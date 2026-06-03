@@ -1,0 +1,411 @@
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { EditorWorkspace } from "./EditorWorkspace";
+import { useEditorStore } from "../../store/useEditorStore";
+import { useSearchSessionStore } from "../../store/useSearchSessionStore";
+import { deferred, makeNote, makeSearchResult } from "../../test/testData";
+
+const capturedProps = vi.hoisted(() => ({
+  editor: null as Record<string, unknown> | null,
+  preview: null as Record<string, unknown> | null,
+}));
+
+const openNoteMock = vi.hoisted(() => vi.fn<(...args: unknown[]) => Promise<void>>());
+const beginOpenNoteMock = vi.hoisted(() => vi.fn(() => 301));
+const isOpenNoteRequestCurrentMock = vi.hoisted(() => vi.fn<(requestId?: unknown) => boolean>(() => true));
+
+vi.mock("../../hooks/useAutoSave", () => ({
+  useAutoSave: () => undefined,
+}));
+
+vi.mock("../../hooks/useEditorSplitResize", () => ({
+  useEditorSplitResize: () => ({
+    editorRatio: 50,
+    isResizing: false,
+    minRatio: 20,
+    maxRatio: 80,
+    startResize: vi.fn(),
+    resize: vi.fn(),
+    stopResize: vi.fn(),
+  }),
+}));
+
+vi.mock("../../hooks/useOpenNote", () => ({
+  useOpenNote: () => ({
+    openNote: openNoteMock,
+    beginOpenNote: beginOpenNoteMock,
+    isOpenNoteRequestCurrent: isOpenNoteRequestCurrentMock,
+  }),
+}));
+
+vi.mock("./MarkdownEditor", () => ({
+  MarkdownEditor: (props: Record<string, unknown>) => {
+    capturedProps.editor = props;
+    return <div data-testid="mock-editor" />;
+  },
+}));
+
+vi.mock("./MarkdownPreview", () => ({
+  MarkdownPreview: (props: Record<string, unknown>) => {
+    capturedProps.preview = props;
+    return <div data-testid="mock-preview" />;
+  },
+}));
+
+describe("EditorWorkspace", () => {
+  beforeEach(() => {
+    capturedProps.editor = null;
+    capturedProps.preview = null;
+    openNoteMock.mockReset();
+    beginOpenNoteMock.mockClear();
+    isOpenNoteRequestCurrentMock.mockClear();
+    useSearchSessionStore.getState().resetForTest();
+    useEditorStore.setState({
+      currentNote: makeNote({ path: "notes/demo.md", title: "Demo" }),
+      content: "# Demo\n\nBody",
+      isComposing: false,
+      isDirty: false,
+      isSaving: false,
+      saveError: null,
+      saveStatus: "saved",
+      showPreview: true,
+      searchNavigationTarget: null,
+      tagNavigationTarget: null,
+    });
+  });
+
+  it("passes only the latest navigation target to editor and preview", () => {
+    useEditorStore.setState({
+      searchNavigationTarget: {
+        note_id: "note-1",
+        note_path: "notes/demo.md",
+        note_title: "Demo",
+        line_start: 9,
+        line_end: 9,
+        occurrence_order: 1,
+        match_text: "alpha",
+        context_snippet: "alpha hit",
+        source: "body",
+        revision: 2,
+      },
+      tagNavigationTarget: {
+        note_id: "note-1",
+        note_path: "notes/demo.md",
+        note_title: "Demo",
+        note_updated_at: "2026-06-01T00:00:00Z",
+        source: "inline",
+        occurrence_order: 1,
+        line_start: 3,
+        line_end: 3,
+        heading_context: null,
+        context_snippet: "Body #阶段一",
+        tag_name: "阶段一",
+        revision: 1,
+      },
+    });
+
+    render(<EditorWorkspace />);
+
+    expect(capturedProps.editor?.searchNavigationTarget).toMatchObject({ revision: 2, line_start: 9 });
+    expect(capturedProps.editor?.tagNavigationTarget).toBeNull();
+    expect(capturedProps.preview?.searchNavigationTarget).toMatchObject({ revision: 2, line_start: 9 });
+    expect(capturedProps.preview?.tagNavigationTarget).toBeNull();
+  });
+
+  it("renders the search session bar when the session is active", () => {
+    useSearchSessionStore.getState().startSession({
+      query: "alpha",
+      results: [makeSearchResult({ title: "Demo", path: "notes/demo.md" })],
+      currentIndex: 0,
+    });
+
+    render(<EditorWorkspace />);
+
+    expect(screen.getByText("搜索会话：alpha")).toBeInTheDocument();
+    expect(screen.getByText("1 / 1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "下一个命中" })).toBeInTheDocument();
+  });
+
+  it("navigates to the next session result across notes and updates the target", async () => {
+    const user = userEvent.setup();
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(12345);
+    openNoteMock.mockImplementation(async (path: unknown) => {
+      useEditorStore.getState().setCurrentNote(makeNote({ path: path as string, title: "Next Note" }));
+    });
+
+    useSearchSessionStore.getState().startSession({
+      query: "alpha",
+      results: [
+        makeSearchResult({
+          note_id: "note-1",
+          title: "Demo",
+          path: "notes/demo.md",
+          line_start: 3,
+          line_end: 3,
+          occurrence_order: 1,
+        }),
+        makeSearchResult({
+          note_id: "note-2",
+          title: "Next Note",
+          path: "notes/next.md",
+          line_start: 11,
+          line_end: 11,
+          occurrence_order: 2,
+          match_text: "alpha",
+          snippet: "Another <mark>alpha</mark> hit",
+        }),
+      ],
+      currentIndex: 0,
+    });
+
+    render(<EditorWorkspace />);
+
+    await user.click(screen.getByRole("button", { name: "下一个命中" }));
+
+    await waitFor(() => {
+      expect(openNoteMock).toHaveBeenCalledWith("notes/next.md", 301);
+      expect(useSearchSessionStore.getState().session?.currentIndex).toBe(1);
+      expect(useEditorStore.getState().searchNavigationTarget).toMatchObject({
+        note_id: "note-2",
+        note_path: "notes/next.md",
+        note_title: "Next Note",
+        line_start: 11,
+        line_end: 11,
+        occurrence_order: 2,
+        context_snippet: "Another <mark>alpha</mark> hit",
+        revision: 12345,
+      });
+    });
+
+    nowSpy.mockRestore();
+  });
+
+  it("clears the search session and target when exiting the session bar", async () => {
+    const user = userEvent.setup();
+
+    useSearchSessionStore.getState().startSession({
+      query: "alpha",
+      results: [makeSearchResult({ title: "Demo", path: "notes/demo.md" })],
+      currentIndex: 0,
+    });
+    useEditorStore.getState().setSearchNavigationTarget({
+      note_id: "note-1",
+      note_path: "notes/demo.md",
+      note_title: "Demo",
+      line_start: 3,
+      line_end: 3,
+      occurrence_order: 1,
+      match_text: "alpha",
+      source: "body",
+      context_snippet: "alpha hit",
+      revision: 9,
+    });
+
+    render(<EditorWorkspace />);
+
+    await user.click(screen.getByRole("button", { name: "退出搜索会话" }));
+
+    expect(useSearchSessionStore.getState().session).toBeNull();
+    expect(useEditorStore.getState().searchNavigationTarget).toBeNull();
+  });
+
+  it("does not write back search navigation after exiting during an in-flight note change", async () => {
+    const user = userEvent.setup();
+    const pendingOpen = deferred<void>();
+
+    openNoteMock.mockImplementation(() => pendingOpen.promise);
+
+    useSearchSessionStore.getState().startSession({
+      query: "alpha",
+      results: [
+        makeSearchResult({
+          note_id: "note-1",
+          title: "Demo",
+          path: "notes/demo.md",
+          line_start: 3,
+          line_end: 3,
+          occurrence_order: 1,
+        }),
+        makeSearchResult({
+          note_id: "note-2",
+          title: "Next Note",
+          path: "notes/next.md",
+          line_start: 11,
+          line_end: 11,
+          occurrence_order: 2,
+          match_text: "alpha",
+          snippet: "Another <mark>alpha</mark> hit",
+        }),
+      ],
+      currentIndex: 0,
+    });
+
+    render(<EditorWorkspace />);
+
+    await user.click(screen.getByRole("button", { name: "下一个命中" }));
+    await user.click(screen.getByRole("button", { name: "退出搜索会话" }));
+
+    expect(useSearchSessionStore.getState().session).toBeNull();
+    expect(useEditorStore.getState().searchNavigationTarget).toBeNull();
+
+    pendingOpen.resolve();
+    await waitFor(() => expect(openNoteMock).toHaveBeenCalledWith("notes/next.md", 301));
+
+    expect(useSearchSessionStore.getState().session).toBeNull();
+    expect(useEditorStore.getState().searchNavigationTarget).toBeNull();
+  });
+
+  it("does not write back search navigation for a stale open-note request", async () => {
+    const user = userEvent.setup();
+    const firstOpen = deferred<void>();
+    const secondOpen = deferred<void>();
+
+    beginOpenNoteMock
+      .mockReturnValueOnce(301)
+      .mockReturnValueOnce(302);
+    isOpenNoteRequestCurrentMock.mockImplementation((requestId: unknown) => requestId === 302);
+    openNoteMock
+      .mockImplementationOnce(async (path: unknown) => {
+        await firstOpen.promise;
+        useEditorStore.getState().setCurrentNote(makeNote({ path: path as string, title: "Next Note" }));
+      })
+      .mockImplementationOnce(async (path: unknown) => {
+        await secondOpen.promise;
+        useEditorStore.getState().setCurrentNote(makeNote({ path: path as string, title: "Next Note" }));
+      });
+
+    useSearchSessionStore.getState().startSession({
+      query: "alpha",
+      results: [
+        makeSearchResult({
+          note_id: "note-1",
+          title: "Demo",
+          path: "notes/demo.md",
+          line_start: 3,
+          line_end: 3,
+          occurrence_order: 1,
+        }),
+        makeSearchResult({
+          note_id: "note-2",
+          title: "Next Note",
+          path: "notes/next.md",
+          line_start: 11,
+          line_end: 11,
+          occurrence_order: 2,
+          match_text: "alpha",
+          snippet: "Another <mark>alpha</mark> hit",
+        }),
+      ],
+      currentIndex: 0,
+    });
+
+    render(<EditorWorkspace />);
+
+    await user.click(screen.getByRole("button", { name: "下一个命中" }));
+    await user.click(screen.getByRole("button", { name: "下一个命中" }));
+
+    firstOpen.resolve();
+    await waitFor(() => expect(openNoteMock).toHaveBeenCalledTimes(2));
+
+    expect(useSearchSessionStore.getState().session?.currentIndex).toBe(0);
+    expect(useEditorStore.getState().searchNavigationTarget).toBeNull();
+
+    secondOpen.resolve();
+    await waitFor(() => {
+      expect(useSearchSessionStore.getState().session?.currentIndex).toBe(1);
+      expect(useEditorStore.getState().searchNavigationTarget).toMatchObject({
+        note_id: "note-2",
+        note_path: "notes/next.md",
+        line_start: 11,
+        occurrence_order: 2,
+      });
+    });
+  });
+
+  it("does not write back search navigation after the session is replaced", async () => {
+    const user = userEvent.setup();
+    const pendingOpen = deferred<void>();
+
+    openNoteMock.mockImplementation(async (path: unknown) => {
+      await pendingOpen.promise;
+      useEditorStore.getState().setCurrentNote(makeNote({ path: path as string, title: "Next Note" }));
+    });
+
+    useSearchSessionStore.getState().startSession({
+      query: "alpha",
+      results: [
+        makeSearchResult({
+          note_id: "note-1",
+          title: "Demo",
+          path: "notes/demo.md",
+          line_start: 3,
+          line_end: 3,
+          occurrence_order: 1,
+        }),
+        makeSearchResult({
+          note_id: "note-2",
+          title: "Next Note",
+          path: "notes/next.md",
+          line_start: 11,
+          line_end: 11,
+          occurrence_order: 2,
+          match_text: "alpha",
+          snippet: "Another <mark>alpha</mark> hit",
+        }),
+      ],
+      currentIndex: 0,
+    });
+
+    render(<EditorWorkspace />);
+
+    await user.click(screen.getByRole("button", { name: "下一个命中" }));
+
+    act(() => {
+      useSearchSessionStore.getState().startSession({
+        query: "beta",
+        results: [makeSearchResult({ note_id: "note-3", title: "Beta", path: "notes/beta.md" })],
+        currentIndex: 0,
+      });
+    });
+
+    act(() => {
+      pendingOpen.resolve();
+    });
+    await waitFor(() => expect(openNoteMock).toHaveBeenCalledWith("notes/next.md", 301));
+
+    expect(useSearchSessionStore.getState().session).toMatchObject({
+      query: "beta",
+      currentIndex: 0,
+    });
+    expect(useEditorStore.getState().searchNavigationTarget).toBeNull();
+  });
+
+  it("handles N, B, and Escape while the search session is active", async () => {
+    useEditorStore.getState().setCurrentNote(makeNote({ path: "notes/demo.md", title: "Demo" }));
+    useSearchSessionStore.getState().startSession({
+      query: "nacos",
+      results: [
+        makeSearchResult({ note_id: "note-1", path: "notes/demo.md", title: "Demo", line_start: 3, occurrence_order: 1 }),
+        makeSearchResult({ note_id: "note-1", path: "notes/demo.md", title: "Demo", line_start: 8, occurrence_order: 2 }),
+      ],
+      currentIndex: 0,
+    });
+
+    render(<EditorWorkspace />);
+
+    fireEvent.keyDown(window, { key: "n" });
+    await waitFor(() => {
+      expect(useSearchSessionStore.getState().session?.currentIndex).toBe(1);
+    });
+
+    fireEvent.keyDown(window, { key: "b" });
+    await waitFor(() => {
+      expect(useSearchSessionStore.getState().session?.currentIndex).toBe(0);
+    });
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(useSearchSessionStore.getState().session).toBeNull();
+    expect(useEditorStore.getState().searchNavigationTarget).toBeNull();
+  });
+});

@@ -1,0 +1,91 @@
+<h2>搜索增强交互草图</h2>
+<p class="subtitle">问题：搜索跳转后，承载“上一个 / 下一个 / 结果计数 / 退出高亮”的搜索会话条应该放在哪里？</p>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">方案 A：搜索弹层内延续</div>
+        <div class="mockup-body">
+          <div class="mock-input">搜索：nacos</div>
+          <div style="display:flex; gap:8px; align-items:center; margin:10px 0; padding:8px 10px; background:#eef4ff; border:1px solid #c9dafc; border-radius:10px; font-size:13px;">
+            <span>2 / 17</span>
+            <button class="mock-button">上一个</button>
+            <button class="mock-button">下一个</button>
+            <span style="margin-left:auto; opacity:.7;">退出高亮</span>
+          </div>
+          <div class="placeholder" style="height:90px;">结果列表继续保留</div>
+          <div style="display:flex; gap:10px; margin-top:10px;">
+            <div class="placeholder" style="flex:1; height:120px; background:#fff8d9;">编辑区高亮当前命中</div>
+            <div class="placeholder" style="flex:1; height:120px; background:#fff8d9;">预览区高亮当前命中</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>方案 A</h3>
+      <p>搜索框始终保持主控台，结果集和上下切换都留在弹层里。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">方案 B：编辑区上方固定会话条</div>
+        <div class="mockup-body">
+          <div class="mock-input">搜索：nacos</div>
+          <div style="display:flex; gap:10px; margin-top:10px;">
+            <div style="flex:1; border:1px solid #d8dee9; border-radius:10px; overflow:hidden;">
+              <div style="display:flex; gap:8px; align-items:center; padding:8px 10px; background:#eef4ff; border-bottom:1px solid #d8dee9; font-size:13px;">
+                <span>搜索命中 2 / 17</span>
+                <button class="mock-button">上一个</button>
+                <button class="mock-button">下一个</button>
+                <span style="margin-left:auto; opacity:.7;">Esc 退出</span>
+              </div>
+              <div class="placeholder" style="height:145px; background:#fff8d9;">编辑区正文，当前命中高亮</div>
+            </div>
+            <div style="flex:1; border:1px solid #d8dee9; border-radius:10px; overflow:hidden;">
+              <div style="padding:8px 10px; background:#f8fafc; border-bottom:1px solid #d8dee9; font-size:13px;">预览区同步滚动</div>
+              <div class="placeholder" style="height:145px; background:#fff8d9;">预览区正文，当前命中高亮</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>方案 B</h3>
+      <p>搜索框负责找结果，进入文章后由工作区顶部接管导航，阅读时更稳定。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">方案 C：底部紧凑状态条</div>
+        <div class="mockup-body">
+          <div class="mock-input">搜索：nacos</div>
+          <div style="display:flex; gap:10px; margin-top:10px;">
+            <div class="placeholder" style="flex:1; height:170px; background:#fff8d9;">编辑区高亮</div>
+            <div class="placeholder" style="flex:1; height:170px; background:#fff8d9;">预览区高亮</div>
+          </div>
+          <div style="margin-top:10px; display:flex; align-items:center; gap:8px; padding:8px 10px; background:#1f2937; color:#fff; border-radius:10px; font-size:13px;">
+            <span>nacos</span>
+            <span style="opacity:.75;">2 / 17</span>
+            <button class="mock-button">◀</button>
+            <button class="mock-button">▶</button>
+            <span style="margin-left:auto; opacity:.75;">继续搜索</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>方案 C</h3>
+      <p>尽量不占上方空间，像阅读器状态条一样悬在底部。</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">已确认的范围</div>
+  <p>空搜索时展示最近搜索词和最近打开的搜索命中；搜索跳转后在编辑区和预览区同时高亮；支持全局结果集的上一个 / 下一个，并兼容当前文章内切换。</p>
+</div>

@@ -236,4 +236,20 @@ describe("TagPanel", () => {
 
     expect(getActiveDraggedTagName()).toBe("项目报告");
   });
+
+  it("shows a tag-shaped drag preview while dragging a tag", async () => {
+    apiMocks.listTags.mockResolvedValue([{ id: "tag-1", name: "项目报告", note_count: 3 }]);
+
+    render(<TagPanel />);
+
+    const tagButton = await screen.findByRole("button", { name: "标签 项目报告 3" });
+    fireEvent.mouseDown(tagButton, { button: 0, clientX: 20, clientY: 80 });
+    fireEvent.mouseMove(window, { button: 0, clientX: 92, clientY: 112 });
+
+    const preview = screen.getByTestId("tag-drag-preview");
+    expect(preview).toHaveTextContent("# 项目报告");
+    expect(preview).toHaveStyle({ left: "80px", top: "100px" });
+    expect(preview).toHaveStyle({ background: "rgb(255, 255, 255)" });
+    expect(preview).toHaveStyle({ transform: "translate3d(0, 0, 0) rotate(-1deg)" });
+  });
 });
