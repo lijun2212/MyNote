@@ -26,6 +26,8 @@ pub struct NoteTreeNode {
     pub name: String,
     pub path: String,
     pub is_dir: bool,
+    pub notebook_icon: Option<String>,
+    pub notebook_color: Option<String>,
     pub children: Vec<NoteTreeNode>,
 }
 
@@ -33,6 +35,12 @@ pub struct NoteTreeNode {
 pub struct SaveNoteResult {
     pub note: Note,
     pub conflict: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RenameNotebookResult {
+    pub notebook_path: String,
+    pub moved_note_paths: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,6 +52,8 @@ pub struct CreateNoteInput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateNotebookInput {
     pub name: String,
+    pub icon: String,
+    pub color: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

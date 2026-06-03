@@ -10,7 +10,16 @@ const hookMocks = vi.hoisted(() => ({
   createNote: vi.fn(),
   createNotebook: vi.fn(),
   moveNote: vi.fn(),
+  renameNotebook: vi.fn(),
+  updateNotebookVisual: vi.fn(),
+  deleteNotebook: vi.fn(),
+  reorderNotebooks: vi.fn(),
   openNote: vi.fn(),
+}));
+
+const apiMocks = vi.hoisted(() => ({
+  listNotesByTag: vi.fn(),
+  getNoteTree: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({
@@ -22,6 +31,10 @@ vi.mock("../../hooks/useKnowledgeBase", () => ({
     createNote: hookMocks.createNote,
     createNotebook: hookMocks.createNotebook,
     moveNote: hookMocks.moveNote,
+    renameNotebook: hookMocks.renameNotebook,
+    updateNotebookVisual: hookMocks.updateNotebookVisual,
+    deleteNotebook: hookMocks.deleteNotebook,
+    reorderNotebooks: hookMocks.reorderNotebooks,
   }),
 }));
 
@@ -32,9 +45,7 @@ vi.mock("../../hooks/useOpenNote", () => ({
 }));
 
 vi.mock("../../api/commands", () => ({
-  api: {
-    listNotesByTag: vi.fn(),
-  },
+  api: apiMocks,
 }));
 
 describe("FileTreePanel", () => {
@@ -47,7 +58,14 @@ describe("FileTreePanel", () => {
     hookMocks.createNote.mockReset();
     hookMocks.createNotebook.mockReset();
     hookMocks.moveNote.mockReset();
+    hookMocks.renameNotebook.mockReset();
+    hookMocks.updateNotebookVisual.mockReset();
+    hookMocks.deleteNotebook.mockReset();
+    hookMocks.reorderNotebooks.mockReset();
     hookMocks.openNote.mockReset();
+    apiMocks.listNotesByTag.mockReset();
+    apiMocks.getNoteTree.mockReset();
+    apiMocks.listNotesByTag.mockResolvedValue([]);
 
     const tree: NoteTreeNode[] = [
       {
@@ -82,6 +100,8 @@ describe("FileTreePanel", () => {
       },
     ];
 
+    apiMocks.getNoteTree.mockResolvedValue(tree);
+
     useAppStore.setState({
       kb: makeKnowledgeBase(),
       tree,
@@ -97,6 +117,400 @@ describe("FileTreePanel", () => {
     expect(screen.getByText("法律")).toBeInTheDocument();
     expect(screen.getByText("未归档")).toBeInTheDocument();
     expect(screen.getByText("我的笔记.md")).toBeInTheDocument();
+  });
+
+  it("shows directory color and article count while toggling with visible state changes", async () => {
+    const user = userEvent.setup();
+
+    render(<FileTreePanel />);
+
+    expect(screen.queryByRole("button", { name: "切换目录 法律" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "切换目录 未归档" })).not.toBeInTheDocument();
+
+    const directoryToggle = screen.getByRole("button", { name: "切换笔记本 法律" });
+    const directoryTitle = screen.getByRole("button", { name: "法律" });
+    const directoryContent = screen.getByTestId("directory-content:notes/法律");
+    const notebookColorTrigger = screen.getByRole("button", { name: "编辑笔记本颜色 法律" });
+    const directoryCount = screen.getByTestId("directory-count:notes/法律");
+    const noteRow = screen.getByText("案例.md");
+
+    expect(directoryContent).toHaveStyle({
+      overflow: "hidden",
+    });
+    expect(directoryContent.style.transition).toContain("max-height");
+    expect(directoryTitle.style.transition).toContain("background");
+    expect(directoryTitle).toHaveStyle({ fontSize: "14px" });
+    expect(noteRow).toHaveStyle({ fontSize: "13px" });
+    expect(notebookColorTrigger).toHaveStyle({ width: "8px" });
+    expect(notebookColorTrigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByTestId("notebook-icon:notes/法律")).not.toBeInTheDocument();
+    expect(directoryCount).toHaveTextContent("1");
+    expect(directoryCount).not.toHaveTextContent("篇");
+    expect(directoryToggle).toHaveAttribute("aria-expanded", "true");
+    expect(noteRow).toBeInTheDocument();
+
+    await user.click(directoryToggle);
+    expect(directoryToggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByTestId("directory-count:notes/法律")).toHaveTextContent("1");
+    expect(screen.getByTestId("directory-count:notes/法律")).not.toHaveTextContent("篇");
+    await waitFor(() => expect(screen.queryByText("案例.md")).not.toBeInTheDocument());
+
+    await user.click(directoryToggle);
+    expect(directoryToggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("案例.md")).toBeInTheDocument();
+  });
+
+  it("uses the default cursor for directories and notes", () => {
+    render(<FileTreePanel />);
+
+    const directoryToggle = screen.getByRole("button", { name: "法律" });
+    const noteRow = screen.getByText("案例.md");
+
+    expect(directoryToggle).toHaveStyle({ cursor: "default" });
+    expect(noteRow).toHaveStyle({ cursor: "default" });
+  });
+
+  it("does not render top-level notebook icons or nested directory icons", () => {
+    useAppStore.setState({
+      tree: [
+        {
+          id: null,
+          name: "notes",
+          path: "notes",
+          is_dir: true,
+          children: [
+            {
+              id: null,
+              name: "法律",
+              path: "notes/法律",
+              is_dir: true,
+              notebook_icon: "book",
+              notebook_color: "blue",
+              children: [
+                {
+                  id: null,
+                  name: "案例",
+                  path: "notes/法律/案例",
+                  is_dir: true,
+                  children: [
+                    {
+                      id: "note-1",
+                      name: "判例.md",
+                      path: "notes/法律/案例/判例.md",
+                      is_dir: false,
+                      children: [],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    render(<FileTreePanel />);
+
+    expect(screen.getByRole("button", { name: "编辑笔记本颜色 法律" })).toBeInTheDocument();
+    expect(screen.getByTestId("directory-count:notes/法律")).toHaveTextContent("1");
+    expect(screen.getByTestId("directory-count:notes/法律")).not.toHaveTextContent("篇");
+    expect(screen.queryByTestId("notebook-icon:notes/法律")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("notebook-icon:notes/法律/案例")).not.toBeInTheDocument();
+  });
+
+  it("does not render notebook icons when top-level notebook metadata is missing", () => {
+    useAppStore.setState({
+      tree: [
+        {
+          id: null,
+          name: "notes",
+          path: "notes",
+          is_dir: true,
+          children: [
+            {
+              id: null,
+              name: "默认笔记本",
+              path: "notes/默认笔记本",
+              is_dir: true,
+              children: [],
+            },
+          ],
+        },
+      ],
+    });
+
+    render(<FileTreePanel />);
+
+    expect(screen.getByRole("button", { name: "编辑笔记本颜色 默认笔记本" })).toBeInTheDocument();
+    expect(screen.getByTestId("directory-count:notes/默认笔记本")).toHaveTextContent("0");
+    expect(screen.getByTestId("directory-count:notes/默认笔记本")).not.toHaveTextContent("篇");
+    expect(screen.queryByTestId("notebook-icon:notes/默认笔记本")).not.toBeInTheDocument();
+  });
+
+  it("does not render a notebook marker for 未归档", () => {
+    render(<FileTreePanel />);
+
+    expect(screen.getByText("未归档")).toBeInTheDocument();
+    expect(screen.queryByTestId("notebook-icon:notes/__unarchived__")).not.toBeInTheDocument();
+  });
+
+  it("shows inline notebook actions only for top-level notebooks", () => {
+    useAppStore.setState({
+      tree: [
+        {
+          id: null,
+          name: "notes",
+          path: "notes",
+          is_dir: true,
+          children: [
+            {
+              id: null,
+              name: "项目",
+              path: "notes/项目",
+              is_dir: true,
+              children: [
+                {
+                  id: null,
+                  name: "子目录",
+                  path: "notes/项目/子目录",
+                  is_dir: true,
+                  children: [
+                    {
+                      id: "note-1",
+                      name: "说明.md",
+                      path: "notes/项目/子目录/说明.md",
+                      is_dir: false,
+                      children: [],
+                    },
+                  ],
+                },
+              ],
+            },
+            {
+              id: "note-2",
+              name: "根笔记.md",
+              path: "notes/根笔记.md",
+              is_dir: false,
+              children: [],
+            },
+          ],
+        },
+      ],
+    });
+
+    render(<FileTreePanel />);
+
+    const moveUpButton = screen.getByRole("button", { name: "上移笔记本 项目" });
+    const moveDownButton = screen.getByRole("button", { name: "下移笔记本 项目" });
+    const moveGroup = screen.getByTestId("notebook-move-group:notes/项目");
+
+    expect(moveUpButton).toBeInTheDocument();
+    expect(moveDownButton).toBeInTheDocument();
+    expect(moveGroup).toContainElement(moveUpButton);
+    expect(moveGroup).toContainElement(moveDownButton);
+    expect(moveGroup).not.toContainElement(screen.getByRole("button", { name: "删除笔记本 项目" }));
+    expect(moveGroup).toHaveStyle({ flexDirection: "column" });
+    expect(moveUpButton).toHaveTextContent("▲");
+    expect(moveDownButton).toHaveTextContent("▼");
+    expect(screen.getByRole("button", { name: "删除笔记本 项目" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "编辑笔记本颜色 项目" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "上移笔记本 子目录" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "删除笔记本 未归档" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "删除笔记本 根笔记.md" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /更多操作/ })).not.toBeInTheDocument();
+  });
+
+  it("enters inline rename mode on notebook title double click and saves on Enter", async () => {
+    const user = userEvent.setup();
+    hookMocks.renameNotebook.mockResolvedValue({
+      notebook_path: "notes/项目管理",
+      moved_note_paths: [],
+    });
+
+    render(<FileTreePanel />);
+
+    await user.dblClick(screen.getByText("法律"));
+
+    const input = screen.getByRole("textbox", { name: "重命名笔记本 法律" });
+    await user.clear(input);
+    await user.type(input, "项目管理{Enter}");
+
+    await waitFor(() => expect(hookMocks.renameNotebook).toHaveBeenCalledWith("notes/法律", "项目管理"));
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "重命名笔记本 法律" })).not.toBeInTheDocument());
+  });
+
+  it("keeps the rename draft and error inline when renameNotebook fails", async () => {
+    const user = userEvent.setup();
+    hookMocks.renameNotebook.mockRejectedValue(new Error("名称已存在"));
+
+    render(<FileTreePanel />);
+
+    await user.dblClick(screen.getByText("法律"));
+
+    const input = screen.getByRole("textbox", { name: "重命名笔记本 法律" });
+    await user.clear(input);
+    await user.type(input, "冲突名称{Enter}");
+
+    await waitFor(() => expect(hookMocks.renameNotebook).toHaveBeenCalledWith("notes/法律", "冲突名称"));
+    expect(screen.getByRole("textbox", { name: "重命名笔记本 法律" })).toHaveValue("冲突名称");
+    expect(screen.getByText("名称已存在")).toBeInTheDocument();
+  });
+
+  it("opens the inline color strip from the accent bar and saves immediately on color click", async () => {
+    const user = userEvent.setup();
+    hookMocks.updateNotebookVisual.mockResolvedValue(undefined);
+
+    render(<FileTreePanel />);
+
+    await user.click(screen.getByRole("button", { name: "编辑笔记本颜色 法律" }));
+    const orangeSwatch = screen.getByRole("button", { name: "笔记本颜色 橙色" });
+
+    expect(orangeSwatch).not.toHaveTextContent("橙色");
+
+    await user.click(orangeSwatch);
+
+    await waitFor(() => expect(hookMocks.updateNotebookVisual).toHaveBeenCalledWith("notes/法律", "folder", "orange"));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "笔记本颜色 橙色" })).not.toBeInTheDocument());
+  });
+
+  it("keeps the folder fallback when updating color for notebooks without icon metadata", async () => {
+    const user = userEvent.setup();
+    hookMocks.updateNotebookVisual.mockResolvedValue(undefined);
+
+    useAppStore.setState({
+      tree: [
+        {
+          id: null,
+          name: "notes",
+          path: "notes",
+          is_dir: true,
+          children: [
+            {
+              id: null,
+              name: "默认笔记本",
+              path: "notes/默认笔记本",
+              is_dir: true,
+              children: [],
+            },
+          ],
+        },
+      ],
+    });
+
+    render(<FileTreePanel />);
+
+    await user.click(screen.getByRole("button", { name: "编辑笔记本颜色 默认笔记本" }));
+    await user.click(screen.getByRole("button", { name: "笔记本颜色 橙色" }));
+
+    await waitFor(() => expect(hookMocks.updateNotebookVisual).toHaveBeenCalledWith("notes/默认笔记本", "folder", "orange"));
+  });
+
+  it("shows a lightweight delete confirmation inline and confirms deletion", async () => {
+    const user = userEvent.setup();
+    hookMocks.deleteNotebook.mockResolvedValue(undefined);
+    useAppStore.setState({
+      tree: [
+        {
+          id: null,
+          name: "notes",
+          path: "notes",
+          is_dir: true,
+          children: [
+            {
+              id: null,
+              name: "空笔记本",
+              path: "notes/空笔记本",
+              is_dir: true,
+              children: [],
+            },
+          ],
+        },
+      ],
+    });
+
+    render(<FileTreePanel />);
+
+    await user.click(screen.getByRole("button", { name: "删除笔记本 空笔记本" }));
+    expect(screen.getByText("确认删除该笔记本？")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "确认删除笔记本 空笔记本" }));
+
+    await waitFor(() => expect(hookMocks.deleteNotebook).toHaveBeenCalledWith("notes/空笔记本"));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "确认删除笔记本 空笔记本" })).not.toBeInTheDocument());
+  });
+
+  it("shows a lightweight delete confirmation inline and keeps it open on delete failure", async () => {
+    const user = userEvent.setup();
+    hookMocks.deleteNotebook.mockRejectedValue(new Error("只能删除空笔记本"));
+
+    render(<FileTreePanel />);
+
+    await user.click(screen.getByRole("button", { name: "删除笔记本 法律" }));
+    expect(screen.getByText("确认删除该笔记本？")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "确认删除笔记本 法律" }));
+
+    await waitFor(() => expect(hookMocks.deleteNotebook).toHaveBeenCalledWith("notes/法律"));
+    expect(screen.getByRole("button", { name: "确认删除笔记本 法律" })).toBeInTheDocument();
+    expect(screen.getByText("只能删除空笔记本")).toBeInTheDocument();
+  });
+
+  it("reorders notebooks directly from inline arrow buttons", async () => {
+    const user = userEvent.setup();
+    hookMocks.reorderNotebooks.mockResolvedValue(undefined);
+    useAppStore.setState({
+      tree: [
+        {
+          id: null,
+          name: "notes",
+          path: "notes",
+          is_dir: true,
+          children: [
+            {
+              id: null,
+              name: "法律",
+              path: "notes/法律",
+              is_dir: true,
+              children: [],
+            },
+            {
+              id: null,
+              name: "产品",
+              path: "notes/产品",
+              is_dir: true,
+              children: [],
+            },
+            {
+              id: null,
+              name: "研发",
+              path: "notes/研发",
+              is_dir: true,
+              children: [],
+            },
+          ],
+        },
+      ],
+    });
+
+    render(<FileTreePanel />);
+
+    expect(screen.getByRole("button", { name: "上移笔记本 法律" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "下移笔记本 研发" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "上移笔记本 产品" }));
+    await waitFor(() => expect(hookMocks.reorderNotebooks).toHaveBeenCalledWith([
+      "notes/产品",
+      "notes/法律",
+      "notes/研发",
+    ]));
+
+    hookMocks.reorderNotebooks.mockClear();
+    await user.click(screen.getByRole("button", { name: "下移笔记本 产品" }));
+    await waitFor(() => expect(hookMocks.reorderNotebooks).toHaveBeenCalledWith([
+      "notes/法律",
+      "notes/研发",
+      "notes/产品",
+    ]));
   });
 
   it("shows notebook creation action beside the new note action", () => {
@@ -128,7 +542,19 @@ describe("FileTreePanel", () => {
     expect(hookMocks.createNote).not.toHaveBeenCalled();
   });
 
-  it("creates a notebook through the knowledge base hook", async () => {
+  it("opens the notebook creation panel with default icon and color selected", async () => {
+    const user = userEvent.setup();
+
+    render(<FileTreePanel />);
+
+    await user.click(screen.getByRole("button", { name: "新建笔记本" }));
+
+    expect(screen.getByRole("textbox", { name: "笔记本名称" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "图标 书本" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "颜色 蓝色" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("creates a notebook with the default icon and color when pressing Enter", async () => {
     const user = userEvent.setup();
     hookMocks.createNotebook.mockResolvedValue(undefined);
 
@@ -137,9 +563,54 @@ describe("FileTreePanel", () => {
     await user.click(screen.getByRole("button", { name: "新建笔记本" }));
     const input = screen.getByRole("textbox", { name: "笔记本名称" });
     await user.type(input, "法律");
-    fireEvent.blur(input);
+    await user.keyboard("{Enter}");
 
-    await waitFor(() => expect(hookMocks.createNotebook).toHaveBeenCalledWith("法律"));
+    await waitFor(() => expect(hookMocks.createNotebook).toHaveBeenCalledWith("法律", "book", "blue"));
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "笔记本名称" })).not.toBeInTheDocument());
+  });
+
+  it("creates a notebook with the user-selected icon and color", async () => {
+    const user = userEvent.setup();
+    hookMocks.createNotebook.mockResolvedValue(undefined);
+
+    render(<FileTreePanel />);
+
+    await user.click(screen.getByRole("button", { name: "新建笔记本" }));
+    await user.type(screen.getByRole("textbox", { name: "笔记本名称" }), "项目");
+    await user.click(screen.getByRole("button", { name: "图标 代码" }));
+    await user.click(screen.getByRole("button", { name: "颜色 橙色" }));
+    await user.click(screen.getByRole("button", { name: "创建笔记本" }));
+
+    await waitFor(() => expect(hookMocks.createNotebook).toHaveBeenCalledWith("项目", "code", "orange"));
+  });
+
+  it("cancels notebook creation, closes the panel, and discards draft input", async () => {
+    const user = userEvent.setup();
+
+    render(<FileTreePanel />);
+
+    await user.click(screen.getByRole("button", { name: "新建笔记本" }));
+    await user.type(screen.getByRole("textbox", { name: "笔记本名称" }), "临时草稿");
+    await user.click(screen.getByRole("button", { name: "取消创建笔记本" }));
+
+    expect(hookMocks.createNotebook).not.toHaveBeenCalled();
+    expect(screen.queryByRole("textbox", { name: "笔记本名称" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "新建笔记本" }));
+    expect(screen.getByRole("textbox", { name: "笔记本名称" })).toHaveValue("");
+  });
+
+  it("closes the notebook creation panel on Escape without creating a notebook", async () => {
+    const user = userEvent.setup();
+
+    render(<FileTreePanel />);
+
+    await user.click(screen.getByRole("button", { name: "新建笔记本" }));
+    await user.type(screen.getByRole("textbox", { name: "笔记本名称" }), "临时草稿");
+    await user.keyboard("{Escape}");
+
+    expect(hookMocks.createNotebook).not.toHaveBeenCalled();
+    expect(screen.queryByRole("textbox", { name: "笔记本名称" })).not.toBeInTheDocument();
   });
 
   it("creates a note in the explicitly selected notebook", async () => {
@@ -198,6 +669,118 @@ describe("FileTreePanel", () => {
     expect(screen.getByRole("option", { name: "法律" })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "未归档" })).not.toBeInTheDocument();
     expect(notebookSelect).toHaveValue("notes/法律");
+  });
+
+  it("still allows creating a note while tag filtering is active", async () => {
+    const user = userEvent.setup();
+    hookMocks.createNote.mockResolvedValue(undefined);
+    apiMocks.listNotesByTag.mockResolvedValue([
+      {
+        id: "note-1",
+        path: "notes/法律/案例.md",
+        title: "案例.md",
+      },
+    ]);
+
+    useAppStore.setState({ selectedTagIds: ["tag-1"] });
+
+    render(<FileTreePanel />);
+
+    await waitFor(() => expect(apiMocks.listNotesByTag).toHaveBeenCalledWith(["tag-1"]));
+    await user.click(screen.getByRole("button", { name: "新建笔记" }));
+
+    const notebookSelect = screen.getByRole("combobox", { name: "目标笔记本" });
+    expect(notebookSelect).toHaveValue("notes/法律");
+
+    const titleInput = screen.getByRole("textbox", { name: "笔记标题" });
+    await user.type(titleInput, "筛选态新建");
+    fireEvent.blur(titleInput);
+
+    await waitFor(() => expect(hookMocks.createNote).toHaveBeenCalledWith("notes/法律", "筛选态新建"));
+  });
+
+  it("recovers notebook choices on tag-filter cold start before creating a note", async () => {
+    const user = userEvent.setup();
+    hookMocks.createNote.mockResolvedValue(undefined);
+
+    const fullTree: NoteTreeNode[] = [
+      {
+        id: null,
+        name: "notes",
+        path: "notes",
+        is_dir: true,
+        children: [
+          {
+            id: null,
+            name: "法律",
+            path: "notes/法律",
+            is_dir: true,
+            children: [],
+          },
+        ],
+      },
+    ];
+
+    apiMocks.getNoteTree.mockResolvedValue(fullTree);
+    apiMocks.listNotesByTag.mockResolvedValue([
+      {
+        id: "note-1",
+        path: "notes/法律/案例.md",
+        title: "案例.md",
+      },
+    ]);
+
+    useAppStore.setState({
+      tree: [
+        {
+          id: "note-1",
+          name: "案例.md",
+          path: "notes/法律/案例.md",
+          is_dir: false,
+          children: [],
+        },
+      ],
+      selectedTagIds: ["tag-1"],
+    });
+
+    render(<FileTreePanel />);
+
+    await user.click(screen.getByRole("button", { name: "新建笔记" }));
+
+    await waitFor(() => expect(apiMocks.getNoteTree).toHaveBeenCalled());
+    const notebookSelect = await screen.findByRole("combobox", { name: "目标笔记本" });
+    expect(notebookSelect).toHaveValue("notes/法律");
+  });
+
+  it("falls back to the first notebook when the selected node is an unarchived root note", async () => {
+    const user = userEvent.setup();
+
+    useAppStore.setState({ selectedNodePath: "notes/我的笔记.md" });
+
+    render(<FileTreePanel />);
+
+    await user.click(screen.getByRole("button", { name: "新建笔记" }));
+
+    const notebookSelect = screen.getByRole("combobox", { name: "目标笔记本" });
+    expect(notebookSelect).toHaveValue("notes/法律");
+  });
+
+  it("keeps the notebook creation draft open when creation fails", async () => {
+    const user = userEvent.setup();
+    hookMocks.createNotebook.mockResolvedValue(false);
+
+    render(<FileTreePanel />);
+
+    await user.click(screen.getByRole("button", { name: "新建笔记本" }));
+    await user.type(screen.getByRole("textbox", { name: "笔记本名称" }), "失败草稿");
+    await user.click(screen.getByRole("button", { name: "图标 代码" }));
+    await user.click(screen.getByRole("button", { name: "颜色 橙色" }));
+    await user.click(screen.getByRole("button", { name: "创建笔记本" }));
+
+    expect(hookMocks.createNotebook).toHaveBeenCalledWith("失败草稿", "code", "orange");
+    expect(screen.getByRole("textbox", { name: "笔记本名称" })).toHaveValue("失败草稿");
+    expect(screen.getByRole("button", { name: "图标 代码" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "颜色 橙色" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("moves a note when a file is dropped onto a notebook directory", async () => {
@@ -282,7 +865,7 @@ describe("FileTreePanel", () => {
     render(<FileTreePanel />);
 
     const fileNode = screen.getByText("案例.md");
-    const notebookNode = screen.getByText("法律");
+    const notebookNode = screen.getByRole("button", { name: "法律" });
     Object.defineProperty(document, "elementFromPoint", {
       configurable: true,
       value: vi.fn(() => notebookNode),
@@ -291,7 +874,7 @@ describe("FileTreePanel", () => {
     fireEvent.mouseDown(fileNode, { button: 0, clientX: 20, clientY: 80 });
     fireEvent.mouseMove(window, { button: 0, clientX: 20, clientY: 40 });
 
-    expect(notebookNode.parentElement).toHaveStyle({ background: "rgb(219, 234, 254)" });
+    expect(notebookNode).toHaveStyle({ background: "rgb(219, 234, 254)" });
   });
 
   it("shows a note-shaped drag preview while dragging a file", () => {

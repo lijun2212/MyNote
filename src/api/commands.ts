@@ -7,6 +7,7 @@ import type {
   NoteLinks,
   NoteRelations,
   NoteTreeNode,
+  RenameNotebookResult,
   Relation,
   RelationType,
   SaveNoteResult,
@@ -25,8 +26,8 @@ export const api = {
   createNote: (directory: string, title: string) =>
     invoke<Note>("create_note", { directory, title }),
 
-  createNotebook: (name: string) =>
-    invoke<string>("create_notebook", { name }),
+  createNotebook: (name: string, icon: string, color: string) =>
+    invoke<string>("create_notebook", { name, icon, color }),
 
   getNoteByPath: (path: string) =>
     invoke<NoteDetail>("get_note_by_path", { path }),
@@ -42,6 +43,18 @@ export const api = {
 
   moveNote: (sourcePath: string, targetDirectory: string) =>
     invoke<Note>("move_note", { sourcePath, targetDirectory }),
+
+  renameNotebook: (oldPath: string, newName: string) =>
+    invoke<RenameNotebookResult>("rename_notebook", { oldPath, newName }),
+
+  updateNotebookVisual: (notebookPath: string, icon: string, color: string) =>
+    invoke<void>("update_notebook_visual", { notebookPath, icon, color }),
+
+  deleteNotebook: (notebookPath: string) =>
+    invoke<void>("delete_notebook", { notebookPath }),
+
+  reorderNotebooks: (orderedPaths: string[]) =>
+    invoke<void>("reorder_notebooks", { orderedPaths }),
 
   listTags: () =>
     invoke<Tag[]>("list_tags"),

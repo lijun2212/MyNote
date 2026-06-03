@@ -29,12 +29,19 @@ export interface NoteTreeNode {
   name: string;
   path: string;
   is_dir: boolean;
+  notebook_icon?: string | null;
+  notebook_color?: string | null;
   children: NoteTreeNode[];
 }
 
 export interface SaveNoteResult {
   note: Note;
   conflict: boolean;
+}
+
+export interface RenameNotebookResult {
+  notebook_path: string;
+  moved_note_paths: Array<[string, string]>;
 }
 
 export interface CreateNoteInput {

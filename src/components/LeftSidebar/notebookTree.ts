@@ -26,6 +26,8 @@ export function buildNotebookTreeView(tree: NoteTreeNode[]): NoteTreeNode[] {
       name: "未归档",
       path: "notes/__unarchived__",
       is_dir: true,
+      notebook_icon: null,
+      notebook_color: null,
       children: unarchivedNotes,
     });
   }
