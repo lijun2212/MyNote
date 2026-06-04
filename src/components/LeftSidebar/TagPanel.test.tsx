@@ -2,10 +2,21 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TagPanel } from "./TagPanel";
+import { ContextMenuHost } from "../ContextMenu/ContextMenuHost";
+import { ContextMenuProvider } from "../ContextMenu/useContextMenu";
 import { useAppStore } from "../../store/useAppStore";
 import { useEditorStore } from "../../store/useEditorStore";
 import { makeKnowledgeBase, makeNote } from "../../test/testData";
 import { getActiveDraggedTagName, clearActiveDraggedTagName } from "../EditorWorkspace/tagDragState";
+
+function renderWithContextMenu() {
+  return render(
+    <ContextMenuProvider>
+      <TagPanel />
+      <ContextMenuHost />
+    </ContextMenuProvider>,
+  );
+}
 
 const apiMocks = vi.hoisted(() => ({
   listTags: vi.fn(),
@@ -251,5 +262,20 @@ describe("TagPanel", () => {
     expect(preview).toHaveStyle({ left: "80px", top: "100px" });
     expect(preview).toHaveStyle({ background: "rgb(255, 255, 255)" });
     expect(preview).toHaveStyle({ transform: "translate3d(0, 0, 0) rotate(-1deg)" });
+  });
+
+  it("opens a tag context menu on right click and keeps unavailable actions disabled", async () => {
+    apiMocks.listTags.mockResolvedValue([{ id: "tag-1", name: "项目报告", note_count: 3 }]);
+
+    renderWithContextMenu();
+
+    fireEvent.contextMenu(await screen.findByRole("button", { name: "标签 项目报告 3" }), {
+      clientX: 100,
+      clientY: 72,
+    });
+
+    expect(await screen.findByRole("menu")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "删除标签" })).toHaveAttribute("aria-disabled", "false");
+    expect(screen.getByRole("menuitem", { name: "重命名" })).toHaveAttribute("aria-disabled", "true");
   });
 });

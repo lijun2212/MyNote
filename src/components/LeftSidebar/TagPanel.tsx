@@ -5,6 +5,7 @@ import { useAppStore } from "../../store/useAppStore";
 import { useEditorStore } from "../../store/useEditorStore";
 import { useOpenNote } from "../../hooks/useOpenNote";
 import { scheduleClearActiveDraggedTagName, setActiveDraggedTagName } from "../EditorWorkspace/tagDragState";
+import { useContextMenu } from "../ContextMenu/useContextMenu";
 
 const INSERT_TAG_EVENT = "mynote:insert-tag";
 const TAG_DRAG_DEBUG_PREFIX = "[mynote:tag-drag]";
@@ -52,6 +53,7 @@ export function TagPanel() {
   const setContent = useEditorStore((s) => s.setContent);
   const setTagNavigationTarget = useEditorStore((s) => s.setTagNavigationTarget);
   const { openNote, beginOpenNote, isOpenNoteRequestCurrent } = useOpenNote();
+  const { openContextMenu } = useContextMenu();
 
   useEffect(() => {
     if (!kb) return;
@@ -259,6 +261,22 @@ export function TagPanel() {
     setIsCreatingTag(false);
   };
 
+  const handleTagContextMenu = (tag: Tag, event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+
+    openContextMenu({
+      position: { x: event.clientX, y: event.clientY },
+      payload: {
+        type: "tag",
+        tagId: tag.id,
+        tagName: tag.name,
+        handlers: {
+          delete: () => handleDeleteTag(tag),
+        },
+      },
+    });
+  };
+
   return (
     <div style={{ padding: "8px 0" }}>
       {tags.length === 0 && (
@@ -317,6 +335,7 @@ export function TagPanel() {
               logTagDrag("dragend", { tagName: tag.name });
               scheduleClearActiveDraggedTagName();
             }}
+            onContextMenu={(event) => handleTagContextMenu(tag, event)}
             aria-label={`标签 ${tag.name} ${tag.note_count ?? 0}`}
             style={{
               flex: 1,

@@ -7,6 +7,7 @@ import { useOpenNote } from "../../hooks/useOpenNote";
 import { FileTreeNode } from "./FileTreeNode";
 import { ImportDialog } from "./ImportDialog";
 import { api } from "../../api/commands";
+import { useContextMenu } from "../ContextMenu/useContextMenu";
 import type { NoteTreeNode } from "../../types";
 import { buildNotebookTreeView } from "./notebookTree";
 import { getDropDirectoryPath } from "./fileTreeDrag";
@@ -87,6 +88,7 @@ export function FileTreePanel() {
     reorderNotebooks,
   } = useKnowledgeBase();
   const { openNote } = useOpenNote();
+  const { openContextMenu } = useContextMenu();
   const [inputVisible, setInputVisible] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [targetNotebookPath, setTargetNotebookPath] = useState("");
@@ -131,6 +133,18 @@ export function FileTreePanel() {
     }
 
     return notebooks[0]?.path ?? null;
+  }
+
+  function getNoteTitle(node: NoteTreeNode) {
+    return node.name.replace(/\.md$/i, "");
+  }
+
+  async function writeClipboardText(text: string) {
+    if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+      return;
+    }
+
+    await navigator.clipboard.writeText(text);
   }
 
   useEffect(() => {
@@ -668,6 +682,71 @@ export function FileTreePanel() {
     setDragOverPath(null);
   }
 
+  function handleNodeContextMenu(node: NoteTreeNode, event: React.MouseEvent<HTMLElement>) {
+    event.preventDefault();
+
+    if (node.is_dir) {
+      if (!isTopLevelNotebookPath(node.path)) {
+        return;
+      }
+
+      openContextMenu({
+        position: { x: event.clientX, y: event.clientY },
+        payload: {
+          type: "notebook",
+          path: node.path,
+          notebookName: node.name,
+          handlers: {
+            createNote: () => {
+              setCreationHint(null);
+              setInputValue("");
+              setTargetNotebookPath(node.path);
+              setInputVisible(true);
+            },
+            rename: () => beginNotebookRename(node),
+            delete: () => toggleNotebookDeleteConfirmation(node.path),
+          },
+        },
+      });
+      return;
+    }
+
+    openContextMenu({
+      position: { x: event.clientX, y: event.clientY },
+      payload: {
+        type: "note",
+        noteId: node.id ?? node.path,
+        noteTitle: getNoteTitle(node),
+        path: node.path,
+        handlers: {
+          open: () => openNote(node.path),
+          copyLink: () => writeClipboardText(node.path),
+          copyWikiLink: () => writeClipboardText(`[[${getNoteTitle(node)}]]`),
+        },
+      },
+    });
+  }
+
+  function handleBlankAreaContextMenu(event: React.MouseEvent<HTMLDivElement>) {
+    if (event.target !== event.currentTarget) {
+      return;
+    }
+
+    event.preventDefault();
+    openContextMenu({
+      position: { x: event.clientX, y: event.clientY },
+      payload: {
+        type: "fileTreeBlank",
+        path: "notes",
+        handlers: {
+          createNote: () => void handleNewNote(),
+          createNotebook: handleNewNotebook,
+          importNote: handleImport,
+        },
+      },
+    });
+  }
+
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <div style={{
@@ -905,6 +984,7 @@ export function FileTreePanel() {
         </div>
       )}
       <div
+        onContextMenu={handleBlankAreaContextMenu}
         onPointerUp={handlePointerDragEnd}
         onPointerCancel={handlePointerDragEnd}
         style={{ flex: 1, overflowY: "auto", paddingTop: 4 }}
@@ -1014,6 +1094,7 @@ export function FileTreePanel() {
               onPointerEnterDirectory={handlePointerEnterDirectory}
               onPointerLeaveDirectory={handlePointerLeaveDirectory}
               onPointerUpOnDirectory={handlePointerUpOnDirectory}
+              onContextMenu={handleNodeContextMenu}
             />
           );
         })}

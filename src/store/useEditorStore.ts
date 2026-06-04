@@ -1,6 +1,12 @@
 import { create } from "zustand";
 import type { Note, SearchNavigationTarget, TagNavigationTarget } from "../types";
 
+export type EditorMode = "editor" | "split";
+
+function deriveEditorMode(showPreview: boolean): EditorMode {
+  return showPreview ? "split" : "editor";
+}
+
 interface EditorState {
   currentNote: Note | null;
   content: string;
@@ -10,6 +16,7 @@ interface EditorState {
   saveError: string | null;
   saveStatus: "saved" | "saving" | "unsaved" | "error";
   showPreview: boolean;
+  getEditorMode: () => EditorMode;
   searchNavigationTarget: SearchNavigationTarget | null;
   tagNavigationTarget: TagNavigationTarget | null;
 
@@ -21,11 +28,12 @@ interface EditorState {
   setSaving: (saving: boolean) => void;
   setSaveError: (error: string | null) => void;
   togglePreview: () => void;
+  setEditorMode: (mode: EditorMode) => void;
   setSearchNavigationTarget: (target: SearchNavigationTarget | null) => void;
   setTagNavigationTarget: (target: TagNavigationTarget | null) => void;
 }
 
-export const useEditorStore = create<EditorState>((set) => ({
+export const useEditorStore = create<EditorState>((set, get) => ({
   currentNote: null,
   content: "",
   isComposing: false,
@@ -34,6 +42,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   saveError: null,
   saveStatus: "saved",
   showPreview: true,
+  getEditorMode: () => deriveEditorMode(get().showPreview),
   searchNavigationTarget: null,
   tagNavigationTarget: null,
 
@@ -52,6 +61,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   setSaveError: (error) =>
     set({ saveError: error, isSaving: false, saveStatus: "error" }),
   togglePreview: () => set((s) => ({ showPreview: !s.showPreview })),
+  setEditorMode: (mode) => set({ showPreview: mode === "split" }),
   setSearchNavigationTarget: (target) => set({ searchNavigationTarget: target }),
   setTagNavigationTarget: (target) => set({ tagNavigationTarget: target }),
 }));
