@@ -4,6 +4,9 @@ import DOMPurify from "dompurify";
 import MarkdownIt from "markdown-it";
 import { api } from "../../api/commands";
 import { useOpenNote } from "../../hooks/useOpenNote";
+import { useAppStore } from "../../store/useAppStore";
+import { useEditorStore } from "../../store/useEditorStore";
+import { useContextMenu } from "../ContextMenu/useContextMenu";
 import { findInlineTagMatches } from "./inlineTags";
 import {
   getTopVisibleSourceLine,
@@ -11,6 +14,7 @@ import {
   type SourceLineSyncSignal,
 } from "./sourceLineSync";
 import type { SearchNavigationTarget, TagNavigationTarget } from "../../types";
+import type { PreviewLinkKind } from "../ContextMenu/contextMenuTypes";
 
 const md = new MarkdownIt({ html: false, linkify: true, typographer: true });
 const SOURCE_LINE_TAGS = new Set(["blockquote", "h1", "h2", "h3", "h4", "h5", "h6", "li", "ol", "p", "table", "tr", "ul"]);
@@ -31,7 +35,7 @@ const ALLOWED_MARKDOWN_TAGS = [
 ];
 
 const ALLOWED_MARKDOWN_ATTR = ["alt", "href", "src", "title", "class", "data-title", "data-source-line", "data-source-end-line"];
-const ALLOWED_MARKDOWN_URI = /^(?:(?:https?):|(?:data:image\/(?:gif|png|jpe?g|webp);base64,)|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i;
+const ALLOWED_MARKDOWN_URI = /^(?:(?:https?):|(?:data:image\/(?:gif|png|jpe?g|webp);base64,)|(?:notes\/)|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i;
 const MIN_TABLE_COLUMN_PERCENT = 8;
 
 function sanitizePreviewHtml(html: string): string {
@@ -196,6 +200,120 @@ function getOccurrenceIndexWithinTargetRange(content: string, searchNavigationTa
 
 function formatColumnWidth(value: number): string {
   return `${Number(value.toFixed(2))}%`;
+}
+
+function getEventElement(target: EventTarget | null): Element | null {
+  if (target instanceof Element) return target;
+  if (target instanceof Text) return target.parentElement;
+  return null;
+}
+
+function writeClipboardText(text: string) {
+  if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+    return Promise.resolve();
+  }
+
+  return navigator.clipboard.writeText(text);
+}
+
+function normalizeInternalNotePath(href: string): string | undefined {
+  const trimmedHref = href.trim();
+  if (!trimmedHref || /^https?:\/\//i.test(trimmedHref)) {
+    return undefined;
+  }
+
+  const rawPath = trimmedHref.replace(/^\/+/, "").split(/[?#]/, 1)[0] ?? "";
+  if (!rawPath) {
+    return undefined;
+  }
+
+  let normalizedPath = rawPath;
+  try {
+    normalizedPath = decodeURIComponent(rawPath);
+  } catch {
+    normalizedPath = rawPath;
+  }
+
+  if (!/^notes\/.+\.md$/i.test(normalizedPath)) {
+    return undefined;
+  }
+
+  return normalizedPath;
+}
+
+function getPreviewLinkTarget(element: Element): {
+  linkType: PreviewLinkKind;
+  href: string;
+  notePath?: string;
+  wikiTitle?: string;
+} | null {
+  const wikiLink = element.closest(".wiki-link") as HTMLElement | null;
+  if (wikiLink) {
+    const title = wikiLink.dataset.title?.trim();
+    if (!title) {
+      return null;
+    }
+
+    return {
+      linkType: "wiki",
+      href: `[[${title}]]`,
+      wikiTitle: title,
+    };
+  }
+
+  const anchor = element.closest("a[href]") as HTMLAnchorElement | null;
+  if (!anchor) {
+    return null;
+  }
+
+  const href = anchor.getAttribute("href")?.trim() ?? "";
+  if (!href) {
+    return null;
+  }
+
+  if (/^https?:\/\//i.test(href)) {
+    return {
+      linkType: "external",
+      href,
+    };
+  }
+
+  return {
+    linkType: "internal",
+    href,
+    notePath: normalizeInternalNotePath(href),
+  };
+}
+
+async function resolveWikiNotePath(title: string): Promise<string | undefined> {
+  try {
+    const note = await api.getNoteByTitle(title);
+    return note?.path;
+  } catch (error) {
+    console.error("Failed to resolve wiki link target:", error);
+    return undefined;
+  }
+}
+
+async function resolvePreviewLinkTarget(element: Element): Promise<{
+  linkType: PreviewLinkKind;
+  href: string;
+  notePath?: string;
+  wikiTitle?: string;
+} | null> {
+  const linkTarget = getPreviewLinkTarget(element);
+  if (!linkTarget) {
+    return null;
+  }
+
+  if (linkTarget.linkType !== "wiki" || !linkTarget.wikiTitle) {
+    return linkTarget;
+  }
+
+  return {
+    ...linkTarget,
+    notePath: await resolveWikiNotePath(linkTarget.wikiTitle),
+  };
 }
 
 function shouldSkipInlineTagEnhancement(node: Node | null): boolean {
@@ -417,11 +535,52 @@ export function MarkdownPreview({
   const isProgrammaticScroll = useRef(false);
   const programmaticScrollTimerRef = useRef<number | null>(null);
   const navigationHighlightTimerRef = useRef<number | null>(null);
+  const previewContextMenuRequestRef = useRef(0);
   const previewLineOffsetRef = useRef(0);
   const [activePreviewNavigationTarget, setActivePreviewNavigationTarget] = useState<TagNavigationTarget | null>(null);
   const [activeSearchNavigationTarget, setActiveSearchNavigationTarget] = useState<ActiveSearchNavigationTarget | null>(null);
   const [isFrontMatterNavigationActive, setIsFrontMatterNavigationActive] = useState(false);
+  const openContextMenu = useContextMenu().openContextMenu;
   const { openNote, beginOpenNote, isOpenNoteRequestCurrent } = useOpenNote();
+  const setEditorMode = useEditorStore((s) => s.setEditorMode);
+  const setRightSidebarVisible = useAppStore((s) => s.setRightSidebarVisible);
+
+  const openWikiNote = async (title: string, requestId = beginOpenNote()) => {
+    try {
+      const note = await api.getNoteByTitle(title);
+      if (note && isOpenNoteRequestCurrent(requestId)) {
+        await openNote(note.path, requestId);
+      }
+      return note?.path;
+    } catch (error) {
+      if (!isOpenNoteRequestCurrent(requestId)) {
+        return undefined;
+      }
+      console.error("Failed to open wiki link:", error);
+      return undefined;
+    }
+  };
+
+  const openPreviewLinkTarget = async (linkTarget: {
+    linkType: PreviewLinkKind;
+    href: string;
+    notePath?: string;
+    wikiTitle?: string;
+  }) => {
+    if (linkTarget.linkType === "external") {
+      await openUrl(linkTarget.href);
+      return;
+    }
+
+    if (linkTarget.notePath) {
+      await openNote(linkTarget.notePath, beginOpenNote());
+      return;
+    }
+
+    if (linkTarget.linkType === "wiki" && linkTarget.wikiTitle) {
+      await openWikiNote(linkTarget.wikiTitle);
+    }
+  };
 
   const releaseProgrammaticScrollSoon = () => {
     if (programmaticScrollTimerRef.current !== null) {
@@ -619,31 +778,18 @@ export function MarkdownPreview({
     };
 
     const handleClick = async (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      const wikiLink = target.closest(".wiki-link") as HTMLElement | null;
-      if (!wikiLink) {
-        const anchor = target.closest("a") as HTMLAnchorElement | null;
-        const href = anchor?.getAttribute("href");
-        if (href) {
-          e.preventDefault();
-          if (/^https?:\/\//i.test(href)) {
-            await openUrl(href);
-          }
-        }
+      const target = getEventElement(e.target);
+      if (!target) {
         return;
       }
-      const title = wikiLink.dataset.title;
-      if (!title) return;
-      const requestId = beginOpenNote();
-      try {
-        const note = await api.getNoteByTitle(title);
-        if (note && isOpenNoteRequestCurrent(requestId)) {
-          await openNote(note.path, requestId);
-        }
-      } catch (e) {
-        if (!isOpenNoteRequestCurrent(requestId)) return;
-        console.error("Failed to open wiki link:", e);
+
+      const linkTarget = getPreviewLinkTarget(target);
+      if (!linkTarget) {
+        return;
       }
+
+      e.preventDefault();
+      await openPreviewLinkTarget(linkTarget);
     };
 
     container.addEventListener("pointerdown", handleTablePointerDown);
@@ -667,10 +813,63 @@ export function MarkdownPreview({
     };
   }, [openNote, beginOpenNote, isOpenNoteRequestCurrent]);
 
+  const handlePreviewContextMenu = async (event: React.MouseEvent<HTMLDivElement>) => {
+    const target = getEventElement(event.target);
+    if (!target) {
+      return;
+    }
+
+    event.preventDefault();
+    const requestId = ++previewContextMenuRequestRef.current;
+
+    const linkTarget = await resolvePreviewLinkTarget(target);
+    if (requestId !== previewContextMenuRequestRef.current) {
+      return;
+    }
+
+    if (linkTarget) {
+      openContextMenu({
+        position: { x: event.clientX, y: event.clientY },
+        payload: {
+          type: "previewLink",
+          linkType: linkTarget.linkType,
+          href: linkTarget.href,
+          notePath: linkTarget.notePath,
+          handlers: {
+            open: () => openPreviewLinkTarget(linkTarget),
+            copy: () => writeClipboardText(linkTarget.href),
+            openTargetNote: linkTarget.notePath
+              ? () => openNote(linkTarget.notePath as string, beginOpenNote())
+              : undefined,
+          },
+        },
+      });
+      return;
+    }
+
+    openContextMenu({
+      position: { x: event.clientX, y: event.clientY },
+      payload: {
+        type: "previewBlank",
+        handlers: {
+          returnToEditor: () => {
+            setEditorMode("editor");
+          },
+          showSidebar: () => {
+            setRightSidebarVisible(true);
+          },
+        },
+      },
+    });
+  };
+
   return (
     <div
       ref={scrollContainerRef}
       onScroll={handlePreviewScroll}
+      onContextMenu={(event) => {
+        void handlePreviewContextMenu(event);
+      }}
       style={{
         width: "100%",
         height: "100%",

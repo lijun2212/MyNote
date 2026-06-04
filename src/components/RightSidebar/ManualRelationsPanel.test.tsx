@@ -1,11 +1,17 @@
 import { StrictMode, act } from "react";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ManualRelationsPanel } from "./ManualRelationsPanel";
+import { ContextMenuHost } from "../ContextMenu/ContextMenuHost";
+import { ContextMenuProvider } from "../ContextMenu/useContextMenu";
 import { useAppStore } from "../../store/useAppStore";
 import { makeKnowledgeBase, makeSearchResult } from "../../test/testData";
 import type { NoteRelations, RelationItem } from "../../types";
+
+const hookMocks = vi.hoisted(() => ({
+  openNote: vi.fn(),
+}));
 
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
@@ -27,6 +33,10 @@ const apiMocks = vi.hoisted(() => ({
 
 vi.mock("../../api/commands", () => ({
   api: apiMocks,
+}));
+
+vi.mock("../../hooks/useOpenNote", () => ({
+  useOpenNote: () => ({ openNote: hookMocks.openNote }),
 }));
 
 function makeRelationItem(overrides: Partial<RelationItem> = {}): RelationItem {
@@ -55,6 +65,15 @@ function renderPanel(noteId: string | null = "note-1") {
   return render(<ManualRelationsPanel noteId={noteId} />);
 }
 
+function renderWithContextMenu(noteId: string | null = "note-1") {
+  return render(
+    <ContextMenuProvider>
+      <ManualRelationsPanel noteId={noteId} />
+      <ContextMenuHost />
+    </ContextMenuProvider>,
+  );
+}
+
 function renderPanelInStrictMode(noteId: string | null = "note-1") {
   return render(
     <StrictMode>
@@ -68,6 +87,8 @@ beforeEach(() => {
   apiMocks.searchNotes.mockReset();
   apiMocks.createRelation.mockReset();
   apiMocks.deleteRelation.mockReset();
+  hookMocks.openNote.mockReset();
+  hookMocks.openNote.mockResolvedValue(undefined);
 
   useAppStore.setState({ kb: makeKnowledgeBase({ id: "kb-1" }) });
 });
@@ -486,5 +507,84 @@ describe("ManualRelationsPanel", () => {
 
     await waitFor(() => expect(apiMocks.listRelations).toHaveBeenCalledTimes(3));
     expect(await screen.findByText("StrictMode 新关系")).toBeInTheDocument();
+  });
+
+  it("opens the relation-blank context menu and can open the add-relation form", async () => {
+    const user = userEvent.setup();
+    apiMocks.listRelations.mockResolvedValue(makeRelations());
+
+    renderWithContextMenu();
+
+    await screen.findByText("暂无手动关系");
+
+    fireEvent.contextMenu(screen.getByTestId("manual-relations-surface"), {
+      clientX: 56,
+      clientY: 80,
+    });
+
+    expect(await screen.findByRole("menuitem", { name: "创建关系" })).toHaveAttribute("aria-disabled", "false");
+    expect(screen.getByRole("menuitem", { name: "刷新关系" })).toHaveAttribute("aria-disabled", "false");
+    expect(screen.getByRole("menuitem", { name: "显示侧栏" })).toHaveAttribute("aria-disabled", "false");
+
+    await user.click(screen.getByRole("menuitem", { name: "创建关系" }));
+
+    expect(await screen.findByPlaceholderText("搜索目标笔记")).toBeInTheDocument();
+  });
+
+  it("deletes a relation from the relation-item context menu through the shared host", async () => {
+    const user = userEvent.setup();
+    apiMocks.listRelations
+      .mockResolvedValueOnce(makeRelations({
+        outgoing: [
+          makeRelationItem({
+            id: "rel-context-delete",
+            note_title: "待删除关系",
+          }),
+        ],
+      }))
+      .mockResolvedValueOnce(makeRelations());
+    apiMocks.deleteRelation.mockResolvedValue(undefined);
+
+    renderWithContextMenu();
+
+    const relationItem = (await screen.findByText("待删除关系")).closest("[data-relation-item='true']") as HTMLElement | null;
+    expect(relationItem).not.toBeNull();
+
+    fireEvent.contextMenu(relationItem as HTMLElement, {
+      clientX: 32,
+      clientY: 48,
+    });
+
+    expect(await screen.findByRole("menuitem", { name: "删除关系" })).toHaveAttribute("aria-disabled", "false");
+    expect(screen.getByRole("menuitem", { name: "查看目标笔记" })).toHaveAttribute("aria-disabled", "false");
+
+    await user.click(screen.getByRole("menuitem", { name: "删除关系" }));
+
+    await waitFor(() => expect(apiMocks.deleteRelation).toHaveBeenCalledWith("rel-context-delete"));
+    await waitFor(() => expect(apiMocks.listRelations).toHaveBeenCalledTimes(2));
+  });
+
+  it("disables view-target-note in the relation-item context menu when notePath is missing", async () => {
+    apiMocks.listRelations.mockResolvedValue(makeRelations({
+      outgoing: [
+        makeRelationItem({
+          id: "rel-missing-path",
+          note_title: "缺少路径关系",
+          note_path: "",
+        }),
+      ],
+    }));
+
+    renderWithContextMenu();
+
+    const relationItem = (await screen.findByText("缺少路径关系")).closest("[data-relation-item='true']") as HTMLElement | null;
+    expect(relationItem).not.toBeNull();
+
+    fireEvent.contextMenu(relationItem as HTMLElement, {
+      clientX: 40,
+      clientY: 64,
+    });
+
+    expect(await screen.findByRole("menuitem", { name: "查看目标笔记" })).toHaveAttribute("aria-disabled", "true");
   });
 });

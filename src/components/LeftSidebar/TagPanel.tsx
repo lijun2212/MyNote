@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../api/commands";
-import type { Tag } from "../../types";
+import type { Tag, TagContextItem } from "../../types";
 import { useAppStore } from "../../store/useAppStore";
 import { useEditorStore } from "../../store/useEditorStore";
 import { useOpenNote } from "../../hooks/useOpenNote";
@@ -158,6 +158,12 @@ export function TagPanel() {
     api.listTags().then(setTags).catch(console.error);
   };
 
+  const clearTagFilter = () => {
+    latestTagContextRequestId.current += 1;
+    setSelectedTagIds([]);
+    setActiveTagContext(null);
+  };
+
   const loadTagContext = async (tag: Tag) => {
     const requestId = latestTagContextRequestId.current + 1;
     latestTagContextRequestId.current = requestId;
@@ -194,21 +200,49 @@ export function TagPanel() {
     void loadTagContext(tag);
   };
 
-  const openContextItem = async (item: NonNullable<typeof activeTagContext>["items"][number]) => {
-    if (!activeTagContext) return;
-
+  const openContextItemNote = async (item: TagContextItem) => {
     try {
       const requestId = beginOpenNote();
       await openNote(item.note_path, requestId);
-      if (!isOpenNoteRequestCurrent(requestId)) return;
-      setTagNavigationTarget({
-        ...item,
-        tag_name: activeTagContext.tag_name,
-        revision: Date.now(),
-      });
+      return requestId;
     } catch (error) {
       console.error("Failed to open tag context note:", error);
+      return null;
     }
+  };
+
+  const openContextItem = async (item: TagContextItem) => {
+    if (!activeTagContext) return;
+
+    const requestId = await openContextItemNote(item);
+    if (!requestId) return;
+    if (!isOpenNoteRequestCurrent(requestId)) return;
+    setTagNavigationTarget({
+      ...item,
+      tag_name: activeTagContext.tag_name,
+      revision: Date.now(),
+    });
+  };
+
+  const handleTagBlankContextMenu = (event: React.MouseEvent<HTMLDivElement>) => {
+    const target = getEventElement(event.target);
+    if (target?.closest("[data-tag-panel-tag-row='true'], [data-tag-context-item='true']")) {
+      return;
+    }
+
+    event.preventDefault();
+
+    openContextMenu({
+      position: { x: event.clientX, y: event.clientY },
+      payload: {
+        type: "tagBlank",
+        selectedTagIds,
+        handlers: {
+          refresh: reloadTags,
+          clearFilter: clearTagFilter,
+        },
+      },
+    });
   };
 
   const handleDeleteTag = async (tag: Tag) => {
@@ -277,8 +311,34 @@ export function TagPanel() {
     });
   };
 
+  const handleTagContextItemContextMenu = (item: TagContextItem, event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+
+    openContextMenu({
+      position: { x: event.clientX, y: event.clientY },
+      payload: {
+        type: "tagContextItem",
+        notePath: item.note_path,
+        noteTitle: item.note_title,
+        lineStart: item.line_start,
+        lineEnd: item.line_end,
+        occurrenceOrder: item.occurrence_order,
+        handlers: {
+          open: async () => {
+            await openContextItemNote(item);
+          },
+          locate: () => openContextItem(item),
+        },
+      },
+    });
+  };
+
   return (
-    <div style={{ padding: "8px 0" }}>
+    <div
+      data-testid="tag-panel-surface"
+      onContextMenu={handleTagBlankContextMenu}
+      style={{ padding: "8px 0", minHeight: "100%" }}
+    >
       {tags.length === 0 && (
         <div style={{ padding: "16px 12px", fontSize: 13, color: "#999" }}>
           暂无标签。在笔记 Front Matter 中添加 <code>tags: [标签名]</code> 或在正文中使用 #标签 语法。
@@ -288,6 +348,7 @@ export function TagPanel() {
       {tags.map((tag) => (
         <div
           key={tag.id}
+          data-tag-panel-tag-row="true"
           style={{
             display: "flex",
             alignItems: "center",
@@ -397,9 +458,11 @@ export function TagPanel() {
                 key={`${item.note_id}:${item.line_start}:${item.line_end}:${item.occurrence_order}`}
                 type="button"
                 aria-label={`打开标签上下文笔记 ${item.note_title}`}
+                data-tag-context-item="true"
                 onClick={() => {
                   void openContextItem(item);
                 }}
+                onContextMenu={(event) => handleTagContextItemContextMenu(item, event)}
                 style={{
                   border: "1px solid #e2e8f0",
                   borderRadius: 6,
