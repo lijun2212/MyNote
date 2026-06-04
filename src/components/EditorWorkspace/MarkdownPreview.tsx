@@ -535,6 +535,7 @@ export function MarkdownPreview({
   const isProgrammaticScroll = useRef(false);
   const programmaticScrollTimerRef = useRef<number | null>(null);
   const navigationHighlightTimerRef = useRef<number | null>(null);
+  const previewContextMenuRequestRef = useRef(0);
   const previewLineOffsetRef = useRef(0);
   const [activePreviewNavigationTarget, setActivePreviewNavigationTarget] = useState<TagNavigationTarget | null>(null);
   const [activeSearchNavigationTarget, setActiveSearchNavigationTarget] = useState<ActiveSearchNavigationTarget | null>(null);
@@ -819,8 +820,13 @@ export function MarkdownPreview({
     }
 
     event.preventDefault();
+    const requestId = ++previewContextMenuRequestRef.current;
 
     const linkTarget = await resolvePreviewLinkTarget(target);
+    if (requestId !== previewContextMenuRequestRef.current) {
+      return;
+    }
+
     if (linkTarget) {
       openContextMenu({
         position: { x: event.clientX, y: event.clientY },

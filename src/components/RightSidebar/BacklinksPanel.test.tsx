@@ -5,7 +5,7 @@ import { BacklinksPanel } from "./BacklinksPanel";
 import { ContextMenuHost } from "../ContextMenu/ContextMenuHost";
 import { ContextMenuProvider } from "../ContextMenu/useContextMenu";
 import { tauriMocks } from "../../test/setup";
-import { makeKnowledgeBase } from "../../test/testData";
+import { deferred, makeKnowledgeBase } from "../../test/testData";
 import { useAppStore } from "../../store/useAppStore";
 import type { LinkItem, NoteLinks, NoteRelations, RelationItem } from "../../types";
 
@@ -257,6 +257,80 @@ describe("BacklinksPanel", () => {
 
     await waitFor(() => expect(apiMocks.getNoteLinks).toHaveBeenCalledTimes(2));
     expect(await screen.findByText("刷新后的链接")).toBeInTheDocument();
+  });
+
+  it("ignores stale refresh results after switching notes", async () => {
+    const user = userEvent.setup();
+    const refreshRequest = deferred<NoteLinks>();
+
+    apiMocks.getNoteLinks
+      .mockResolvedValueOnce(makeLinks({
+        outgoing: [
+          makeLink({
+            id: "note-1-link",
+            note_title: "笔记一链接",
+            link_text: "笔记一链接",
+            note_path: "notes/note-1.md",
+            link_url: "notes/note-1.md",
+          }),
+        ],
+      }))
+      .mockImplementationOnce(() => refreshRequest.promise)
+      .mockResolvedValueOnce(makeLinks({
+        outgoing: [
+          makeLink({
+            id: "note-2-link",
+            note_title: "笔记二链接",
+            link_text: "笔记二链接",
+            note_path: "notes/note-2.md",
+            link_url: "notes/note-2.md",
+          }),
+        ],
+      }));
+    apiMocks.listRelations.mockResolvedValue(makeRelations());
+
+    const view = render(
+      <ContextMenuProvider>
+        <BacklinksPanel noteId="note-1" />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    expect(await screen.findByText("笔记一链接")).toBeInTheDocument();
+
+    fireEvent.contextMenu(screen.getByTestId("backlinks-links-surface"), {
+      clientX: 48,
+      clientY: 72,
+    });
+    await user.click(await screen.findByRole("menuitem", { name: "刷新链接" }));
+
+    await waitFor(() => expect(apiMocks.getNoteLinks).toHaveBeenCalledTimes(2));
+
+    view.rerender(
+      <ContextMenuProvider>
+        <BacklinksPanel noteId="note-2" />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    expect(await screen.findByText("笔记二链接")).toBeInTheDocument();
+
+    refreshRequest.resolve(makeLinks({
+      outgoing: [
+        makeLink({
+          id: "stale-link",
+          note_title: "过期链接",
+          link_text: "过期链接",
+          note_path: "notes/stale.md",
+          link_url: "notes/stale.md",
+        }),
+      ],
+    }));
+
+    await waitFor(() => {
+      expect(screen.getByText("笔记二链接")).toBeInTheDocument();
+      expect(screen.queryByText("过期链接")).not.toBeInTheDocument();
+    });
   });
 
   it("shows different link-item context menu enablement for internal and external links", async () => {

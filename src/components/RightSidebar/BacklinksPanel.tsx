@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { NoteLinks } from "../../types";
 import { api } from "../../api/commands";
@@ -41,19 +41,33 @@ function normalizeLinkType(linkType: string): PreviewLinkKind {
 export function BacklinksPanel({ noteId }: Props) {
   const [links, setLinks] = useState<NoteLinks | null>(null);
   const [loading, setLoading] = useState(false);
+  const activeNoteIdRef = useRef<string | null>(noteId);
+  const reloadRequestRef = useRef(0);
   const { openNote } = useOpenNote();
   const setRightSidebarVisible = useAppStore((state) => state.setRightSidebarVisible);
   const { openContextMenu } = useContextMenu();
 
+  activeNoteIdRef.current = noteId;
+
   const reloadLinks = async (targetNoteId: string) => {
+    const requestId = ++reloadRequestRef.current;
     setLoading(true);
 
     try {
       const data = await api.getNoteLinks(targetNoteId);
+      if (reloadRequestRef.current !== requestId || activeNoteIdRef.current !== targetNoteId) {
+        return;
+      }
       setLinks(data);
     } catch {
+      if (reloadRequestRef.current !== requestId || activeNoteIdRef.current !== targetNoteId) {
+        return;
+      }
       setLinks(null);
     } finally {
+      if (reloadRequestRef.current !== requestId || activeNoteIdRef.current !== targetNoteId) {
+        return;
+      }
       setLoading(false);
     }
   };

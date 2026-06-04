@@ -8,7 +8,7 @@ import { MarkdownPreview } from "./MarkdownPreview";
 import { useAppStore } from "../../store/useAppStore";
 import { useEditorStore } from "../../store/useEditorStore";
 import { tauriMocks } from "../../test/setup";
-import { makeNote, makeNoteDetail } from "../../test/testData";
+import { deferred, makeNote, makeNoteDetail } from "../../test/testData";
 import type { SearchNavigationTarget, TagNavigationTarget } from "../../types";
 
 const invokeMock = vi.mocked(invoke);
@@ -809,6 +809,42 @@ describe("MarkdownPreview", () => {
     fireEvent.contextMenu(screen.getByRole("link", { name: "External" }), { clientX: 42, clientY: 48 });
 
     expect(await screen.findByRole("menuitem", { name: "打开目标笔记" })).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("ignores stale async preview link context menu resolutions", async () => {
+    const wikiLookup = deferred<ReturnType<typeof makeNote>>();
+
+    invokeMock.mockImplementation(async (command, args) => {
+      if (command === "get_note_by_title") {
+        expect(args).toEqual({ title: "Wiki Target" });
+        return wikiLookup.promise;
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    const { container } = renderWithContextMenu(
+      <MarkdownPreview content={[["Open [[Wiki Target]]", "", "Preview body"].join("\n")][0]} />,
+    );
+
+    fireEvent.contextMenu(screen.getByText("Wiki Target"), { clientX: 32, clientY: 40 });
+    fireEvent.contextMenu(container.querySelector("[data-testid='markdown-preview-content']") as HTMLElement, {
+      clientX: 60,
+      clientY: 80,
+    });
+
+    expect(await screen.findByRole("menuitem", { name: "返回编辑" })).toBeInTheDocument();
+
+    wikiLookup.resolve(makeNote({
+      id: "wiki-note",
+      path: "notes/wiki-target.md",
+      title: "Wiki Target",
+      content_hash: "wiki-hash",
+    }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("menuitem", { name: "返回编辑" })).toBeInTheDocument();
+      expect(screen.queryByRole("menuitem", { name: "打开链接" })).not.toBeInTheDocument();
+    });
   });
 
   it("keeps normal left-click semantics after opening preview link context menus", async () => {
