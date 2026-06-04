@@ -28,6 +28,8 @@ function createHandlers() {
     showLeftSidebar: vi.fn().mockResolvedValue(undefined),
     refreshTagFilter: vi.fn().mockResolvedValue(undefined),
     clearSelectedTags: vi.fn().mockResolvedValue(undefined),
+    openTagContextItemNote: vi.fn().mockResolvedValue(undefined),
+    locateTagContextItem: vi.fn().mockResolvedValue(undefined),
     returnToEditor: vi.fn().mockResolvedValue(undefined),
     showPreviewSidebar: vi.fn().mockResolvedValue(undefined),
     openPreviewLink: vi.fn().mockResolvedValue(undefined),
@@ -83,6 +85,15 @@ describe("menuActionRunner", () => {
     const selectionPayload = { type: "editorSelection" as const, selectedText: "项目", handlers: {} };
     const blankPayload = { type: "editorBlank" as const, handlers: {} };
     const tagBlankPayload = { type: "tagBlank" as const, selectedTagIds: ["tag-1"], handlers: {} };
+    const tagContextItemPayload = {
+      type: "tagContextItem" as const,
+      notePath: "notes/tag-context.md",
+      noteTitle: "标签上下文",
+      lineStart: 3,
+      lineEnd: 3,
+      occurrenceOrder: 0,
+      handlers: {},
+    };
     const previewBlankPayload = { type: "previewBlank" as const, handlers: {} };
     const previewLinkPayload = {
       type: "previewLink" as const,
@@ -105,6 +116,7 @@ describe("menuActionRunner", () => {
     const selectionActions = new Set(["selection.insertLink", "selection.insertTag", "selection.createWikiLink"]);
     const blankActions = new Set(["blank.refreshIndex", "blank.showSidebar"]);
     const tagBlankActions = new Set(["tagBlank.refresh", "tagBlank.clearFilter"]);
+    const tagContextItemActions = new Set(["tagContextItem.openNote", "tagContextItem.locate"]);
     const previewBlankActions = new Set(["previewBlank.returnToEditor", "previewBlank.showSidebar"]);
     const previewLinkActions = new Set(["previewLink.open", "previewLink.copy", "previewLink.openTargetNote"]);
     const linksBlankActions = new Set(["linksBlank.refresh"]);
@@ -124,6 +136,8 @@ describe("menuActionRunner", () => {
                 ? blankPayload
                 : tagBlankActions.has(actionId)
                   ? tagBlankPayload
+                  : tagContextItemActions.has(actionId)
+                    ? tagContextItemPayload
                   : previewBlankActions.has(actionId)
                     ? previewBlankPayload
                     : previewLinkActions.has(actionId)

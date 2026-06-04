@@ -279,13 +279,18 @@ describe("TagPanel", () => {
     expect(screen.getByRole("menuitem", { name: "重命名" })).toHaveAttribute("aria-disabled", "true");
   });
 
-  it("opens a tag-blank context menu and only enables clear-filter when tags are selected", async () => {
+  it("opens a tag-blank context menu from visible blank panel space and only enables clear-filter when tags are selected", async () => {
     const user = userEvent.setup();
     apiMocks.listTags.mockResolvedValue([{ id: "tag-1", name: "项目报告", note_count: 3 }]);
 
-    const { rerender } = renderWithContextMenu();
+    const { container, rerender } = renderWithContextMenu();
+    const panelSurface = container.firstElementChild as HTMLElement | null;
 
-    fireEvent.contextMenu(await screen.findByTestId("tag-panel-list"), {
+    expect(panelSurface).not.toBeNull();
+
+    await screen.findByRole("button", { name: "标签 项目报告 3" });
+
+    fireEvent.contextMenu(panelSurface as HTMLElement, {
       clientX: 80,
       clientY: 120,
     });
@@ -306,7 +311,7 @@ describe("TagPanel", () => {
       </ContextMenuProvider>,
     );
 
-    fireEvent.contextMenu(await screen.findByTestId("tag-panel-list"), {
+    fireEvent.contextMenu(panelSurface as HTMLElement, {
       clientX: 96,
       clientY: 128,
     });

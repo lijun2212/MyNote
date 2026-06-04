@@ -226,7 +226,7 @@ export function TagPanel() {
 
   const handleTagBlankContextMenu = (event: React.MouseEvent<HTMLDivElement>) => {
     const target = getEventElement(event.target);
-    if (target?.closest("[data-tag-panel-tag-row='true']")) {
+    if (target?.closest("[data-tag-panel-tag-row='true'], [data-tag-context-item='true']")) {
       return;
     }
 
@@ -334,13 +334,17 @@ export function TagPanel() {
   };
 
   return (
-    <div style={{ padding: "8px 0" }}>
+    <div
+      data-testid="tag-panel-surface"
+      onContextMenu={handleTagBlankContextMenu}
+      style={{ padding: "8px 0", minHeight: "100%" }}
+    >
       {tags.length === 0 && (
         <div style={{ padding: "16px 12px", fontSize: 13, color: "#999" }}>
           暂无标签。在笔记 Front Matter 中添加 <code>tags: [标签名]</code> 或在正文中使用 #标签 语法。
         </div>
       )}
-      <div data-testid="tag-panel-list" onContextMenu={handleTagBlankContextMenu}>
+      <div data-testid="tag-panel-list">
       {tags.map((tag) => (
         <div
           key={tag.id}
