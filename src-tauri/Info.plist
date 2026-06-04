@@ -2,13 +2,20 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <key>CFBundleDisplayName</key>
+  <string>MyNote</string>
+  <key>CFBundleName</key>
+  <string>MyNote</string>
+  <key>CFBundleAllowMixedLocalizations</key>
+  <true/>
   <key>CFBundleLocalizations</key>
   <array>
+    <string>zh_CN</string>
     <string>zh-Hans</string>
     <string>zh-Hant</string>
     <string>en</string>
   </array>
   <key>CFBundleDevelopmentRegion</key>
-  <string>zh-Hans</string>
+  <string>zh_CN</string>
 </dict>
 </plist>

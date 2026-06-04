@@ -1,0 +1,180 @@
+<h2>MyNote 菜单结构 · 推荐方案 B2</h2>
+<p class="subtitle">主系统菜单收敛为 文件 / 编辑 / 视图 / 笔记 / 帮助。右键菜单按对象分型，不做一个通吃的大菜单。</p>
+
+<div class="split">
+  <div class="mockup" data-choice="system-menu" onclick="toggleSelect(this)">
+    <div class="mockup-header">系统菜单栏</div>
+    <div class="mockup-body">
+      <div class="section">
+        <div class="label">文件</div>
+        <ul>
+          <li>新建知识库</li>
+          <li>打开知识库</li>
+          <li>打开最近知识库</li>
+          <li>关闭知识库</li>
+          <li>新建笔记</li>
+          <li>导入 Markdown</li>
+          <li>导出当前笔记</li>
+          <li>导出知识库（未来灰态）</li>
+          <li>设置</li>
+        </ul>
+      </div>
+      <div class="section">
+        <div class="label">编辑</div>
+        <ul>
+          <li>撤销 / 重做</li>
+          <li>剪切 / 复制 / 粘贴</li>
+          <li>全选</li>
+          <li>查找 / 替换</li>
+          <li>插入链接 / 插入标签</li>
+          <li>粘贴图片为附件</li>
+        </ul>
+      </div>
+      <div class="section">
+        <div class="label">视图</div>
+        <ul>
+          <li>显示/隐藏左侧栏</li>
+          <li>显示/隐藏右侧栏</li>
+          <li>编辑模式</li>
+          <li>分屏预览</li>
+          <li>专注模式</li>
+          <li>搜索面板</li>
+          <li>图谱视图（未来灰态）</li>
+          <li>修订记录面板（未来灰态）</li>
+        </ul>
+      </div>
+      <div class="section">
+        <div class="label">笔记</div>
+        <ul>
+          <li>重命名当前笔记</li>
+          <li>移动到笔记本</li>
+          <li>复制笔记链接</li>
+          <li>显示反向链接</li>
+          <li>管理标签</li>
+          <li>创建关联（未来灰态）</li>
+          <li>查看知识关系（未来灰态）</li>
+          <li>删除 / 恢复笔记</li>
+        </ul>
+      </div>
+      <div class="section">
+        <div class="label">帮助</div>
+        <ul>
+          <li>欢迎页 / 快速开始</li>
+          <li>Markdown 语法帮助</li>
+          <li>快捷键列表</li>
+          <li>检查更新（未来）</li>
+          <li>关于 MyNote</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="mockup" data-choice="context-menu" onclick="toggleSelect(this)">
+    <div class="mockup-header">右键菜单按对象分型</div>
+    <div class="mockup-body">
+      <div class="section">
+        <div class="label">笔记本 / 目录</div>
+        <ul>
+          <li>新建笔记</li>
+          <li>新建子目录（未来）</li>
+          <li>重命名笔记本</li>
+          <li>更换颜色</li>
+          <li>调整顺序</li>
+          <li>删除笔记本</li>
+        </ul>
+      </div>
+      <div class="section">
+        <div class="label">笔记节点</div>
+        <ul>
+          <li>打开</li>
+          <li>在新窗口打开（未来）</li>
+          <li>重命名</li>
+          <li>移动到…</li>
+          <li>复制路径</li>
+          <li>复制 Wiki 链接</li>
+          <li>显示反向链接</li>
+          <li>删除</li>
+        </ul>
+      </div>
+      <div class="section">
+        <div class="label">标签</div>
+        <ul>
+          <li>查看标签上下文</li>
+          <li>按此标签筛选</li>
+          <li>重命名标签（未来）</li>
+          <li>合并标签（未来）</li>
+          <li>移除标签</li>
+        </ul>
+      </div>
+      <div class="section">
+        <div class="label">编辑器文本选择</div>
+        <ul>
+          <li>加粗 / 斜体 / 标题</li>
+          <li>转为列表 / 引用 / 代码块</li>
+          <li>添加链接</li>
+          <li>添加标签</li>
+          <li>创建双链</li>
+          <li>创建知识关联（未来）</li>
+        </ul>
+      </div>
+      <div class="section">
+        <div class="label">空白区域</div>
+        <ul>
+          <li>新建笔记</li>
+          <li>粘贴</li>
+          <li>刷新索引</li>
+          <li>显示侧栏</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>设计原则</h3>
+  <div class="pros-cons">
+    <div class="pros">
+      <h4>保留在系统菜单的动作</h4>
+      <ul>
+        <li>跨对象、跨页面、全局一致的动作</li>
+        <li>有明确快捷键的动作</li>
+        <li>用户预期会去顶部菜单找的动作</li>
+      </ul>
+    </div>
+    <div class="cons">
+      <h4>保留在右键菜单的动作</h4>
+      <ul>
+        <li>强依赖当前对象的动作</li>
+        <li>与当前光标、选区、节点直接相关</li>
+        <li>不适合全局化展示的整理动作</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>需要你重点判断的点</h3>
+  <div class="options" data-multiselect>
+    <div class="option" data-choice="file-menu-too-heavy" onclick="toggleSelect(this)">
+      <div class="letter">1</div>
+      <div class="content">
+        <h3>文件菜单是否过重</h3>
+        <p>比如新建知识库、导入、导出、设置是否应再拆分。</p>
+      </div>
+    </div>
+    <div class="option" data-choice="view-menu-right" onclick="toggleSelect(this)">
+      <div class="letter">2</div>
+      <div class="content">
+        <h3>视图菜单是否合理</h3>
+        <p>确认侧栏显隐、编辑模式、搜索/图谱/修订是否就该放这里。</p>
+      </div>
+    </div>
+    <div class="option" data-choice="context-object-typing" onclick="toggleSelect(this)">
+      <div class="letter">3</div>
+      <div class="content">
+        <h3>右键菜单对象分型是否足够清楚</h3>
+        <p>重点看笔记本、笔记、标签、选区、空白区这五类是否够用。</p>
+      </div>
+    </div>
+  </div>
+</div>

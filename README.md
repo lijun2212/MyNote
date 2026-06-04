@@ -1,6 +1,6 @@
-# Tauri + React + Typescript
+# MyNote
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+MyNote is a simple personal Markdown notebook built with Tauri, React, and TypeScript.
 
 ## Recommended IDE Setup
 

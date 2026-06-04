@@ -1,0 +1,83 @@
+<h2>MyNote 菜单架构方向</h2>
+<p class="subtitle">双轨完整方案下，比较三种信息架构密度。当前按你的选择，高亮推荐的是平衡型。</p>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">方案 A · 精简高频</div>
+        <div class="mockup-body">
+          <div class="mock-nav">文件 · 编辑 · 查看 · 笔记 · 帮助</div>
+          <div style="display:flex; gap:12px; margin-top:12px;">
+            <div class="mock-sidebar" style="width:38%;">右键菜单<br><br>新建笔记<br>重命名<br>移动<br>删除</div>
+            <div class="mock-content">未来功能基本隐藏<br><br>关系、图谱、修订、导出等放到次级入口</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>方案 A</h3>
+      <p>最轻量，学习成本低，但后续扩展时会频繁改菜单结构。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup" style="border-color:#c98f3b; box-shadow:0 0 0 2px rgba(201,143,59,.18);">
+        <div class="mockup-header">方案 B · 平衡型（推荐）</div>
+        <div class="mockup-body">
+          <div class="mock-nav">文件 · 编辑 · 视图 · 笔记 · 组织 · 窗口 · 帮助</div>
+          <div style="display:flex; gap:12px; margin-top:12px;">
+            <div class="mock-sidebar" style="width:38%;">右键菜单按对象分层<br><br>笔记操作<br>组织操作<br>链接/标签<br>未来功能灰态</div>
+            <div class="mock-content">高频动作直出<br><br>图谱 / 修订 / 导出 / 关系管理预留位置但不抢首屏</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>方案 B</h3>
+      <p>当前功能可顺滑落位，未来能力可灰态预留，系统菜单与右键菜单都能保持稳定。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">方案 C · 专业工具型</div>
+        <div class="mockup-body">
+          <div class="mock-nav">文件 · 编辑 · 选择 · 导航 · 笔记 · 标签 · 链接 · 图谱 · 修订 · 工具 · 帮助</div>
+          <div style="display:flex; gap:12px; margin-top:12px;">
+            <div class="mock-sidebar" style="width:38%;">右键菜单较长<br><br>接近 IDE / 专业文档工具</div>
+            <div class="mock-content">全量暴露能力<br><br>专业感更强，但早期产品会显得偏重</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>方案 C</h3>
+      <p>适合成熟阶段，但现阶段会把未完成能力暴露得过重。</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>推荐结论</h3>
+  <div class="pros-cons">
+    <div class="pros">
+      <h4>推荐 B 的原因</h4>
+      <ul>
+        <li>符合你选的双轨完整 + 平衡型 + 灰态预留</li>
+        <li>能把当前已实现功能和未来图谱、修订、关系能力放进同一骨架</li>
+        <li>不会把右键菜单做成一长串难扫的命令列表</li>
+      </ul>
+    </div>
+    <div class="cons">
+      <h4>需要控制的点</h4>
+      <ul>
+        <li>灰态功能必须少而准，不能把菜单变成路线图墙</li>
+        <li>系统菜单和右键菜单要避免同层级重复过多</li>
+        <li>对象不同，右键菜单必须明显分型</li>
+      </ul>
+    </div>
+  </div>
+</div>
