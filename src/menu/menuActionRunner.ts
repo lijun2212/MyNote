@@ -18,43 +18,45 @@ import type { MenuActionId } from "./menuIds";
 type MaybePromise = Promise<void> | void;
 
 export interface MenuActionRunnerHandlers {
-  createNote: () => MaybePromise;
-  createNotebook: () => MaybePromise;
-  importNote: () => MaybePromise;
-  openSearch: () => MaybePromise;
-  toggleLeftSidebar: () => MaybePromise;
-  toggleRightSidebar: () => MaybePromise;
-  setEditorMode: (mode: EditorMode) => MaybePromise;
-  openCurrentNote: (payload: NoteContextMenuPayload) => MaybePromise;
-  moveCurrentNote: (payload: NoteContextMenuPayload) => MaybePromise;
-  renameCurrentNote: (payload: NoteContextMenuPayload) => MaybePromise;
-  copyCurrentNoteLink: (payload: NoteContextMenuPayload) => MaybePromise;
-  copyCurrentNoteWikiLink: (payload: NoteContextMenuPayload) => MaybePromise;
-  createNoteInNotebook: (payload: NotebookContextMenuPayload) => MaybePromise;
-  renameNotebook: (payload: NotebookContextMenuPayload) => MaybePromise;
-  reorderNotebook: (payload: NotebookContextMenuPayload) => MaybePromise;
-  deleteNotebook: (payload: NotebookContextMenuPayload) => MaybePromise;
-  deleteTag: (payload: TagContextMenuPayload) => MaybePromise;
-  insertLinkFromSelection: (payload: EditorSelectionContextMenuPayload) => MaybePromise;
-  insertTagFromSelection: (payload: EditorSelectionContextMenuPayload) => MaybePromise;
-  createWikiLinkFromSelection: (payload: EditorSelectionContextMenuPayload) => MaybePromise;
-  refreshIndex: (payload: EditorBlankContextMenuPayload) => MaybePromise;
-  showLeftSidebar: (payload: EditorBlankContextMenuPayload) => MaybePromise;
-  refreshTagFilter: (payload: TagBlankContextMenuPayload) => MaybePromise;
-  clearSelectedTags: (payload: TagBlankContextMenuPayload) => MaybePromise;
-  returnToEditor: (payload: PreviewBlankContextMenuPayload) => MaybePromise;
-  showPreviewSidebar: (payload: PreviewBlankContextMenuPayload) => MaybePromise;
-  openPreviewLink: (payload: PreviewLinkContextMenuPayload) => MaybePromise;
-  copyPreviewLink: (payload: PreviewLinkContextMenuPayload) => MaybePromise;
-  openPreviewTargetNote: (payload: PreviewLinkContextMenuPayload) => MaybePromise;
-  refreshLinks: (payload: LinksBlankContextMenuPayload) => MaybePromise;
-  createRelation: (payload: RelationBlankContextMenuPayload) => MaybePromise;
-  refreshRelations: (payload: RelationBlankContextMenuPayload) => MaybePromise;
-  openRelationTarget: (payload: RelationItemContextMenuPayload) => MaybePromise;
-  deleteRelation: (payload: RelationItemContextMenuPayload) => MaybePromise;
-  openShortcuts: () => MaybePromise;
-  openAbout: () => MaybePromise;
+  createNote?: () => MaybePromise;
+  createNotebook?: () => MaybePromise;
+  importNote?: () => MaybePromise;
+  openSearch?: () => MaybePromise;
+  toggleLeftSidebar?: () => MaybePromise;
+  toggleRightSidebar?: () => MaybePromise;
+  setEditorMode?: (mode: EditorMode) => MaybePromise;
+  openCurrentNote?: (payload: NoteContextMenuPayload) => MaybePromise;
+  moveCurrentNote?: (payload: NoteContextMenuPayload) => MaybePromise;
+  renameCurrentNote?: (payload: NoteContextMenuPayload) => MaybePromise;
+  copyCurrentNoteLink?: (payload: NoteContextMenuPayload) => MaybePromise;
+  copyCurrentNoteWikiLink?: (payload: NoteContextMenuPayload) => MaybePromise;
+  createNoteInNotebook?: (payload: NotebookContextMenuPayload) => MaybePromise;
+  renameNotebook?: (payload: NotebookContextMenuPayload) => MaybePromise;
+  reorderNotebook?: (payload: NotebookContextMenuPayload) => MaybePromise;
+  deleteNotebook?: (payload: NotebookContextMenuPayload) => MaybePromise;
+  deleteTag?: (payload: TagContextMenuPayload) => MaybePromise;
+  insertLinkFromSelection?: (payload: EditorSelectionContextMenuPayload) => MaybePromise;
+  insertTagFromSelection?: (payload: EditorSelectionContextMenuPayload) => MaybePromise;
+  createWikiLinkFromSelection?: (payload: EditorSelectionContextMenuPayload) => MaybePromise;
+  refreshIndex?: (payload: EditorBlankContextMenuPayload) => MaybePromise;
+  showLeftSidebar?: (payload: EditorBlankContextMenuPayload) => MaybePromise;
+  refreshTagFilter?: (payload: TagBlankContextMenuPayload) => MaybePromise;
+  clearSelectedTags?: (payload: TagBlankContextMenuPayload) => MaybePromise;
+  returnToEditor?: (payload: PreviewBlankContextMenuPayload) => MaybePromise;
+  showPreviewSidebar?: (payload: PreviewBlankContextMenuPayload) => MaybePromise;
+  openPreviewLink?: (payload: PreviewLinkContextMenuPayload) => MaybePromise;
+  copyPreviewLink?: (payload: PreviewLinkContextMenuPayload) => MaybePromise;
+  openPreviewTargetNote?: (payload: PreviewLinkContextMenuPayload) => MaybePromise;
+  refreshLinks?: (payload: LinksBlankContextMenuPayload) => MaybePromise;
+  createRelation?: (payload: RelationBlankContextMenuPayload) => MaybePromise;
+  refreshRelations?: (payload: RelationBlankContextMenuPayload) => MaybePromise;
+  openRelationTarget?: (payload: RelationItemContextMenuPayload) => MaybePromise;
+  deleteRelation?: (payload: RelationItemContextMenuPayload) => MaybePromise;
+  openShortcuts?: () => MaybePromise;
+  openAbout?: () => MaybePromise;
 }
+
+type MenuActionHandlerKey = keyof MenuActionRunnerHandlers;
 
 function assertNotePayload(payload: ContextMenuPayload | undefined): NoteContextMenuPayload {
   if (!payload || payload.type !== "note") {
@@ -112,6 +114,16 @@ function assertPreviewLinkPayload(payload: ContextMenuPayload | undefined): Prev
   return payload;
 }
 
+function assertPreviewTargetNotePayload(payload: ContextMenuPayload | undefined): PreviewLinkContextMenuPayload {
+  const previewLinkPayload = assertPreviewLinkPayload(payload);
+
+  if (previewLinkPayload.linkType === "external" || !previewLinkPayload.notePath) {
+    throw new Error("This menu action requires a preview link payload with a target note path.");
+  }
+
+  return previewLinkPayload;
+}
+
 function assertLinksBlankPayload(payload: ContextMenuPayload | undefined): LinksBlankContextMenuPayload {
   if (!payload || payload.type !== "linksBlank") {
     throw new Error("This menu action requires a links blank context payload.");
@@ -133,48 +145,72 @@ function assertRelationItemPayload(payload: ContextMenuPayload | undefined): Rel
   return payload;
 }
 
+function assertRelationTargetPayload(payload: ContextMenuPayload | undefined): RelationItemContextMenuPayload {
+  const relationItemPayload = assertRelationItemPayload(payload);
+
+  if (!relationItemPayload.notePath) {
+    throw new Error("This menu action requires a relation item payload with a target note path.");
+  }
+
+  return relationItemPayload;
+}
+
+function requireHandler<K extends MenuActionHandlerKey>(
+  handlers: MenuActionRunnerHandlers,
+  actionId: MenuActionId,
+  handlerKey: K,
+): NonNullable<MenuActionRunnerHandlers[K]> {
+  const handler = handlers[handlerKey];
+
+  if (typeof handler !== "function") {
+    throw new Error(`Menu action ${actionId} is not configured.`);
+  }
+
+  return handler;
+}
+
 export function createMenuActionRunner(handlers: MenuActionRunnerHandlers) {
   const actionExecutors: Record<MenuActionId, (payload?: ContextMenuPayload) => MaybePromise> = {
-    "file.newNote": () => handlers.createNote(),
-    "file.newNotebook": () => handlers.createNotebook(),
-    "file.importNote": () => handlers.importNote(),
-    "edit.rename": (payload) => handlers.renameCurrentNote(assertNotePayload(payload)),
-    "edit.move": (payload) => handlers.moveCurrentNote(assertNotePayload(payload)),
-    "edit.copyLink": (payload) => handlers.copyCurrentNoteLink(assertNotePayload(payload)),
-    "view.search": () => handlers.openSearch(),
-    "view.toggleLeftSidebar": () => handlers.toggleLeftSidebar(),
-    "view.toggleRightSidebar": () => handlers.toggleRightSidebar(),
-    "view.editorOnly": () => handlers.setEditorMode("editor"),
-    "view.split": () => handlers.setEditorMode("split"),
-    "note.rename": (payload) => handlers.renameCurrentNote(assertNotePayload(payload)),
-    "note.move": (payload) => handlers.moveCurrentNote(assertNotePayload(payload)),
-    "note.copyLink": (payload) => handlers.copyCurrentNoteLink(assertNotePayload(payload)),
-    "note.copyWikiLink": (payload) => handlers.copyCurrentNoteWikiLink(assertNotePayload(payload)),
-    "help.shortcuts": () => handlers.openShortcuts(),
-    "help.about": () => handlers.openAbout(),
-    "notebook.createNote": (payload) => handlers.createNoteInNotebook(assertNotebookPayload(payload)),
-    "notebook.rename": (payload) => handlers.renameNotebook(assertNotebookPayload(payload)),
-    "notebook.reorder": (payload) => handlers.reorderNotebook(assertNotebookPayload(payload)),
-    "notebook.delete": (payload) => handlers.deleteNotebook(assertNotebookPayload(payload)),
-    "note.open": (payload) => handlers.openCurrentNote(assertNotePayload(payload)),
-    "tag.delete": (payload) => handlers.deleteTag(assertTagPayload(payload)),
-    "selection.insertLink": (payload) => handlers.insertLinkFromSelection(assertEditorSelectionPayload(payload)),
-    "selection.insertTag": (payload) => handlers.insertTagFromSelection(assertEditorSelectionPayload(payload)),
-    "selection.createWikiLink": (payload) => handlers.createWikiLinkFromSelection(assertEditorSelectionPayload(payload)),
-    "blank.refreshIndex": (payload) => handlers.refreshIndex(assertEditorBlankPayload(payload)),
-    "blank.showSidebar": (payload) => handlers.showLeftSidebar(assertEditorBlankPayload(payload)),
-    "tagBlank.refresh": (payload) => handlers.refreshTagFilter(assertTagBlankPayload(payload)),
-    "tagBlank.clearFilter": (payload) => handlers.clearSelectedTags(assertTagBlankPayload(payload)),
-    "previewBlank.returnToEditor": (payload) => handlers.returnToEditor(assertPreviewBlankPayload(payload)),
-    "previewBlank.showSidebar": (payload) => handlers.showPreviewSidebar(assertPreviewBlankPayload(payload)),
-    "previewLink.open": (payload) => handlers.openPreviewLink(assertPreviewLinkPayload(payload)),
-    "previewLink.copy": (payload) => handlers.copyPreviewLink(assertPreviewLinkPayload(payload)),
-    "previewLink.openTargetNote": (payload) => handlers.openPreviewTargetNote(assertPreviewLinkPayload(payload)),
-    "linksBlank.refresh": (payload) => handlers.refreshLinks(assertLinksBlankPayload(payload)),
-    "relationBlank.create": (payload) => handlers.createRelation(assertRelationBlankPayload(payload)),
-    "relationBlank.refresh": (payload) => handlers.refreshRelations(assertRelationBlankPayload(payload)),
-    "relationItem.openTarget": (payload) => handlers.openRelationTarget(assertRelationItemPayload(payload)),
-    "relationItem.delete": (payload) => handlers.deleteRelation(assertRelationItemPayload(payload)),
+    "file.newNote": () => requireHandler(handlers, "file.newNote", "createNote")(),
+    "file.newNotebook": () => requireHandler(handlers, "file.newNotebook", "createNotebook")(),
+    "file.importNote": () => requireHandler(handlers, "file.importNote", "importNote")(),
+    "edit.rename": (payload) => requireHandler(handlers, "edit.rename", "renameCurrentNote")(assertNotePayload(payload)),
+    "edit.move": (payload) => requireHandler(handlers, "edit.move", "moveCurrentNote")(assertNotePayload(payload)),
+    "edit.copyLink": (payload) => requireHandler(handlers, "edit.copyLink", "copyCurrentNoteLink")(assertNotePayload(payload)),
+    "view.search": () => requireHandler(handlers, "view.search", "openSearch")(),
+    "view.toggleLeftSidebar": () => requireHandler(handlers, "view.toggleLeftSidebar", "toggleLeftSidebar")(),
+    "view.toggleRightSidebar": () => requireHandler(handlers, "view.toggleRightSidebar", "toggleRightSidebar")(),
+    "view.editorOnly": () => requireHandler(handlers, "view.editorOnly", "setEditorMode")("editor"),
+    "view.split": () => requireHandler(handlers, "view.split", "setEditorMode")("split"),
+    "note.rename": (payload) => requireHandler(handlers, "note.rename", "renameCurrentNote")(assertNotePayload(payload)),
+    "note.move": (payload) => requireHandler(handlers, "note.move", "moveCurrentNote")(assertNotePayload(payload)),
+    "note.copyLink": (payload) => requireHandler(handlers, "note.copyLink", "copyCurrentNoteLink")(assertNotePayload(payload)),
+    "note.copyWikiLink": (payload) => requireHandler(handlers, "note.copyWikiLink", "copyCurrentNoteWikiLink")(assertNotePayload(payload)),
+    "help.shortcuts": () => requireHandler(handlers, "help.shortcuts", "openShortcuts")(),
+    "help.about": () => requireHandler(handlers, "help.about", "openAbout")(),
+    "notebook.createNote": (payload) => requireHandler(handlers, "notebook.createNote", "createNoteInNotebook")(assertNotebookPayload(payload)),
+    "notebook.rename": (payload) => requireHandler(handlers, "notebook.rename", "renameNotebook")(assertNotebookPayload(payload)),
+    "notebook.reorder": (payload) => requireHandler(handlers, "notebook.reorder", "reorderNotebook")(assertNotebookPayload(payload)),
+    "notebook.delete": (payload) => requireHandler(handlers, "notebook.delete", "deleteNotebook")(assertNotebookPayload(payload)),
+    "note.open": (payload) => requireHandler(handlers, "note.open", "openCurrentNote")(assertNotePayload(payload)),
+    "tag.delete": (payload) => requireHandler(handlers, "tag.delete", "deleteTag")(assertTagPayload(payload)),
+    "selection.insertLink": (payload) => requireHandler(handlers, "selection.insertLink", "insertLinkFromSelection")(assertEditorSelectionPayload(payload)),
+    "selection.insertTag": (payload) => requireHandler(handlers, "selection.insertTag", "insertTagFromSelection")(assertEditorSelectionPayload(payload)),
+    "selection.createWikiLink": (payload) => requireHandler(handlers, "selection.createWikiLink", "createWikiLinkFromSelection")(assertEditorSelectionPayload(payload)),
+    "blank.refreshIndex": (payload) => requireHandler(handlers, "blank.refreshIndex", "refreshIndex")(assertEditorBlankPayload(payload)),
+    "blank.showSidebar": (payload) => requireHandler(handlers, "blank.showSidebar", "showLeftSidebar")(assertEditorBlankPayload(payload)),
+    "tagBlank.refresh": (payload) => requireHandler(handlers, "tagBlank.refresh", "refreshTagFilter")(assertTagBlankPayload(payload)),
+    "tagBlank.clearFilter": (payload) => requireHandler(handlers, "tagBlank.clearFilter", "clearSelectedTags")(assertTagBlankPayload(payload)),
+    "previewBlank.returnToEditor": (payload) => requireHandler(handlers, "previewBlank.returnToEditor", "returnToEditor")(assertPreviewBlankPayload(payload)),
+    "previewBlank.showSidebar": (payload) => requireHandler(handlers, "previewBlank.showSidebar", "showPreviewSidebar")(assertPreviewBlankPayload(payload)),
+    "previewLink.open": (payload) => requireHandler(handlers, "previewLink.open", "openPreviewLink")(assertPreviewLinkPayload(payload)),
+    "previewLink.copy": (payload) => requireHandler(handlers, "previewLink.copy", "copyPreviewLink")(assertPreviewLinkPayload(payload)),
+    "previewLink.openTargetNote": (payload) => requireHandler(handlers, "previewLink.openTargetNote", "openPreviewTargetNote")(assertPreviewTargetNotePayload(payload)),
+    "linksBlank.refresh": (payload) => requireHandler(handlers, "linksBlank.refresh", "refreshLinks")(assertLinksBlankPayload(payload)),
+    "relationBlank.create": (payload) => requireHandler(handlers, "relationBlank.create", "createRelation")(assertRelationBlankPayload(payload)),
+    "relationBlank.refresh": (payload) => requireHandler(handlers, "relationBlank.refresh", "refreshRelations")(assertRelationBlankPayload(payload)),
+    "relationItem.openTarget": (payload) => requireHandler(handlers, "relationItem.openTarget", "openRelationTarget")(assertRelationTargetPayload(payload)),
+    "relationItem.delete": (payload) => requireHandler(handlers, "relationItem.delete", "deleteRelation")(assertRelationItemPayload(payload)),
   };
 
   return {

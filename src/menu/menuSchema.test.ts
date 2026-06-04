@@ -34,6 +34,24 @@ const tagPayload = {
   },
 };
 
+const fileTreeBlankPayload = {
+  type: "fileTreeBlank" as const,
+  path: "notes",
+  handlers: {
+    createNote: () => undefined,
+    createNotebook: () => undefined,
+    importNote: () => undefined,
+  },
+};
+
+const editorBlankPayload = {
+  type: "editorBlank" as const,
+  handlers: {
+    refreshIndex: () => undefined,
+    showSidebar: () => undefined,
+  },
+};
+
 const editorSelectionPayload = {
   type: "editorSelection" as const,
   selectedText: "项目周报",
@@ -63,7 +81,7 @@ const previewBlankPayload = {
 
 const previewLinkPayload = {
   type: "previewLink" as const,
-  linkType: "internal",
+  linkType: "internal" as const,
   href: "notes/产品/需求.md",
   notePath: "notes/产品/需求.md",
   handlers: {
@@ -119,6 +137,18 @@ function collectEnabledActionIds() {
     .filter((item) => item.enabled !== false)
     .map((item) => item.id);
 
+  const fileTreeBlankActions = buildContextMenuSchema(fileTreeBlankPayload)
+    .filter((item) => item.enabled !== false)
+    .map((item) => item.id);
+
+  const editorSelectionActions = buildContextMenuSchema(editorSelectionPayload)
+    .filter((item) => item.enabled !== false)
+    .map((item) => item.id);
+
+  const editorBlankActions = buildContextMenuSchema(editorBlankPayload)
+    .filter((item) => item.enabled !== false)
+    .map((item) => item.id);
+
   const tagBlankActions = buildContextMenuSchema(tagBlankPayload)
     .filter((item) => item.enabled !== false)
     .map((item) => item.id);
@@ -148,6 +178,9 @@ function collectEnabledActionIds() {
     ...notebookActions,
     ...noteActions,
     ...tagActions,
+    ...fileTreeBlankActions,
+    ...editorSelectionActions,
+    ...editorBlankActions,
     ...tagBlankActions,
     ...previewBlankActions,
     ...previewLinkActions,
@@ -219,7 +252,9 @@ describe("menuSchema", () => {
     const notebookMenu = buildContextMenuSchema(notebookPayload);
     const noteMenu = buildContextMenuSchema(notePayload);
     const tagMenu = buildContextMenuSchema(tagPayload);
+    const fileTreeBlankMenu = buildContextMenuSchema(fileTreeBlankPayload);
     const selectionMenu = buildContextMenuSchema(editorSelectionPayload);
+    const editorBlankMenu = buildContextMenuSchema(editorBlankPayload);
     const tagBlankMenu = buildContextMenuSchema(tagBlankPayload);
     const previewBlankMenu = buildContextMenuSchema(previewBlankPayload);
     const previewLinkMenu = buildContextMenuSchema(previewLinkPayload);
@@ -231,7 +266,9 @@ describe("menuSchema", () => {
     expect(noteMenu.map((item) => item.id)).toContain("note.copyWikiLink");
     expect(noteMenu.map((item) => item.id)).not.toContain("notebook.reorder");
     expect(tagMenu.map((item) => item.id)).toContain("tag.delete");
+    expect(fileTreeBlankMenu.map((item) => item.id)).toContain("file.newNotebook");
     expect(selectionMenu.map((item) => item.id)).toContain("selection.insertLink");
+    expect(editorBlankMenu.map((item) => item.id)).toContain("blank.refreshIndex");
     expect(tagBlankMenu.map((item) => item.id)).toContain("tagBlank.clearFilter");
     expect(previewBlankMenu.map((item) => item.id)).toContain("previewBlank.returnToEditor");
     expect(previewLinkMenu.map((item) => item.id)).toContain("previewLink.openTargetNote");
@@ -330,19 +367,35 @@ describe("menuSchema", () => {
     expect(wikiMenu.find((item) => item.id === "previewLink.openTargetNote")?.enabled).toBe(true);
   });
 
+  it("only enables relationItem.openTarget when a target note path and handler both exist", () => {
+    const enabledMenu = buildContextMenuSchema(relationItemPayload);
+    const missingTargetMenu = buildContextMenuSchema({
+      type: "relationItem",
+      relationId: "rel-1",
+      handlers: {
+        openTarget: () => undefined,
+        delete: () => undefined,
+      },
+    });
+    const missingHandlerMenu = buildContextMenuSchema({
+      type: "relationItem",
+      relationId: "rel-1",
+      notePath: "notes/产品/需求.md",
+      handlers: {
+        delete: () => undefined,
+      },
+    });
+
+    expect(enabledMenu.find((item) => item.id === "relationItem.openTarget")?.enabled).toBe(true);
+    expect(missingTargetMenu.find((item) => item.id === "relationItem.openTarget")?.enabled).toBe(false);
+    expect(missingHandlerMenu.find((item) => item.id === "relationItem.openTarget")?.enabled).toBe(false);
+  });
+
   it("only enables context actions that already have real consumers", () => {
     const notebookMenu = buildContextMenuSchema(notebookPayload);
     const noteMenu = buildContextMenuSchema(notePayload);
     const tagMenu = buildContextMenuSchema(tagPayload);
-    const blankMenu = buildContextMenuSchema({
-      type: "fileTreeBlank",
-      path: "notes",
-      handlers: {
-        createNote: () => undefined,
-        createNotebook: () => undefined,
-        importNote: () => undefined,
-      },
-    });
+    const blankMenu = buildContextMenuSchema(fileTreeBlankPayload);
 
     expect(notebookMenu.find((item) => item.id === "notebook.createNote")?.enabled).toBe(true);
     expect(notebookMenu.find((item) => item.id === "notebook.reorder")?.enabled).toBe(false);

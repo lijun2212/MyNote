@@ -44,6 +44,14 @@ function createHandlers() {
 }
 
 describe("menuActionRunner", () => {
+  it("allows callers to provide only the handlers needed for the exercised action", async () => {
+    const moveCurrentNote = vi.fn().mockResolvedValue(undefined);
+    const runner = createMenuActionRunner({ moveCurrentNote });
+
+    await expect(runner.run("note.move", { type: "note", noteId: "n1", path: "notes/a.md" })).resolves.toBe(true);
+    expect(moveCurrentNote).toHaveBeenCalledOnce();
+  });
+
   it("routes note.move to the provided handler", async () => {
     const handlers = createHandlers();
     const runner = createMenuActionRunner(handlers);
@@ -78,7 +86,7 @@ describe("menuActionRunner", () => {
     const previewBlankPayload = { type: "previewBlank" as const, handlers: {} };
     const previewLinkPayload = {
       type: "previewLink" as const,
-      linkType: "internal",
+      linkType: "internal" as const,
       href: "notes/a.md",
       notePath: "notes/a.md",
       handlers: {},
@@ -187,7 +195,7 @@ describe("menuActionRunner", () => {
     const runner = createMenuActionRunner(handlers);
     const payload = {
       type: "previewLink" as const,
-      linkType: "internal",
+      linkType: "internal" as const,
       href: "notes/a.md",
       notePath: "notes/a.md",
       handlers: {},
@@ -214,6 +222,31 @@ describe("menuActionRunner", () => {
 
     await expect(runner.run("relationItem.delete", payload)).resolves.toBe(true);
     expect(handlers.deleteRelation).toHaveBeenCalledWith(payload);
+  });
+
+  it("rejects previewLink.openTargetNote when the payload has no target note", async () => {
+    const runner = createMenuActionRunner({ openPreviewTargetNote: vi.fn().mockResolvedValue(undefined) });
+
+    await expect(
+      runner.run("previewLink.openTargetNote", {
+        type: "previewLink",
+        linkType: "external",
+        href: "https://example.com",
+        handlers: {},
+      }),
+    ).rejects.toThrow("This menu action requires a preview link payload with a target note path.");
+  });
+
+  it("rejects relationItem.openTarget when the payload has no target note", async () => {
+    const runner = createMenuActionRunner({ openRelationTarget: vi.fn().mockResolvedValue(undefined) });
+
+    await expect(
+      runner.run("relationItem.openTarget", {
+        type: "relationItem",
+        relationId: "rel-1",
+        handlers: {},
+      }),
+    ).rejects.toThrow("This menu action requires a relation item payload with a target note path.");
   });
 
   it("throws when a previewLink-only action receives a non-previewLink payload", async () => {
