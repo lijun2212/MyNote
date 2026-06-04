@@ -317,6 +317,41 @@ describe("MarkdownPreview", () => {
     });
   });
 
+  it("synchronously prevents default for managed preview links before async handling", () => {
+    const internalNote = makeNote({
+      id: "prevent-default-note",
+      path: "notes/产品/需求.md",
+      title: "需求",
+      content_hash: "prevent-default-hash",
+    });
+
+    invokeMock.mockImplementation(async (command, args) => {
+      if (command === "get_note_by_path") {
+        expect(args).toEqual({ path: internalNote.path });
+        return makeNoteDetail({ note: internalNote, content: "# 需求" });
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    render(
+      <MarkdownPreview
+        content={[
+          "[Internal](notes/%E4%BA%A7%E5%93%81/%E9%9C%80%E6%B1%82.md)",
+          "",
+          "[External](https://example.com/docs)",
+        ].join("\n")}
+      />,
+    );
+
+    const internalEvent = new MouseEvent("click", { bubbles: true, cancelable: true });
+    screen.getByRole("link", { name: "Internal" }).dispatchEvent(internalEvent);
+    expect(internalEvent.defaultPrevented).toBe(true);
+
+    const externalEvent = new MouseEvent("click", { bubbles: true, cancelable: true });
+    screen.getByRole("link", { name: "External" }).dispatchEvent(externalEvent);
+    expect(externalEvent.defaultPrevented).toBe(true);
+  });
+
   it("opens a resolved wiki link and updates app and editor stores", async () => {
     const resolvedNote = makeNote({
       id: "wiki-note",
@@ -804,6 +839,51 @@ describe("MarkdownPreview", () => {
       expect(invokeMock).toHaveBeenCalledWith("get_note_by_path", { path: "notes/internal-target.md" });
       expect(useEditorStore.getState().currentNote).toEqual(internalNote);
       expect(useAppStore.getState().selectedNodePath).toBe("notes/internal-target.md");
+    });
+  });
+
+  it("normalizes encoded note hrefs for preview context menu and open behavior", async () => {
+    const encodedNote = makeNote({
+      id: "encoded-note",
+      path: "notes/产品/需求.md",
+      title: "需求",
+      content_hash: "encoded-hash",
+    });
+
+    invokeMock.mockImplementation(async (command, args) => {
+      if (command === "get_note_by_path") {
+        expect(args).toEqual({ path: encodedNote.path });
+        return makeNoteDetail({ note: encodedNote, content: "# 需求" });
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    renderWithContextMenu(
+      <MarkdownPreview content="[Encoded](notes/%E4%BA%A7%E5%93%81/%E9%9C%80%E6%B1%82.md?view=preview#%E6%A0%87%E9%A2%98)" />,
+    );
+
+    const link = screen.getByRole("link", { name: "Encoded" });
+
+    fireEvent.contextMenu(link, { clientX: 28, clientY: 36 });
+    const openTargetNoteItem = await screen.findByRole("menuitem", { name: "打开目标笔记" });
+    expect(openTargetNoteItem).toHaveAttribute("aria-disabled", "false");
+
+    fireEvent.click(openTargetNoteItem);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_note_by_path", { path: encodedNote.path });
+      expect(useEditorStore.getState().currentNote).toEqual(encodedNote);
+      expect(useAppStore.getState().selectedNodePath).toBe(encodedNote.path);
+    });
+
+    invokeMock.mockClear();
+
+    fireEvent.click(link);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_note_by_path", { path: encodedNote.path });
+      expect(useEditorStore.getState().currentNote).toEqual(encodedNote);
+      expect(useAppStore.getState().selectedNodePath).toBe(encodedNote.path);
     });
   });
 });

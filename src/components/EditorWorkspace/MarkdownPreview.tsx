@@ -222,7 +222,18 @@ function normalizeInternalNotePath(href: string): string | undefined {
     return undefined;
   }
 
-  const normalizedPath = trimmedHref.replace(/^\/+/, "").split(/[?#]/, 1)[0] ?? "";
+  const rawPath = trimmedHref.replace(/^\/+/, "").split(/[?#]/, 1)[0] ?? "";
+  if (!rawPath) {
+    return undefined;
+  }
+
+  let normalizedPath = rawPath;
+  try {
+    normalizedPath = decodeURIComponent(rawPath);
+  } catch {
+    normalizedPath = rawPath;
+  }
+
   if (!/^notes\/.+\.md$/i.test(normalizedPath)) {
     return undefined;
   }
@@ -230,22 +241,12 @@ function normalizeInternalNotePath(href: string): string | undefined {
   return normalizedPath;
 }
 
-async function resolveWikiNotePath(title: string): Promise<string | undefined> {
-  try {
-    const note = await api.getNoteByTitle(title);
-    return note?.path;
-  } catch (error) {
-    console.error("Failed to resolve wiki link target:", error);
-    return undefined;
-  }
-}
-
-async function resolvePreviewLinkTarget(element: Element): Promise<{
+function getPreviewLinkTarget(element: Element): {
   linkType: PreviewLinkKind;
   href: string;
   notePath?: string;
   wikiTitle?: string;
-} | null> {
+} | null {
   const wikiLink = element.closest(".wiki-link") as HTMLElement | null;
   if (wikiLink) {
     const title = wikiLink.dataset.title?.trim();
@@ -256,7 +257,6 @@ async function resolvePreviewLinkTarget(element: Element): Promise<{
     return {
       linkType: "wiki",
       href: `[[${title}]]`,
-      notePath: await resolveWikiNotePath(title),
       wikiTitle: title,
     };
   }
@@ -282,6 +282,37 @@ async function resolvePreviewLinkTarget(element: Element): Promise<{
     linkType: "internal",
     href,
     notePath: normalizeInternalNotePath(href),
+  };
+}
+
+async function resolveWikiNotePath(title: string): Promise<string | undefined> {
+  try {
+    const note = await api.getNoteByTitle(title);
+    return note?.path;
+  } catch (error) {
+    console.error("Failed to resolve wiki link target:", error);
+    return undefined;
+  }
+}
+
+async function resolvePreviewLinkTarget(element: Element): Promise<{
+  linkType: PreviewLinkKind;
+  href: string;
+  notePath?: string;
+  wikiTitle?: string;
+} | null> {
+  const linkTarget = getPreviewLinkTarget(element);
+  if (!linkTarget) {
+    return null;
+  }
+
+  if (linkTarget.linkType !== "wiki" || !linkTarget.wikiTitle) {
+    return linkTarget;
+  }
+
+  return {
+    ...linkTarget,
+    notePath: await resolveWikiNotePath(linkTarget.wikiTitle),
   };
 }
 
@@ -751,7 +782,7 @@ export function MarkdownPreview({
         return;
       }
 
-      const linkTarget = await resolvePreviewLinkTarget(target);
+      const linkTarget = getPreviewLinkTarget(target);
       if (!linkTarget) {
         return;
       }
