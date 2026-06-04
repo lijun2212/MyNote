@@ -143,7 +143,10 @@ export function buildContextMenuSchema(payload: ContextMenuPayload): MenuSchemaI
   }
 
   if (payload.type === "tagContextItem") {
-    return [];
+    return [
+      item("tagContextItem.openNote", "打开笔记", isEnabled(payload.handlers?.open)),
+      item("tagContextItem.locate", "定位到标签位置", isEnabled(payload.handlers?.locate)),
+    ];
   }
 
   if (payload.type === "previewBlank") {

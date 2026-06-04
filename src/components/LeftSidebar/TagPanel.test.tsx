@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TagPanel } from "./TagPanel";
@@ -277,5 +277,93 @@ describe("TagPanel", () => {
     expect(await screen.findByRole("menu")).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "删除标签" })).toHaveAttribute("aria-disabled", "false");
     expect(screen.getByRole("menuitem", { name: "重命名" })).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("opens a tag-blank context menu and only enables clear-filter when tags are selected", async () => {
+    const user = userEvent.setup();
+    apiMocks.listTags.mockResolvedValue([{ id: "tag-1", name: "项目报告", note_count: 3 }]);
+
+    const { rerender } = renderWithContextMenu();
+
+    fireEvent.contextMenu(await screen.findByTestId("tag-panel-list"), {
+      clientX: 80,
+      clientY: 120,
+    });
+
+    expect(await screen.findByRole("menu")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "刷新标签结果" })).toHaveAttribute("aria-disabled", "false");
+    expect(screen.getByRole("menuitem", { name: "清空标签过滤" })).toHaveAttribute("aria-disabled", "true");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    act(() => {
+      useAppStore.setState({ selectedTagIds: ["tag-1"] });
+    });
+    rerender(
+      <ContextMenuProvider>
+        <TagPanel />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    fireEvent.contextMenu(await screen.findByTestId("tag-panel-list"), {
+      clientX: 96,
+      clientY: 128,
+    });
+
+    expect(await screen.findByRole("menu")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "清空标签过滤" })).toHaveAttribute("aria-disabled", "false");
+
+    await user.click(screen.getByRole("menuitem", { name: "清空标签过滤" }));
+    expect(useAppStore.getState().selectedTagIds).toEqual([]);
+  });
+
+  it("opens a tag-context-item menu on right click for real context entries", async () => {
+    const user = userEvent.setup();
+
+    apiMocks.listTags.mockResolvedValue([{ id: "tag-1", name: "项目报告", note_count: 2 }]);
+    apiMocks.getTagContext.mockResolvedValue({
+      tag_id: "tag-1",
+      tag_name: "项目报告",
+      total_notes: 2,
+      visible_count: 1,
+      has_more: false,
+      items: [
+        {
+          note_id: "note-2",
+          note_path: "notes/project-report.md",
+          note_title: "项目周报",
+          note_updated_at: "2026-06-01T10:00:00Z",
+          source: "front_matter" as const,
+          occurrence_order: 0,
+          line_start: 12,
+          line_end: 12,
+          heading_context: "执行摘要",
+          context_snippet: "这里提到了项目报告标签。",
+        },
+      ],
+    });
+
+    renderWithContextMenu();
+
+    await user.click(await screen.findByRole("button", { name: "标签 项目报告 2" }));
+
+    fireEvent.contextMenu(await screen.findByRole("button", { name: /打开标签上下文笔记 项目周报/ }), {
+      clientX: 132,
+      clientY: 216,
+    });
+
+    expect(await screen.findByRole("menu")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "打开笔记" })).toHaveAttribute("aria-disabled", "false");
+    expect(screen.getByRole("menuitem", { name: "定位到标签位置" })).toHaveAttribute("aria-disabled", "false");
+
+    await user.click(screen.getByRole("menuitem", { name: "定位到标签位置" }));
+
+    await waitFor(() => expect(apiMocks.getNoteByPath).toHaveBeenCalledWith("notes/project-report.md"));
+    expect(useEditorStore.getState().tagNavigationTarget).toMatchObject({
+      note_path: "notes/project-report.md",
+      note_title: "项目周报",
+      occurrence_order: 0,
+    });
   });
 });

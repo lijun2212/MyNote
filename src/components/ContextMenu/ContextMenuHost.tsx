@@ -48,6 +48,10 @@ function createContextRunner(payload: ContextMenuPayload) {
     createWikiLinkFromSelection: (selectionPayload) => selectionPayload.handlers?.createWikiLink?.(selectionPayload),
     refreshIndex: (blankPayload) => blankPayload.handlers?.refreshIndex?.(blankPayload),
     showLeftSidebar: (blankPayload) => blankPayload.handlers?.showSidebar?.(blankPayload),
+    refreshTagFilter: (tagBlankPayload) => tagBlankPayload.handlers?.refresh?.(tagBlankPayload),
+    clearSelectedTags: (tagBlankPayload) => tagBlankPayload.handlers?.clearFilter?.(tagBlankPayload),
+    openTagContextItemNote: (tagContextItemPayload) => tagContextItemPayload.handlers?.open?.(tagContextItemPayload),
+    locateTagContextItem: (tagContextItemPayload) => tagContextItemPayload.handlers?.locate?.(tagContextItemPayload),
     openShortcuts: noop,
     openAbout: noop,
   });

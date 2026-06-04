@@ -9,6 +9,7 @@ import type {
   RelationBlankContextMenuPayload,
   RelationItemContextMenuPayload,
   TagBlankContextMenuPayload,
+  TagContextItemContextMenuPayload,
   TagContextMenuPayload,
   LinksBlankContextMenuPayload,
 } from "../components/ContextMenu/contextMenuTypes";
@@ -42,6 +43,8 @@ export interface MenuActionRunnerHandlers {
   showLeftSidebar?: (payload: EditorBlankContextMenuPayload) => MaybePromise;
   refreshTagFilter?: (payload: TagBlankContextMenuPayload) => MaybePromise;
   clearSelectedTags?: (payload: TagBlankContextMenuPayload) => MaybePromise;
+  openTagContextItemNote?: (payload: TagContextItemContextMenuPayload) => MaybePromise;
+  locateTagContextItem?: (payload: TagContextItemContextMenuPayload) => MaybePromise;
   returnToEditor?: (payload: PreviewBlankContextMenuPayload) => MaybePromise;
   showPreviewSidebar?: (payload: PreviewBlankContextMenuPayload) => MaybePromise;
   openPreviewLink?: (payload: PreviewLinkContextMenuPayload) => MaybePromise;
@@ -103,6 +106,13 @@ function assertTagBlankPayload(payload: ContextMenuPayload | undefined): TagBlan
 function assertPreviewBlankPayload(payload: ContextMenuPayload | undefined): PreviewBlankContextMenuPayload {
   if (!payload || payload.type !== "previewBlank") {
     throw new Error("This menu action requires a preview blank context payload.");
+  }
+  return payload;
+}
+
+function assertTagContextItemPayload(payload: ContextMenuPayload | undefined): TagContextItemContextMenuPayload {
+  if (!payload || payload.type !== "tagContextItem") {
+    throw new Error("This menu action requires a tag context item payload.");
   }
   return payload;
 }
@@ -201,6 +211,8 @@ export function createMenuActionRunner(handlers: MenuActionRunnerHandlers) {
     "blank.showSidebar": (payload) => requireHandler(handlers, "blank.showSidebar", "showLeftSidebar")(assertEditorBlankPayload(payload)),
     "tagBlank.refresh": (payload) => requireHandler(handlers, "tagBlank.refresh", "refreshTagFilter")(assertTagBlankPayload(payload)),
     "tagBlank.clearFilter": (payload) => requireHandler(handlers, "tagBlank.clearFilter", "clearSelectedTags")(assertTagBlankPayload(payload)),
+    "tagContextItem.openNote": (payload) => requireHandler(handlers, "tagContextItem.openNote", "openTagContextItemNote")(assertTagContextItemPayload(payload)),
+    "tagContextItem.locate": (payload) => requireHandler(handlers, "tagContextItem.locate", "locateTagContextItem")(assertTagContextItemPayload(payload)),
     "previewBlank.returnToEditor": (payload) => requireHandler(handlers, "previewBlank.returnToEditor", "returnToEditor")(assertPreviewBlankPayload(payload)),
     "previewBlank.showSidebar": (payload) => requireHandler(handlers, "previewBlank.showSidebar", "showPreviewSidebar")(assertPreviewBlankPayload(payload)),
     "previewLink.open": (payload) => requireHandler(handlers, "previewLink.open", "openPreviewLink")(assertPreviewLinkPayload(payload)),

@@ -48,6 +48,8 @@ export const MENU_ACTION_IDS = [
 	"blank.showSidebar",
 	"tagBlank.refresh",
 	"tagBlank.clearFilter",
+	"tagContextItem.openNote",
+	"tagContextItem.locate",
 	"previewBlank.returnToEditor",
 	"previewBlank.showSidebar",
 	"previewLink.open",

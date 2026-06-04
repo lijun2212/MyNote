@@ -100,6 +100,14 @@ export interface TagBlankContextMenuPayload extends ContextMenuPayloadBase {
 export interface TagContextItemContextMenuPayload extends ContextMenuPayloadBase {
   type: "tagContextItem";
   notePath: string;
+  noteTitle?: string;
+  lineStart?: number;
+  lineEnd?: number;
+  occurrenceOrder?: number;
+  handlers?: {
+    open?: (payload: TagContextItemContextMenuPayload) => MaybePromise;
+    locate?: (payload: TagContextItemContextMenuPayload) => MaybePromise;
+  };
 }
 
 export interface PreviewBlankContextMenuPayload extends ContextMenuPayloadBase {
