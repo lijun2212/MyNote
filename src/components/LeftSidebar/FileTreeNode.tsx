@@ -53,6 +53,7 @@ interface Props {
   onPointerEnterDirectory: (node: NoteTreeNode) => void;
   onPointerLeaveDirectory: (node: NoteTreeNode) => void;
   onPointerUpOnDirectory: (node: NoteTreeNode, event: React.PointerEvent<HTMLElement>) => void;
+  onContextMenu?: (node: NoteTreeNode, event: React.MouseEvent<HTMLElement>) => void;
   isNotebook?: boolean;
   isRenamingNotebook?: boolean;
   isPickingNotebookColor?: boolean;
@@ -88,6 +89,7 @@ export function FileTreeNode({
   onPointerEnterDirectory,
   onPointerLeaveDirectory,
   onPointerUpOnDirectory,
+  onContextMenu,
   isNotebook = false,
   isRenamingNotebook = false,
   isPickingNotebookColor = false,
@@ -198,6 +200,7 @@ export function FileTreeNode({
     return (
       <div>
         <div
+          onContextMenu={(event) => onContextMenu?.(node, event)}
           onDragEnter={(event) => onDragEnterDirectory(node, event)}
           onDragOver={(event) => onDragEnterDirectory(node, event)}
           onDragLeave={() => onDragLeaveDirectory(node)}
@@ -656,6 +659,7 @@ export function FileTreeNode({
                   onPointerEnterDirectory={onPointerEnterDirectory}
                   onPointerLeaveDirectory={onPointerLeaveDirectory}
                   onPointerUpOnDirectory={onPointerUpOnDirectory}
+                  onContextMenu={onContextMenu}
                 />
               ))}
             </div>
@@ -671,6 +675,7 @@ export function FileTreeNode({
       data-note-drag-source={node.path}
       data-note-drag-label={node.name}
       onClick={() => onSelectFile(node)}
+      onContextMenu={(event) => onContextMenu?.(node, event)}
       onDragStart={(event) => onStartDragFile(node, event)}
       onPointerDown={(event) => onStartPointerDragFile(node, event)}
       style={{

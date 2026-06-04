@@ -2,9 +2,20 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FileTreePanel } from "./FileTreePanel";
+import { ContextMenuHost } from "../ContextMenu/ContextMenuHost";
+import { ContextMenuProvider } from "../ContextMenu/useContextMenu";
 import { useAppStore } from "../../store/useAppStore";
 import { makeKnowledgeBase } from "../../test/testData";
 import type { NoteTreeNode } from "../../types";
+
+function renderWithContextMenu() {
+  return render(
+    <ContextMenuProvider>
+      <FileTreePanel />
+      <ContextMenuHost />
+    </ContextMenuProvider>,
+  );
+}
 
 const hookMocks = vi.hoisted(() => ({
   createNote: vi.fn(),
@@ -168,6 +179,33 @@ describe("FileTreePanel", () => {
 
     expect(directoryToggle).toHaveStyle({ cursor: "default" });
     expect(noteRow).toHaveStyle({ cursor: "default" });
+  });
+
+  it("opens a notebook context menu on right click and keeps unavailable actions disabled", async () => {
+    renderWithContextMenu();
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "法律" }), {
+      clientX: 120,
+      clientY: 80,
+    });
+
+    expect(await screen.findByRole("menu")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "新建笔记" })).toHaveAttribute("aria-disabled", "false");
+    expect(screen.getByRole("menuitem", { name: "调整顺序" })).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("opens a note context menu on right click and leaves unimplemented note actions disabled", async () => {
+    renderWithContextMenu();
+
+    fireEvent.contextMenu(screen.getByText("案例.md"), {
+      clientX: 140,
+      clientY: 120,
+    });
+
+    expect(await screen.findByRole("menu")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "打开笔记" })).toHaveAttribute("aria-disabled", "false");
+    expect(screen.getByRole("menuitem", { name: "重命名" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("menuitem", { name: "移动" })).toHaveAttribute("aria-disabled", "true");
   });
 
   it("does not render top-level notebook icons or nested directory icons", () => {

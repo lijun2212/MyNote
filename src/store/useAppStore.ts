@@ -7,6 +7,8 @@ interface AppState {
   tree: NoteTreeNode[];
   selectedNodePath: string | null;
   activeTagContext: TagContext | null;
+  leftSidebarVisible: boolean;
+  rightSidebarVisible: boolean;
   loading: boolean;
   error: string | null;
   selectedTagIds: string[];
@@ -15,6 +17,10 @@ interface AppState {
   setTree: (tree: NoteTreeNode[]) => void;
   setSelectedNodePath: (path: string | null) => void;
   setActiveTagContext: (context: TagContext | null) => void;
+  setLeftSidebarVisible: (visible: boolean) => void;
+  setRightSidebarVisible: (visible: boolean) => void;
+  toggleLeftSidebar: () => void;
+  toggleRightSidebar: () => void;
   setError: (error: string | null) => void;
   refreshTree: () => Promise<void>;
   setSelectedTagIds: (ids: string[]) => void;
@@ -25,6 +31,8 @@ export const useAppStore = create<AppState>((set) => ({
   tree: [],
   selectedNodePath: null,
   activeTagContext: null,
+  leftSidebarVisible: true,
+  rightSidebarVisible: false,
   loading: false,
   error: null,
   selectedTagIds: [],
@@ -33,6 +41,10 @@ export const useAppStore = create<AppState>((set) => ({
   setTree: (tree) => set({ tree }),
   setSelectedNodePath: (path) => set({ selectedNodePath: path }),
   setActiveTagContext: (context) => set({ activeTagContext: context }),
+  setLeftSidebarVisible: (visible) => set({ leftSidebarVisible: visible }),
+  setRightSidebarVisible: (visible) => set({ rightSidebarVisible: visible }),
+  toggleLeftSidebar: () => set((state) => ({ leftSidebarVisible: !state.leftSidebarVisible })),
+  toggleRightSidebar: () => set((state) => ({ rightSidebarVisible: !state.rightSidebarVisible })),
   setError: (error) => set({ error }),
   setSelectedTagIds: (ids) => set({ selectedTagIds: ids }),
 

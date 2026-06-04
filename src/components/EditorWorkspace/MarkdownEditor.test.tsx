@@ -1,4 +1,4 @@
-import { render, fireEvent, waitFor } from "@testing-library/react";
+import { render, fireEvent, waitFor, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { EditorView } from "@codemirror/view";
 import userEvent from "@testing-library/user-event";
@@ -6,11 +6,40 @@ import { MarkdownEditor } from "./MarkdownEditor";
 import { setActiveDraggedTagName, clearActiveDraggedTagName } from "./tagDragState";
 import type { SearchNavigationTarget, TagNavigationTarget } from "../../types";
 import { useEditorStore } from "../../store/useEditorStore";
+import { ContextMenuHost } from "../ContextMenu/ContextMenuHost";
+import { ContextMenuProvider } from "../ContextMenu/useContextMenu";
+import { useAppStore } from "../../store/useAppStore";
 
 describe("MarkdownEditor", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     clearActiveDraggedTagName();
+    if (typeof Range !== "undefined") {
+      Object.defineProperty(Range.prototype, "getClientRects", {
+        configurable: true,
+        value: () => ({
+          length: 0,
+          item: () => null,
+          [Symbol.iterator]: function* iterator() {
+            yield* [] as DOMRect[];
+          },
+        }),
+      });
+      Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+        configurable: true,
+        value: () => ({
+          x: 0,
+          y: 0,
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          width: 0,
+          height: 0,
+          toJSON: () => ({}),
+        }),
+      });
+    }
   });
 
   it("inserts a dragged tag at the drop location", async () => {
@@ -429,5 +458,113 @@ describe("MarkdownEditor", () => {
       expect(onChange).toHaveBeenCalled();
     });
     expect(container.querySelector(".cm-content")?.textContent?.toLowerCase()).toContain("nb");
+  });
+
+  it("shows selection context menu for formatting and knowledge actions", async () => {
+    const { container } = render(
+      <ContextMenuProvider>
+        <MarkdownEditor initialContent="项目周报" onChange={vi.fn()} />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const editorRoot = container.querySelector(".cm-editor") as HTMLElement;
+    expect(editorRoot).toBeTruthy();
+
+    const view = EditorView.findFromDOM(editorRoot);
+    expect(view).toBeTruthy();
+
+    view?.dispatch({ selection: { anchor: 0, head: 4 } });
+    fireEvent.contextMenu(editorRoot, { clientX: 24, clientY: 32 });
+
+    expect(await screen.findByRole("menuitem", { name: "添加链接" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "添加标签" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "创建双链" })).toBeInTheDocument();
+  });
+
+  it("applies the selected knowledge action from the context menu", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const { container } = render(
+      <ContextMenuProvider>
+        <MarkdownEditor initialContent="项目周报" onChange={onChange} />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const editorRoot = container.querySelector(".cm-editor") as HTMLElement;
+    const view = EditorView.findFromDOM(editorRoot);
+    view?.dispatch({ selection: { anchor: 0, head: 4 } });
+
+    fireEvent.contextMenu(editorRoot, { clientX: 24, clientY: 32 });
+    await user.click(await screen.findByRole("menuitem", { name: "创建双链" }));
+
+    await waitFor(() => {
+      expect(onChange.mock.lastCall?.[0]).toContain("[[项目周报]]");
+    });
+  });
+
+  it("applies selection actions to the snapshot that was active when the menu opened", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const { container } = render(
+      <ContextMenuProvider>
+        <MarkdownEditor initialContent="项目周报 第二段" onChange={onChange} />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const editorRoot = container.querySelector(".cm-editor") as HTMLElement;
+    const view = EditorView.findFromDOM(editorRoot);
+    view?.dispatch({ selection: { anchor: 0, head: 4 } });
+
+    fireEvent.contextMenu(editorRoot, { clientX: 24, clientY: 32 });
+    view?.dispatch({ selection: { anchor: 5, head: 8 } });
+
+    await user.click(await screen.findByRole("menuitem", { name: "创建双链" }));
+
+    await waitFor(() => {
+      expect(onChange.mock.lastCall?.[0]).toContain("[[项目周报]] 第二段");
+    });
+  });
+
+  it("shows editor blank actions and routes implemented ones through the shared context menu host", async () => {
+    const user = userEvent.setup();
+    const refreshTree = vi.fn().mockResolvedValue(undefined);
+    const setLeftSidebarVisible = vi.fn();
+    const previousState = useAppStore.getState();
+
+    useAppStore.setState({
+      refreshTree,
+      setLeftSidebarVisible,
+    });
+
+    const { container, unmount } = render(
+      <ContextMenuProvider>
+        <MarkdownEditor initialContent="项目周报" onChange={vi.fn()} />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const editorRoot = container.querySelector(".cm-editor") as HTMLElement;
+    fireEvent.contextMenu(editorRoot, { clientX: 24, clientY: 32 });
+
+    expect(await screen.findByRole("menuitem", { name: "刷新索引" })).toHaveAttribute("aria-disabled", "false");
+    expect(screen.getByRole("menuitem", { name: "显示侧栏" })).toHaveAttribute("aria-disabled", "false");
+    expect(screen.getByRole("menuitem", { name: "新建笔记" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("menuitem", { name: "粘贴" })).toHaveAttribute("aria-disabled", "true");
+
+    await user.click(screen.getByRole("menuitem", { name: "刷新索引" }));
+    expect(refreshTree).toHaveBeenCalledOnce();
+
+    fireEvent.contextMenu(editorRoot, { clientX: 24, clientY: 32 });
+    await user.click(await screen.findByRole("menuitem", { name: "显示侧栏" }));
+    expect(setLeftSidebarVisible).toHaveBeenCalledWith(true);
+
+    unmount();
+    useAppStore.setState({
+      refreshTree: previousState.refreshTree,
+      setLeftSidebarVisible: previousState.setLeftSidebarVisible,
+    });
   });
 });

@@ -6,6 +6,8 @@ interface Options {
   minWidth: number;
   maxWidth: number;
   defaultVisible: boolean;
+  visible?: boolean;
+  onVisibleChange?: (visible: boolean) => void;
 }
 
 export function useSidebarResize({
@@ -14,7 +16,10 @@ export function useSidebarResize({
   minWidth,
   maxWidth,
   defaultVisible,
+  visible,
+  onVisibleChange,
 }: Options) {
+  const isControlled = visible !== undefined;
   const storageKeyWidth = `mynote:${side}-sidebar:width`;
   const storageKeyVisible = `mynote:${side}-sidebar:visible`;
 
@@ -24,10 +29,11 @@ export function useSidebarResize({
     const parsed = parseInt(saved, 10);
     return !isNaN(parsed) ? parsed : defaultWidth;
   });
-  const [isVisible, setIsVisible] = useState<boolean>(() => {
+  const [internalVisible, setInternalVisible] = useState<boolean>(() => {
     const saved = localStorage.getItem(storageKeyVisible);
     return saved !== null ? saved === "true" : defaultVisible;
   });
+  const isVisible = visible ?? internalVisible;
 
   const isDragging = useRef(false);
   const startX = useRef(0);
@@ -68,7 +74,13 @@ export function useSidebarResize({
     localStorage.setItem(storageKeyVisible, String(isVisible));
   }, [isVisible, storageKeyVisible]);
 
-  const toggleVisible = useCallback(() => setIsVisible((v) => !v), []);
+  const toggleVisible = useCallback(() => {
+    const nextVisible = !isVisible;
+    if (!isControlled) {
+      setInternalVisible(nextVisible);
+    }
+    onVisibleChange?.(nextVisible);
+  }, [isControlled, isVisible, onVisibleChange]);
 
   return { width, isVisible, toggleVisible, handleMouseDown };
 }

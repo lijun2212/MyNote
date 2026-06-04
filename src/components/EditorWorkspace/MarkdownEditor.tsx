@@ -7,7 +7,9 @@ import type { SourceLineSyncSignal } from "./sourceLineSync";
 import { findInlineTagMatches } from "./inlineTags";
 import { clearActiveDraggedTagName, getActiveDraggedTagName } from "./tagDragState";
 import type { SearchNavigationTarget, TagNavigationTarget } from "../../types";
+import { useAppStore } from "../../store/useAppStore";
 import { useEditorStore } from "../../store/useEditorStore";
+import { useContextMenu } from "../ContextMenu/useContextMenu";
 
 interface Props {
   initialContent: string;
@@ -21,6 +23,12 @@ interface Props {
 type InsertTagDetail = {
   tagName: string;
   source?: string;
+};
+
+type SelectionSnapshot = {
+  from: number;
+  to: number;
+  text: string;
 };
 
 const INSERT_TAG_EVENT = "mynote:insert-tag";
@@ -242,6 +250,25 @@ function insertTagIntoView(view: EditorView, tagName: string, at?: number | null
   view.focus();
 }
 
+function replaceSelectionSnapshot(
+  view: EditorView,
+  snapshot: SelectionSnapshot,
+  transform: (selectedText: string) => { insert: string; anchor: number },
+) {
+  const currentText = view.state.sliceDoc(snapshot.from, snapshot.to);
+  if (currentText !== snapshot.text) {
+    return;
+  }
+
+  const { insert, anchor } = transform(snapshot.text);
+  view.dispatch({
+    changes: { from: snapshot.from, to: snapshot.to, insert },
+    selection: { anchor: snapshot.from + anchor },
+    scrollIntoView: true,
+  });
+  view.focus();
+}
+
 function readDraggedTagName(dataTransfer: DataTransfer | null): string {
   const customTag = dataTransfer?.getData(DRAGGED_TAG_MIME)?.trim();
   if (customTag) {
@@ -279,7 +306,11 @@ export function MarkdownEditor({
 }: Props) {
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const { openContextMenu } = useContextMenu();
+  const refreshTree = useAppStore((state) => state.refreshTree);
+  const setLeftSidebarVisible = useAppStore((state) => state.setLeftSidebarVisible);
   const setIsComposing = useEditorStore((state) => state.setIsComposing);
+  const isComposing = useEditorStore((state) => state.isComposing);
   const isProgrammaticChange = useRef(false);
   const isProgrammaticScroll = useRef(false);
   const programmaticScrollTimerRef = useRef<number | null>(null);
@@ -322,6 +353,74 @@ export function MarkdownEditor({
     logTagDrag("pointer-insert", { tagName, position });
     insertTagIntoView(view, tagName, position);
     clearActiveDraggedTagName();
+  };
+
+  const handleEditorContextMenu = (event: React.MouseEvent<HTMLDivElement>) => {
+    const view = viewRef.current;
+    if (!view) {
+      return;
+    }
+
+    if (isComposing) {
+      return;
+    }
+
+    const selection = view.state.selection.main;
+    const selectionSnapshot: SelectionSnapshot = {
+      from: selection.from,
+      to: selection.to,
+      text: view.state.sliceDoc(selection.from, selection.to),
+    };
+    const selectedText = selectionSnapshot.text.trim();
+
+    event.preventDefault();
+
+    if (selectedText) {
+      openContextMenu({
+        position: { x: event.clientX, y: event.clientY },
+        payload: {
+          type: "editorSelection",
+          selectedText,
+          handlers: {
+            insertLink: () => {
+              replaceSelectionSnapshot(view, selectionSnapshot, (text) => {
+                const insert = `[${text}]()`;
+                return { insert, anchor: text.length + 3 };
+              });
+            },
+            insertTag: () => {
+              replaceSelectionSnapshot(view, selectionSnapshot, (text) => {
+                const normalized = text.replace(/^#/, "").trim();
+                const insert = `#${normalized}`;
+                return { insert, anchor: insert.length };
+              });
+            },
+            createWikiLink: () => {
+              replaceSelectionSnapshot(view, selectionSnapshot, (text) => {
+                const insert = `[[${text}]]`;
+                return { insert, anchor: insert.length };
+              });
+            },
+          },
+        },
+      });
+      return;
+    }
+
+    openContextMenu({
+      position: { x: event.clientX, y: event.clientY },
+      payload: {
+        type: "editorBlank",
+        handlers: {
+          refreshIndex: async () => {
+            await refreshTree();
+          },
+          showSidebar: () => {
+            setLeftSidebarVisible(true);
+          },
+        },
+      },
+    });
   };
 
   useEffect(() => {
@@ -577,6 +676,7 @@ export function MarkdownEditor({
 
   return (
     <div
+      onContextMenu={handleEditorContextMenu}
       onDragOver={(event) => {
         const tagName = readDraggedTagName(event.dataTransfer);
         logTagDrag("wrapper-dragover", {
@@ -585,9 +685,10 @@ export function MarkdownEditor({
           clientX: event.clientX,
           clientY: event.clientY,
         });
-        if (!tagName) return;
+        if (!tagName) {
+          return;
+        }
         event.preventDefault();
-        event.dataTransfer.dropEffect = "copy";
       }}
       onDrop={handleExternalTagDrop}
       onPointerUp={handlePointerTagDrop}
