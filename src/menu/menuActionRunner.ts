@@ -4,7 +4,13 @@ import type {
   EditorSelectionContextMenuPayload,
   NoteContextMenuPayload,
   NotebookContextMenuPayload,
+  PreviewBlankContextMenuPayload,
+  PreviewLinkContextMenuPayload,
+  RelationBlankContextMenuPayload,
+  RelationItemContextMenuPayload,
+  TagBlankContextMenuPayload,
   TagContextMenuPayload,
+  LinksBlankContextMenuPayload,
 } from "../components/ContextMenu/contextMenuTypes";
 import type { EditorMode } from "../store/useEditorStore";
 import type { MenuActionId } from "./menuIds";
@@ -34,6 +40,18 @@ export interface MenuActionRunnerHandlers {
   createWikiLinkFromSelection: (payload: EditorSelectionContextMenuPayload) => MaybePromise;
   refreshIndex: (payload: EditorBlankContextMenuPayload) => MaybePromise;
   showLeftSidebar: (payload: EditorBlankContextMenuPayload) => MaybePromise;
+  refreshTagFilter: (payload: TagBlankContextMenuPayload) => MaybePromise;
+  clearSelectedTags: (payload: TagBlankContextMenuPayload) => MaybePromise;
+  returnToEditor: (payload: PreviewBlankContextMenuPayload) => MaybePromise;
+  showPreviewSidebar: (payload: PreviewBlankContextMenuPayload) => MaybePromise;
+  openPreviewLink: (payload: PreviewLinkContextMenuPayload) => MaybePromise;
+  copyPreviewLink: (payload: PreviewLinkContextMenuPayload) => MaybePromise;
+  openPreviewTargetNote: (payload: PreviewLinkContextMenuPayload) => MaybePromise;
+  refreshLinks: (payload: LinksBlankContextMenuPayload) => MaybePromise;
+  createRelation: (payload: RelationBlankContextMenuPayload) => MaybePromise;
+  refreshRelations: (payload: RelationBlankContextMenuPayload) => MaybePromise;
+  openRelationTarget: (payload: RelationItemContextMenuPayload) => MaybePromise;
+  deleteRelation: (payload: RelationItemContextMenuPayload) => MaybePromise;
   openShortcuts: () => MaybePromise;
   openAbout: () => MaybePromise;
 }
@@ -73,6 +91,48 @@ function assertEditorBlankPayload(payload: ContextMenuPayload | undefined): Edit
   return payload;
 }
 
+function assertTagBlankPayload(payload: ContextMenuPayload | undefined): TagBlankContextMenuPayload {
+  if (!payload || payload.type !== "tagBlank") {
+    throw new Error("This menu action requires a tag blank context payload.");
+  }
+  return payload;
+}
+
+function assertPreviewBlankPayload(payload: ContextMenuPayload | undefined): PreviewBlankContextMenuPayload {
+  if (!payload || payload.type !== "previewBlank") {
+    throw new Error("This menu action requires a preview blank context payload.");
+  }
+  return payload;
+}
+
+function assertPreviewLinkPayload(payload: ContextMenuPayload | undefined): PreviewLinkContextMenuPayload {
+  if (!payload || payload.type !== "previewLink") {
+    throw new Error("This menu action requires a preview link context payload.");
+  }
+  return payload;
+}
+
+function assertLinksBlankPayload(payload: ContextMenuPayload | undefined): LinksBlankContextMenuPayload {
+  if (!payload || payload.type !== "linksBlank") {
+    throw new Error("This menu action requires a links blank context payload.");
+  }
+  return payload;
+}
+
+function assertRelationBlankPayload(payload: ContextMenuPayload | undefined): RelationBlankContextMenuPayload {
+  if (!payload || payload.type !== "relationBlank") {
+    throw new Error("This menu action requires a relation blank context payload.");
+  }
+  return payload;
+}
+
+function assertRelationItemPayload(payload: ContextMenuPayload | undefined): RelationItemContextMenuPayload {
+  if (!payload || payload.type !== "relationItem") {
+    throw new Error("This menu action requires a relation item context payload.");
+  }
+  return payload;
+}
+
 export function createMenuActionRunner(handlers: MenuActionRunnerHandlers) {
   const actionExecutors: Record<MenuActionId, (payload?: ContextMenuPayload) => MaybePromise> = {
     "file.newNote": () => handlers.createNote(),
@@ -103,6 +163,18 @@ export function createMenuActionRunner(handlers: MenuActionRunnerHandlers) {
     "selection.createWikiLink": (payload) => handlers.createWikiLinkFromSelection(assertEditorSelectionPayload(payload)),
     "blank.refreshIndex": (payload) => handlers.refreshIndex(assertEditorBlankPayload(payload)),
     "blank.showSidebar": (payload) => handlers.showLeftSidebar(assertEditorBlankPayload(payload)),
+    "tagBlank.refresh": (payload) => handlers.refreshTagFilter(assertTagBlankPayload(payload)),
+    "tagBlank.clearFilter": (payload) => handlers.clearSelectedTags(assertTagBlankPayload(payload)),
+    "previewBlank.returnToEditor": (payload) => handlers.returnToEditor(assertPreviewBlankPayload(payload)),
+    "previewBlank.showSidebar": (payload) => handlers.showPreviewSidebar(assertPreviewBlankPayload(payload)),
+    "previewLink.open": (payload) => handlers.openPreviewLink(assertPreviewLinkPayload(payload)),
+    "previewLink.copy": (payload) => handlers.copyPreviewLink(assertPreviewLinkPayload(payload)),
+    "previewLink.openTargetNote": (payload) => handlers.openPreviewTargetNote(assertPreviewLinkPayload(payload)),
+    "linksBlank.refresh": (payload) => handlers.refreshLinks(assertLinksBlankPayload(payload)),
+    "relationBlank.create": (payload) => handlers.createRelation(assertRelationBlankPayload(payload)),
+    "relationBlank.refresh": (payload) => handlers.refreshRelations(assertRelationBlankPayload(payload)),
+    "relationItem.openTarget": (payload) => handlers.openRelationTarget(assertRelationItemPayload(payload)),
+    "relationItem.delete": (payload) => handlers.deleteRelation(assertRelationItemPayload(payload)),
   };
 
   return {

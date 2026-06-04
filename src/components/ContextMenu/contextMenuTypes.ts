@@ -6,7 +6,21 @@ export interface ContextMenuPosition {
 }
 
 interface ContextMenuPayloadBase {
-  type: "notebook" | "note" | "tag" | "fileTreeBlank" | "editorSelection" | "editorBlank";
+  type:
+    | "notebook"
+    | "note"
+    | "tag"
+    | "fileTreeBlank"
+    | "editorSelection"
+    | "editorBlank"
+    | "tagBlank"
+    | "tagContextItem"
+    | "previewBlank"
+    | "previewLink"
+    | "linksBlank"
+    | "linkItem"
+    | "relationBlank"
+    | "relationItem";
 }
 
 export interface NotebookContextMenuPayload extends ContextMenuPayloadBase {
@@ -74,13 +88,90 @@ export interface EditorBlankContextMenuPayload extends ContextMenuPayloadBase {
   };
 }
 
+export interface TagBlankContextMenuPayload extends ContextMenuPayloadBase {
+  type: "tagBlank";
+  selectedTagIds: string[];
+  handlers?: {
+    refresh?: (payload: TagBlankContextMenuPayload) => MaybePromise;
+    clearFilter?: (payload: TagBlankContextMenuPayload) => MaybePromise;
+  };
+}
+
+export interface TagContextItemContextMenuPayload extends ContextMenuPayloadBase {
+  type: "tagContextItem";
+  notePath: string;
+}
+
+export interface PreviewBlankContextMenuPayload extends ContextMenuPayloadBase {
+  type: "previewBlank";
+  handlers?: {
+    returnToEditor?: (payload: PreviewBlankContextMenuPayload) => MaybePromise;
+    showSidebar?: (payload: PreviewBlankContextMenuPayload) => MaybePromise;
+  };
+}
+
+export type PreviewLinkKind = "external" | "internal" | "wiki";
+
+export interface PreviewLinkContextMenuPayload extends ContextMenuPayloadBase {
+  type: "previewLink";
+  linkType: PreviewLinkKind;
+  href: string;
+  notePath?: string;
+  handlers?: {
+    open?: (payload: PreviewLinkContextMenuPayload) => MaybePromise;
+    copy?: (payload: PreviewLinkContextMenuPayload) => MaybePromise;
+    openTargetNote?: (payload: PreviewLinkContextMenuPayload) => MaybePromise;
+  };
+}
+
+export interface LinksBlankContextMenuPayload extends ContextMenuPayloadBase {
+  type: "linksBlank";
+  handlers?: {
+    refresh?: (payload: LinksBlankContextMenuPayload) => MaybePromise;
+  };
+}
+
+export interface LinkItemContextMenuPayload extends ContextMenuPayloadBase {
+  type: "linkItem";
+  linkId: string;
+  linkType: PreviewLinkKind;
+  href: string;
+  notePath?: string;
+}
+
+export interface RelationBlankContextMenuPayload extends ContextMenuPayloadBase {
+  type: "relationBlank";
+  handlers?: {
+    create?: (payload: RelationBlankContextMenuPayload) => MaybePromise;
+    refresh?: (payload: RelationBlankContextMenuPayload) => MaybePromise;
+  };
+}
+
+export interface RelationItemContextMenuPayload extends ContextMenuPayloadBase {
+  type: "relationItem";
+  relationId: string;
+  notePath?: string;
+  handlers?: {
+    openTarget?: (payload: RelationItemContextMenuPayload) => MaybePromise;
+    delete?: (payload: RelationItemContextMenuPayload) => MaybePromise;
+  };
+}
+
 export type ContextMenuPayload =
   | NotebookContextMenuPayload
   | NoteContextMenuPayload
   | TagContextMenuPayload
   | FileTreeBlankContextMenuPayload
   | EditorSelectionContextMenuPayload
-  | EditorBlankContextMenuPayload;
+  | EditorBlankContextMenuPayload
+  | TagBlankContextMenuPayload
+  | TagContextItemContextMenuPayload
+  | PreviewBlankContextMenuPayload
+  | PreviewLinkContextMenuPayload
+  | LinksBlankContextMenuPayload
+  | LinkItemContextMenuPayload
+  | RelationBlankContextMenuPayload
+  | RelationItemContextMenuPayload;
 
 export interface ContextMenuRequest {
   position: ContextMenuPosition;

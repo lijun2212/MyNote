@@ -44,6 +44,60 @@ const editorSelectionPayload = {
   },
 };
 
+const tagBlankPayload = {
+  type: "tagBlank" as const,
+  selectedTagIds: ["tag-1"],
+  handlers: {
+    refresh: () => undefined,
+    clearFilter: () => undefined,
+  },
+};
+
+const previewBlankPayload = {
+  type: "previewBlank" as const,
+  handlers: {
+    returnToEditor: () => undefined,
+    showSidebar: () => undefined,
+  },
+};
+
+const previewLinkPayload = {
+  type: "previewLink" as const,
+  linkType: "internal",
+  href: "notes/产品/需求.md",
+  notePath: "notes/产品/需求.md",
+  handlers: {
+    open: () => undefined,
+    copy: () => undefined,
+    openTargetNote: () => undefined,
+  },
+};
+
+const linksBlankPayload = {
+  type: "linksBlank" as const,
+  handlers: {
+    refresh: () => undefined,
+  },
+};
+
+const relationBlankPayload = {
+  type: "relationBlank" as const,
+  handlers: {
+    create: () => undefined,
+    refresh: () => undefined,
+  },
+};
+
+const relationItemPayload = {
+  type: "relationItem" as const,
+  relationId: "rel-1",
+  notePath: "notes/产品/需求.md",
+  handlers: {
+    openTarget: () => undefined,
+    delete: () => undefined,
+  },
+};
+
 function collectEnabledActionIds() {
   const appMenuActions = buildAppMenuSchema({
     hasKnowledgeBase: true,
@@ -65,7 +119,42 @@ function collectEnabledActionIds() {
     .filter((item) => item.enabled !== false)
     .map((item) => item.id);
 
-  return [...appMenuActions, ...notebookActions, ...noteActions, ...tagActions];
+  const tagBlankActions = buildContextMenuSchema(tagBlankPayload)
+    .filter((item) => item.enabled !== false)
+    .map((item) => item.id);
+
+  const previewBlankActions = buildContextMenuSchema(previewBlankPayload)
+    .filter((item) => item.enabled !== false)
+    .map((item) => item.id);
+
+  const previewLinkActions = buildContextMenuSchema(previewLinkPayload)
+    .filter((item) => item.enabled !== false)
+    .map((item) => item.id);
+
+  const linksBlankActions = buildContextMenuSchema(linksBlankPayload)
+    .filter((item) => item.enabled !== false)
+    .map((item) => item.id);
+
+  const relationBlankActions = buildContextMenuSchema(relationBlankPayload)
+    .filter((item) => item.enabled !== false)
+    .map((item) => item.id);
+
+  const relationItemActions = buildContextMenuSchema(relationItemPayload)
+    .filter((item) => item.enabled !== false)
+    .map((item) => item.id);
+
+  return [
+    ...appMenuActions,
+    ...notebookActions,
+    ...noteActions,
+    ...tagActions,
+    ...tagBlankActions,
+    ...previewBlankActions,
+    ...previewLinkActions,
+    ...linksBlankActions,
+    ...relationBlankActions,
+    ...relationItemActions,
+  ];
 }
 
 describe("menuSchema", () => {
@@ -131,12 +220,114 @@ describe("menuSchema", () => {
     const noteMenu = buildContextMenuSchema(notePayload);
     const tagMenu = buildContextMenuSchema(tagPayload);
     const selectionMenu = buildContextMenuSchema(editorSelectionPayload);
+    const tagBlankMenu = buildContextMenuSchema(tagBlankPayload);
+    const previewBlankMenu = buildContextMenuSchema(previewBlankPayload);
+    const previewLinkMenu = buildContextMenuSchema(previewLinkPayload);
+    const linksBlankMenu = buildContextMenuSchema(linksBlankPayload);
+    const relationBlankMenu = buildContextMenuSchema(relationBlankPayload);
+    const relationItemMenu = buildContextMenuSchema(relationItemPayload);
 
     expect(notebookMenu.map((item) => item.id)).toContain("notebook.createNote");
     expect(noteMenu.map((item) => item.id)).toContain("note.copyWikiLink");
     expect(noteMenu.map((item) => item.id)).not.toContain("notebook.reorder");
     expect(tagMenu.map((item) => item.id)).toContain("tag.delete");
     expect(selectionMenu.map((item) => item.id)).toContain("selection.insertLink");
+    expect(tagBlankMenu.map((item) => item.id)).toContain("tagBlank.clearFilter");
+    expect(previewBlankMenu.map((item) => item.id)).toContain("previewBlank.returnToEditor");
+    expect(previewLinkMenu.map((item) => item.id)).toContain("previewLink.openTargetNote");
+    expect(linksBlankMenu.map((item) => item.id)).toContain("linksBlank.refresh");
+    expect(relationBlankMenu.map((item) => item.id)).toContain("relationBlank.create");
+    expect(relationItemMenu.map((item) => item.id)).toContain("relationItem.delete");
+  });
+
+  it("only enables tagBlank.clearFilter when tags are selected and a handler exists", () => {
+    const enabledMenu = buildContextMenuSchema(tagBlankPayload);
+    const noSelectionMenu = buildContextMenuSchema({
+      type: "tagBlank",
+      selectedTagIds: [],
+      handlers: {
+        clearFilter: () => undefined,
+      },
+    });
+    const noHandlerMenu = buildContextMenuSchema({
+      type: "tagBlank",
+      selectedTagIds: ["tag-1"],
+      handlers: {},
+    });
+
+    expect(enabledMenu.find((item) => item.id === "tagBlank.clearFilter")?.enabled).toBe(true);
+    expect(noSelectionMenu.find((item) => item.id === "tagBlank.clearFilter")?.enabled).toBe(false);
+    expect(noHandlerMenu.find((item) => item.id === "tagBlank.clearFilter")?.enabled).toBe(false);
+  });
+
+  it("only enables previewLink.openTargetNote when an internal target note path exists and a handler is present", () => {
+    const internalMenu = buildContextMenuSchema(previewLinkPayload);
+    const externalMenu = buildContextMenuSchema({
+      type: "previewLink",
+      linkType: "external",
+      href: "https://example.com",
+      handlers: {
+        open: () => undefined,
+        copy: () => undefined,
+        openTargetNote: () => undefined,
+      },
+    });
+    const unresolvedWikiMenu = buildContextMenuSchema({
+      type: "previewLink",
+      linkType: "wiki",
+      href: "[[未解析]]",
+      handlers: {
+        open: () => undefined,
+        copy: () => undefined,
+        openTargetNote: () => undefined,
+      },
+    });
+    const resolvedWikiMenu = buildContextMenuSchema({
+      type: "previewLink",
+      linkType: "wiki",
+      href: "[[需求]]",
+      notePath: "notes/产品/需求.md",
+      handlers: {
+        open: () => undefined,
+        copy: () => undefined,
+        openTargetNote: () => undefined,
+      },
+    });
+
+    expect(internalMenu.find((item) => item.id === "previewLink.openTargetNote")?.enabled).toBe(true);
+    expect(externalMenu.find((item) => item.id === "previewLink.openTargetNote")?.enabled).toBe(false);
+    expect(unresolvedWikiMenu.find((item) => item.id === "previewLink.openTargetNote")?.enabled).toBe(false);
+    expect(resolvedWikiMenu.find((item) => item.id === "previewLink.openTargetNote")?.enabled).toBe(true);
+  });
+
+  it("reflects enabled differences between external, internal, and wiki preview links", () => {
+    const externalMenu = buildContextMenuSchema({
+      type: "previewLink",
+      linkType: "external",
+      href: "https://example.com",
+      handlers: {
+        open: () => undefined,
+        copy: () => undefined,
+      },
+    });
+    const internalMenu = buildContextMenuSchema(previewLinkPayload);
+    const wikiMenu = buildContextMenuSchema({
+      type: "previewLink",
+      linkType: "wiki",
+      href: "[[需求]]",
+      notePath: "notes/产品/需求.md",
+      handlers: {
+        open: () => undefined,
+        copy: () => undefined,
+        openTargetNote: () => undefined,
+      },
+    });
+
+    expect(externalMenu.find((item) => item.id === "previewLink.open")?.enabled).toBe(true);
+    expect(externalMenu.find((item) => item.id === "previewLink.copy")?.enabled).toBe(true);
+    expect(externalMenu.find((item) => item.id === "previewLink.openTargetNote")?.enabled).toBe(false);
+    expect(internalMenu.find((item) => item.id === "previewLink.openTargetNote")?.enabled).toBe(true);
+    expect(wikiMenu.find((item) => item.id === "previewLink.openTargetNote")?.enabled).toBe(true);
   });
 
   it("only enables context actions that already have real consumers", () => {
@@ -160,6 +351,10 @@ describe("menuSchema", () => {
     expect(tagMenu.find((item) => item.id === "tag.delete")?.enabled).toBe(true);
     expect(tagMenu.find((item) => item.id === "tag.rename")?.enabled).toBe(false);
     expect(blankMenu.every((item) => item.enabled === true)).toBe(true);
+    expect(buildContextMenuSchema(previewBlankPayload).every((item) => item.enabled === true)).toBe(true);
+    expect(buildContextMenuSchema(linksBlankPayload).every((item) => item.enabled === true)).toBe(true);
+    expect(buildContextMenuSchema(relationBlankPayload).every((item) => item.enabled === true)).toBe(true);
+    expect(buildContextMenuSchema(relationItemPayload).every((item) => item.enabled === true)).toBe(true);
   });
 
   it("only exposes enabled actions that the runner supports", () => {

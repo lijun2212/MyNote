@@ -1,6 +1,21 @@
 export const APP_MENU_IDS = ["file", "edit", "view", "note", "help"] as const;
 
-export const CONTEXT_MENU_TARGET_TYPES = ["notebook", "note", "tag", "fileTreeBlank", "editorSelection", "editorBlank"] as const;
+export const CONTEXT_MENU_TARGET_TYPES = [
+	"notebook",
+	"note",
+	"tag",
+	"fileTreeBlank",
+	"editorSelection",
+	"editorBlank",
+	"tagBlank",
+	"tagContextItem",
+	"previewBlank",
+	"previewLink",
+	"linksBlank",
+	"linkItem",
+	"relationBlank",
+	"relationItem",
+] as const;
 
 export const MENU_ACTION_IDS = [
 	"file.newNote",
@@ -31,6 +46,18 @@ export const MENU_ACTION_IDS = [
 	"selection.createWikiLink",
 	"blank.refreshIndex",
 	"blank.showSidebar",
+	"tagBlank.refresh",
+	"tagBlank.clearFilter",
+	"previewBlank.returnToEditor",
+	"previewBlank.showSidebar",
+	"previewLink.open",
+	"previewLink.copy",
+	"previewLink.openTargetNote",
+	"linksBlank.refresh",
+	"relationBlank.create",
+	"relationBlank.refresh",
+	"relationItem.openTarget",
+	"relationItem.delete",
 ] as const;
 
 export const MENU_PLACEHOLDER_IDS = ["view.graph", "view.revisions", "note.relations", "tag.open", "tag.rename", "selection.relation", "blank.newNote", "blank.paste"] as const;

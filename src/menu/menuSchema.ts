@@ -26,6 +26,10 @@ function isEnabled(handler: unknown) {
   return typeof handler === "function";
 }
 
+function hasNotePath(notePath: string | undefined) {
+  return typeof notePath === "string" && notePath.length > 0;
+}
+
 export function buildAppMenuSchema(options: AppMenuSchemaOptions): MenuSchemaItem[] {
   const { hasKnowledgeBase, hasCurrentNote, leftSidebarVisible, rightSidebarVisible, editorMode } = options;
 
@@ -127,11 +131,74 @@ export function buildContextMenuSchema(payload: ContextMenuPayload): MenuSchemaI
     ];
   }
 
-  return [
-    item("note.open", "打开笔记", isEnabled(payload.handlers?.open)),
-    item("note.rename", "重命名", isEnabled(payload.handlers?.rename)),
-    item("note.move", "移动", isEnabled(payload.handlers?.move)),
-    item("note.copyLink", "复制链接", isEnabled(payload.handlers?.copyLink)),
-    item("note.copyWikiLink", "复制 Wiki 链接", isEnabled(payload.handlers?.copyWikiLink)),
-  ];
+  if (payload.type === "tagBlank") {
+    return [
+      item("tagBlank.refresh", "刷新标签结果", isEnabled(payload.handlers?.refresh)),
+      item(
+        "tagBlank.clearFilter",
+        "清空标签过滤",
+        payload.selectedTagIds.length > 0 && isEnabled(payload.handlers?.clearFilter),
+      ),
+    ];
+  }
+
+  if (payload.type === "tagContextItem") {
+    return [];
+  }
+
+  if (payload.type === "previewBlank") {
+    return [
+      item("previewBlank.returnToEditor", "返回编辑器", isEnabled(payload.handlers?.returnToEditor)),
+      item("previewBlank.showSidebar", "显示侧栏", isEnabled(payload.handlers?.showSidebar)),
+    ];
+  }
+
+  if (payload.type === "previewLink") {
+    const canOpenTargetNote =
+      payload.linkType !== "external"
+      && hasNotePath(payload.notePath)
+      && isEnabled(payload.handlers?.openTargetNote);
+
+    return [
+      item("previewLink.open", "打开链接", isEnabled(payload.handlers?.open)),
+      item("previewLink.copy", "复制链接", isEnabled(payload.handlers?.copy)),
+      item("previewLink.openTargetNote", "打开目标笔记", canOpenTargetNote),
+    ];
+  }
+
+  if (payload.type === "linksBlank") {
+    return [
+      item("linksBlank.refresh", "刷新链接", isEnabled(payload.handlers?.refresh)),
+    ];
+  }
+
+  if (payload.type === "linkItem") {
+    return [];
+  }
+
+  if (payload.type === "relationBlank") {
+    return [
+      item("relationBlank.create", "创建关系", isEnabled(payload.handlers?.create)),
+      item("relationBlank.refresh", "刷新关系", isEnabled(payload.handlers?.refresh)),
+    ];
+  }
+
+  if (payload.type === "relationItem") {
+    return [
+      item("relationItem.openTarget", "打开目标笔记", hasNotePath(payload.notePath) && isEnabled(payload.handlers?.openTarget)),
+      item("relationItem.delete", "删除关系", isEnabled(payload.handlers?.delete)),
+    ];
+  }
+
+  if (payload.type === "note") {
+    return [
+      item("note.open", "打开笔记", isEnabled(payload.handlers?.open)),
+      item("note.rename", "重命名", isEnabled(payload.handlers?.rename)),
+      item("note.move", "移动", isEnabled(payload.handlers?.move)),
+      item("note.copyLink", "复制链接", isEnabled(payload.handlers?.copyLink)),
+      item("note.copyWikiLink", "复制 Wiki 链接", isEnabled(payload.handlers?.copyWikiLink)),
+    ];
+  }
+
+  return [];
 }
