@@ -95,6 +95,20 @@ const linksBlankPayload = {
   type: "linksBlank" as const,
   handlers: {
     refresh: () => undefined,
+    showSidebar: () => undefined,
+  },
+};
+
+const linkItemPayload = {
+  type: "linkItem" as const,
+  linkId: "link-1",
+  linkType: "internal" as const,
+  href: "notes/产品/需求.md",
+  notePath: "notes/产品/需求.md",
+  handlers: {
+    open: () => undefined,
+    openTargetNote: () => undefined,
+    copy: () => undefined,
   },
 };
 
@@ -103,6 +117,7 @@ const relationBlankPayload = {
   handlers: {
     create: () => undefined,
     refresh: () => undefined,
+    showSidebar: () => undefined,
   },
 };
 
@@ -259,6 +274,7 @@ describe("menuSchema", () => {
     const previewBlankMenu = buildContextMenuSchema(previewBlankPayload);
     const previewLinkMenu = buildContextMenuSchema(previewLinkPayload);
     const linksBlankMenu = buildContextMenuSchema(linksBlankPayload);
+    const linkItemMenu = buildContextMenuSchema(linkItemPayload);
     const relationBlankMenu = buildContextMenuSchema(relationBlankPayload);
     const relationItemMenu = buildContextMenuSchema(relationItemPayload);
 
@@ -273,6 +289,7 @@ describe("menuSchema", () => {
     expect(previewBlankMenu.map((item) => item.id)).toContain("previewBlank.returnToEditor");
     expect(previewLinkMenu.map((item) => item.id)).toContain("previewLink.openTargetNote");
     expect(linksBlankMenu.map((item) => item.id)).toContain("linksBlank.refresh");
+    expect(linkItemMenu.map((item) => item.id)).toContain("linkItem.openTargetNote");
     expect(relationBlankMenu.map((item) => item.id)).toContain("relationBlank.create");
     expect(relationItemMenu.map((item) => item.id)).toContain("relationItem.delete");
   });
@@ -367,6 +384,28 @@ describe("menuSchema", () => {
     expect(wikiMenu.find((item) => item.id === "previewLink.openTargetNote")?.enabled).toBe(true);
   });
 
+  it("reflects enabled differences between internal and external link-item menus", () => {
+    const internalMenu = buildContextMenuSchema(linkItemPayload);
+    const externalMenu = buildContextMenuSchema({
+      type: "linkItem",
+      linkId: "link-external",
+      linkType: "external",
+      href: "https://example.com",
+      handlers: {
+        open: () => undefined,
+        copy: () => undefined,
+        openTargetNote: () => undefined,
+      },
+    });
+
+    expect(internalMenu.find((item) => item.id === "linkItem.open")?.enabled).toBe(true);
+    expect(internalMenu.find((item) => item.id === "linkItem.openTargetNote")?.enabled).toBe(true);
+    expect(internalMenu.find((item) => item.id === "linkItem.copy")?.enabled).toBe(true);
+    expect(externalMenu.find((item) => item.id === "linkItem.open")?.enabled).toBe(true);
+    expect(externalMenu.find((item) => item.id === "linkItem.openTargetNote")?.enabled).toBe(false);
+    expect(externalMenu.find((item) => item.id === "linkItem.copy")?.enabled).toBe(true);
+  });
+
   it("only enables relationItem.openTarget when a target note path and handler both exist", () => {
     const enabledMenu = buildContextMenuSchema(relationItemPayload);
     const missingTargetMenu = buildContextMenuSchema({
@@ -406,6 +445,7 @@ describe("menuSchema", () => {
     expect(blankMenu.every((item) => item.enabled === true)).toBe(true);
     expect(buildContextMenuSchema(previewBlankPayload).every((item) => item.enabled === true)).toBe(true);
     expect(buildContextMenuSchema(linksBlankPayload).every((item) => item.enabled === true)).toBe(true);
+    expect(buildContextMenuSchema(linkItemPayload).every((item) => item.enabled === true)).toBe(true);
     expect(buildContextMenuSchema(relationBlankPayload).every((item) => item.enabled === true)).toBe(true);
     expect(buildContextMenuSchema(relationItemPayload).every((item) => item.enabled === true)).toBe(true);
   });

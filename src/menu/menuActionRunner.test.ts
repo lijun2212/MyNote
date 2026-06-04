@@ -36,8 +36,13 @@ function createHandlers() {
     copyPreviewLink: vi.fn().mockResolvedValue(undefined),
     openPreviewTargetNote: vi.fn().mockResolvedValue(undefined),
     refreshLinks: vi.fn().mockResolvedValue(undefined),
+    showLinksSidebar: vi.fn().mockResolvedValue(undefined),
+    openLinkItem: vi.fn().mockResolvedValue(undefined),
+    openLinkTargetNote: vi.fn().mockResolvedValue(undefined),
+    copyLinkItem: vi.fn().mockResolvedValue(undefined),
     createRelation: vi.fn().mockResolvedValue(undefined),
     refreshRelations: vi.fn().mockResolvedValue(undefined),
+    showRelationSidebar: vi.fn().mockResolvedValue(undefined),
     openRelationTarget: vi.fn().mockResolvedValue(undefined),
     deleteRelation: vi.fn().mockResolvedValue(undefined),
     openShortcuts: vi.fn().mockResolvedValue(undefined),
@@ -103,6 +108,14 @@ describe("menuActionRunner", () => {
       handlers: {},
     };
     const linksBlankPayload = { type: "linksBlank" as const, handlers: {} };
+    const linkItemPayload = {
+      type: "linkItem" as const,
+      linkId: "link-1",
+      linkType: "internal" as const,
+      href: "notes/a.md",
+      notePath: "notes/a.md",
+      handlers: {},
+    };
     const relationBlankPayload = { type: "relationBlank" as const, handlers: {} };
     const relationItemPayload = {
       type: "relationItem" as const,
@@ -119,8 +132,9 @@ describe("menuActionRunner", () => {
     const tagContextItemActions = new Set(["tagContextItem.openNote", "tagContextItem.locate"]);
     const previewBlankActions = new Set(["previewBlank.returnToEditor", "previewBlank.showSidebar"]);
     const previewLinkActions = new Set(["previewLink.open", "previewLink.copy", "previewLink.openTargetNote"]);
-    const linksBlankActions = new Set(["linksBlank.refresh"]);
-    const relationBlankActions = new Set(["relationBlank.create", "relationBlank.refresh"]);
+    const linksBlankActions = new Set(["linksBlank.refresh", "linksBlank.showSidebar"]);
+    const linkItemActions = new Set(["linkItem.open", "linkItem.openTargetNote", "linkItem.copy"]);
+    const relationBlankActions = new Set(["relationBlank.create", "relationBlank.refresh", "relationBlank.showSidebar"]);
     const relationItemActions = new Set(["relationItem.openTarget", "relationItem.delete"]);
 
     for (const actionId of MENU_ACTION_IDS) {
@@ -144,6 +158,8 @@ describe("menuActionRunner", () => {
                       ? previewLinkPayload
                       : linksBlankActions.has(actionId)
                         ? linksBlankPayload
+                        : linkItemActions.has(actionId)
+                          ? linkItemPayload
                         : relationBlankActions.has(actionId)
                           ? relationBlankPayload
                           : relationItemActions.has(actionId)
@@ -224,6 +240,27 @@ describe("menuActionRunner", () => {
     expect(handlers.openPreviewTargetNote).toHaveBeenCalledWith(payload);
   });
 
+  it("routes linkItem actions to the provided handlers", async () => {
+    const handlers = createHandlers();
+    const runner = createMenuActionRunner(handlers);
+    const payload = {
+      type: "linkItem" as const,
+      linkId: "link-1",
+      linkType: "internal" as const,
+      href: "notes/a.md",
+      notePath: "notes/a.md",
+      handlers: {},
+    };
+
+    await expect(runner.run("linkItem.open", payload)).resolves.toBe(true);
+    await expect(runner.run("linkItem.copy", payload)).resolves.toBe(true);
+    await expect(runner.run("linkItem.openTargetNote", payload)).resolves.toBe(true);
+
+    expect(handlers.openLinkItem).toHaveBeenCalledWith(payload);
+    expect(handlers.copyLinkItem).toHaveBeenCalledWith(payload);
+    expect(handlers.openLinkTargetNote).toHaveBeenCalledWith(payload);
+  });
+
   it("routes relationItem.delete to the provided handler", async () => {
     const handlers = createHandlers();
     const runner = createMenuActionRunner(handlers);
@@ -261,6 +298,20 @@ describe("menuActionRunner", () => {
         handlers: {},
       }),
     ).rejects.toThrow("This menu action requires a relation item payload with a target note path.");
+  });
+
+  it("rejects linkItem.openTargetNote when the payload has no target note", async () => {
+    const runner = createMenuActionRunner({ openLinkTargetNote: vi.fn().mockResolvedValue(undefined) });
+
+    await expect(
+      runner.run("linkItem.openTargetNote", {
+        type: "linkItem",
+        linkId: "link-1",
+        linkType: "external",
+        href: "https://example.com",
+        handlers: {},
+      }),
+    ).rejects.toThrow("This menu action requires a link item payload with a target note path.");
   });
 
   it("throws when a previewLink-only action receives a non-previewLink payload", async () => {

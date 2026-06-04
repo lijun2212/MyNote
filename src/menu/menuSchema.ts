@@ -172,23 +172,34 @@ export function buildContextMenuSchema(payload: ContextMenuPayload): MenuSchemaI
   if (payload.type === "linksBlank") {
     return [
       item("linksBlank.refresh", "刷新链接", isEnabled(payload.handlers?.refresh)),
+      item("linksBlank.showSidebar", "显示侧栏", isEnabled(payload.handlers?.showSidebar)),
     ];
   }
 
   if (payload.type === "linkItem") {
-    return [];
+    const canOpenTargetNote =
+      payload.linkType !== "external"
+      && hasNotePath(payload.notePath)
+      && isEnabled(payload.handlers?.openTargetNote);
+
+    return [
+      item("linkItem.open", "打开链接", isEnabled(payload.handlers?.open)),
+      item("linkItem.openTargetNote", "打开目标笔记", canOpenTargetNote),
+      item("linkItem.copy", "复制链接地址", isEnabled(payload.handlers?.copy)),
+    ];
   }
 
   if (payload.type === "relationBlank") {
     return [
       item("relationBlank.create", "创建关系", isEnabled(payload.handlers?.create)),
       item("relationBlank.refresh", "刷新关系", isEnabled(payload.handlers?.refresh)),
+      item("relationBlank.showSidebar", "显示侧栏", isEnabled(payload.handlers?.showSidebar)),
     ];
   }
 
   if (payload.type === "relationItem") {
     return [
-      item("relationItem.openTarget", "打开目标笔记", hasNotePath(payload.notePath) && isEnabled(payload.handlers?.openTarget)),
+      item("relationItem.openTarget", "查看目标笔记", hasNotePath(payload.notePath) && isEnabled(payload.handlers?.openTarget)),
       item("relationItem.delete", "删除关系", isEnabled(payload.handlers?.delete)),
     ];
   }

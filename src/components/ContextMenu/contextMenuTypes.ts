@@ -136,6 +136,7 @@ export interface LinksBlankContextMenuPayload extends ContextMenuPayloadBase {
   type: "linksBlank";
   handlers?: {
     refresh?: (payload: LinksBlankContextMenuPayload) => MaybePromise;
+    showSidebar?: (payload: LinksBlankContextMenuPayload) => MaybePromise;
   };
 }
 
@@ -145,6 +146,11 @@ export interface LinkItemContextMenuPayload extends ContextMenuPayloadBase {
   linkType: PreviewLinkKind;
   href: string;
   notePath?: string;
+  handlers?: {
+    open?: (payload: LinkItemContextMenuPayload) => MaybePromise;
+    copy?: (payload: LinkItemContextMenuPayload) => MaybePromise;
+    openTargetNote?: (payload: LinkItemContextMenuPayload) => MaybePromise;
+  };
 }
 
 export interface RelationBlankContextMenuPayload extends ContextMenuPayloadBase {
@@ -152,6 +158,7 @@ export interface RelationBlankContextMenuPayload extends ContextMenuPayloadBase 
   handlers?: {
     create?: (payload: RelationBlankContextMenuPayload) => MaybePromise;
     refresh?: (payload: RelationBlankContextMenuPayload) => MaybePromise;
+    showSidebar?: (payload: RelationBlankContextMenuPayload) => MaybePromise;
   };
 }
 

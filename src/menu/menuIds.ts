@@ -56,8 +56,13 @@ export const MENU_ACTION_IDS = [
 	"previewLink.copy",
 	"previewLink.openTargetNote",
 	"linksBlank.refresh",
+	"linksBlank.showSidebar",
+	"linkItem.open",
+	"linkItem.openTargetNote",
+	"linkItem.copy",
 	"relationBlank.create",
 	"relationBlank.refresh",
+	"relationBlank.showSidebar",
 	"relationItem.openTarget",
 	"relationItem.delete",
 ] as const;

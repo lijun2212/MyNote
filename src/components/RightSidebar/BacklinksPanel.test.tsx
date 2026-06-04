@@ -1,7 +1,9 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BacklinksPanel } from "./BacklinksPanel";
+import { ContextMenuHost } from "../ContextMenu/ContextMenuHost";
+import { ContextMenuProvider } from "../ContextMenu/useContextMenu";
 import { tauriMocks } from "../../test/setup";
 import { makeKnowledgeBase } from "../../test/testData";
 import { useAppStore } from "../../store/useAppStore";
@@ -19,6 +21,10 @@ const hookMocks = vi.hoisted(() => ({
   openNote: vi.fn(),
 }));
 
+const browserMocks = vi.hoisted(() => ({
+  writeText: vi.fn(),
+}));
+
 vi.mock("../../api/commands", () => ({
   api: apiMocks,
 }));
@@ -26,6 +32,15 @@ vi.mock("../../api/commands", () => ({
 vi.mock("../../hooks/useOpenNote", () => ({
   useOpenNote: () => ({ openNote: hookMocks.openNote }),
 }));
+
+function renderWithContextMenu(noteId: string | null = "note-1") {
+  return render(
+    <ContextMenuProvider>
+      <BacklinksPanel noteId={noteId} />
+      <ContextMenuHost />
+    </ContextMenuProvider>,
+  );
+}
 
 function makeLink(overrides: Partial<LinkItem> = {}): LinkItem {
   return {
@@ -79,6 +94,11 @@ beforeEach(() => {
   apiMocks.deleteRelation.mockReset();
   hookMocks.openNote.mockReset();
   hookMocks.openNote.mockResolvedValue(undefined);
+  browserMocks.writeText.mockReset();
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: browserMocks.writeText },
+  });
 
   useAppStore.setState({ kb: makeKnowledgeBase({ id: "kb-1" }) });
 });
@@ -202,5 +222,80 @@ describe("BacklinksPanel", () => {
 
     expect(hookMocks.openNote).toHaveBeenCalledWith("notes/internal.md");
     expect(tauriMocks.openUrl).toHaveBeenCalledWith("https://example.com");
+  });
+
+  it("opens the links-blank context menu and refreshes links through the shared host", async () => {
+    const user = userEvent.setup();
+    apiMocks.getNoteLinks
+      .mockResolvedValueOnce(makeLinks())
+      .mockResolvedValueOnce(makeLinks({
+        outgoing: [
+          makeLink({
+            id: "link-refreshed",
+            note_title: "刷新后的链接",
+            link_text: "刷新后的链接",
+            note_path: "notes/refreshed.md",
+            link_url: "notes/refreshed.md",
+          }),
+        ],
+      }));
+    apiMocks.listRelations.mockResolvedValue(makeRelations());
+
+    renderWithContextMenu();
+
+    await waitFor(() => expect(screen.getAllByText("暂无链接")).toHaveLength(2));
+
+    fireEvent.contextMenu(screen.getByTestId("backlinks-links-surface"), {
+      clientX: 48,
+      clientY: 72,
+    });
+
+    expect(await screen.findByRole("menuitem", { name: "刷新链接" })).toHaveAttribute("aria-disabled", "false");
+    expect(screen.getByRole("menuitem", { name: "显示侧栏" })).toHaveAttribute("aria-disabled", "false");
+
+    await user.click(screen.getByRole("menuitem", { name: "刷新链接" }));
+
+    await waitFor(() => expect(apiMocks.getNoteLinks).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("刷新后的链接")).toBeInTheDocument();
+  });
+
+  it("shows different link-item context menu enablement for internal and external links", async () => {
+    apiMocks.getNoteLinks.mockResolvedValue(makeLinks({
+      outgoing: [
+        makeLink({
+          id: "link-internal",
+          note_title: "内部链接",
+          link_text: "内部链接",
+          note_path: "notes/internal.md",
+          link_url: "notes/internal.md",
+          link_type: "wiki",
+        }),
+        makeLink({
+          id: "link-external",
+          note_id: "note-external",
+          note_title: "外部链接",
+          link_text: "外部链接",
+          note_path: "",
+          link_url: "https://example.com",
+          link_type: "external",
+          resolved: false,
+        }),
+      ],
+    }));
+    apiMocks.listRelations.mockResolvedValue(makeRelations());
+
+    renderWithContextMenu();
+
+    fireEvent.contextMenu(await screen.findByText("内部链接"), { clientX: 20, clientY: 24 });
+    expect(await screen.findByRole("menuitem", { name: "打开目标笔记" })).toHaveAttribute("aria-disabled", "false");
+    expect(screen.getByRole("menuitem", { name: "打开链接" })).toHaveAttribute("aria-disabled", "false");
+    expect(screen.getByRole("menuitem", { name: "复制链接地址" })).toHaveAttribute("aria-disabled", "false");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    fireEvent.contextMenu(screen.getByText("外部链接"), { clientX: 28, clientY: 32 });
+    expect(await screen.findByRole("menuitem", { name: "打开目标笔记" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("menuitem", { name: "打开链接" })).toHaveAttribute("aria-disabled", "false");
+    expect(screen.getByRole("menuitem", { name: "复制链接地址" })).toHaveAttribute("aria-disabled", "false");
   });
 });

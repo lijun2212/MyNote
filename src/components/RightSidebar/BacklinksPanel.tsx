@@ -3,16 +3,60 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import type { NoteLinks } from "../../types";
 import { api } from "../../api/commands";
 import { useOpenNote } from "../../hooks/useOpenNote";
+import { useAppStore } from "../../store/useAppStore";
+import type { PreviewLinkKind } from "../ContextMenu/contextMenuTypes";
+import { useContextMenu } from "../ContextMenu/useContextMenu";
 import { ManualRelationsPanel } from "./ManualRelationsPanel";
 
 interface Props {
   noteId: string | null;
 }
 
+function getEventElement(target: EventTarget | null): Element | null {
+  if (target instanceof Element) return target;
+  if (target instanceof Text) return target.parentElement;
+  return null;
+}
+
+function writeClipboardText(text: string) {
+  if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+    return Promise.resolve();
+  }
+
+  return navigator.clipboard.writeText(text);
+}
+
+function normalizeLinkType(linkType: string): PreviewLinkKind {
+  if (linkType === "external") {
+    return "external";
+  }
+
+  if (linkType === "wiki") {
+    return "wiki";
+  }
+
+  return "internal";
+}
+
 export function BacklinksPanel({ noteId }: Props) {
   const [links, setLinks] = useState<NoteLinks | null>(null);
   const [loading, setLoading] = useState(false);
   const { openNote } = useOpenNote();
+  const setRightSidebarVisible = useAppStore((state) => state.setRightSidebarVisible);
+  const { openContextMenu } = useContextMenu();
+
+  const reloadLinks = async (targetNoteId: string) => {
+    setLoading(true);
+
+    try {
+      const data = await api.getNoteLinks(targetNoteId);
+      setLinks(data);
+    } catch {
+      setLinks(null);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (!noteId) {
@@ -44,6 +88,49 @@ export function BacklinksPanel({ noteId }: Props) {
     } catch (e) {
       console.error("Failed to open link:", e);
     }
+  };
+
+  const handleLinksBlankContextMenu = (event: React.MouseEvent<HTMLDivElement>) => {
+    const target = getEventElement(event.target);
+    if (target?.closest("[data-link-item='true']")) {
+      return;
+    }
+
+    event.preventDefault();
+
+    openContextMenu({
+      position: { x: event.clientX, y: event.clientY },
+      payload: {
+        type: "linksBlank",
+        handlers: {
+          refresh: noteId ? () => reloadLinks(noteId) : undefined,
+          showSidebar: () => setRightSidebarVisible(true),
+        },
+      },
+    });
+  };
+
+  const handleLinkContextMenu = (
+    link: NoteLinks["outgoing"][number],
+    event: React.MouseEvent<HTMLElement>,
+  ) => {
+    event.preventDefault();
+
+    openContextMenu({
+      position: { x: event.clientX, y: event.clientY },
+      payload: {
+        type: "linkItem",
+        linkId: link.id,
+        linkType: normalizeLinkType(link.link_type),
+        href: link.link_url,
+        notePath: link.note_path || undefined,
+        handlers: {
+          open: () => handleLinkClick(link),
+          openTargetNote: link.note_path ? () => openNote(link.note_path) : undefined,
+          copy: () => writeClipboardText(link.link_url),
+        },
+      },
+    });
   };
 
   if (!noteId) {
@@ -96,8 +183,10 @@ export function BacklinksPanel({ noteId }: Props) {
     return items.map((link) => (
       <span
         key={link.id}
+        data-link-item="true"
         style={itemStyle}
         onClick={() => handleLinkClick(link)}
+        onContextMenu={(event) => handleLinkContextMenu(link, event)}
         title={link.link_url}
       >
         {link.note_title || link.link_text || link.link_url}
@@ -107,14 +196,16 @@ export function BacklinksPanel({ noteId }: Props) {
 
   return (
     <div style={{ padding: 8, fontSize: 13 }}>
-      <div style={sectionStyle}>
-        <div style={headingStyle}>传出链接</div>
-        {renderAutoLinks(links?.outgoing ?? [])}
-      </div>
+      <div data-testid="backlinks-links-surface" onContextMenu={handleLinksBlankContextMenu}>
+        <div style={sectionStyle}>
+          <div style={headingStyle}>传出链接</div>
+          {renderAutoLinks(links?.outgoing ?? [])}
+        </div>
 
-      <div style={sectionStyle}>
-        <div style={headingStyle}>反向链接 (backlinks)</div>
-        {renderAutoLinks(links?.incoming ?? [])}
+        <div style={sectionStyle}>
+          <div style={headingStyle}>反向链接 (backlinks)</div>
+          {renderAutoLinks(links?.incoming ?? [])}
+        </div>
       </div>
 
       <ManualRelationsPanel noteId={noteId} />

@@ -4,6 +4,7 @@ import type {
   EditorSelectionContextMenuPayload,
   NoteContextMenuPayload,
   NotebookContextMenuPayload,
+  LinkItemContextMenuPayload,
   PreviewBlankContextMenuPayload,
   PreviewLinkContextMenuPayload,
   RelationBlankContextMenuPayload,
@@ -51,8 +52,13 @@ export interface MenuActionRunnerHandlers {
   copyPreviewLink?: (payload: PreviewLinkContextMenuPayload) => MaybePromise;
   openPreviewTargetNote?: (payload: PreviewLinkContextMenuPayload) => MaybePromise;
   refreshLinks?: (payload: LinksBlankContextMenuPayload) => MaybePromise;
+  showLinksSidebar?: (payload: LinksBlankContextMenuPayload) => MaybePromise;
+  openLinkItem?: (payload: LinkItemContextMenuPayload) => MaybePromise;
+  openLinkTargetNote?: (payload: LinkItemContextMenuPayload) => MaybePromise;
+  copyLinkItem?: (payload: LinkItemContextMenuPayload) => MaybePromise;
   createRelation?: (payload: RelationBlankContextMenuPayload) => MaybePromise;
   refreshRelations?: (payload: RelationBlankContextMenuPayload) => MaybePromise;
+  showRelationSidebar?: (payload: RelationBlankContextMenuPayload) => MaybePromise;
   openRelationTarget?: (payload: RelationItemContextMenuPayload) => MaybePromise;
   deleteRelation?: (payload: RelationItemContextMenuPayload) => MaybePromise;
   openShortcuts?: () => MaybePromise;
@@ -148,6 +154,23 @@ function assertRelationBlankPayload(payload: ContextMenuPayload | undefined): Re
   return payload;
 }
 
+function assertLinkItemPayload(payload: ContextMenuPayload | undefined): LinkItemContextMenuPayload {
+  if (!payload || payload.type !== "linkItem") {
+    throw new Error("This menu action requires a link item context payload.");
+  }
+  return payload;
+}
+
+function assertLinkTargetPayload(payload: ContextMenuPayload | undefined): LinkItemContextMenuPayload {
+  const linkItemPayload = assertLinkItemPayload(payload);
+
+  if (linkItemPayload.linkType === "external" || !linkItemPayload.notePath) {
+    throw new Error("This menu action requires a link item payload with a target note path.");
+  }
+
+  return linkItemPayload;
+}
+
 function assertRelationItemPayload(payload: ContextMenuPayload | undefined): RelationItemContextMenuPayload {
   if (!payload || payload.type !== "relationItem") {
     throw new Error("This menu action requires a relation item context payload.");
@@ -219,8 +242,13 @@ export function createMenuActionRunner(handlers: MenuActionRunnerHandlers) {
     "previewLink.copy": (payload) => requireHandler(handlers, "previewLink.copy", "copyPreviewLink")(assertPreviewLinkPayload(payload)),
     "previewLink.openTargetNote": (payload) => requireHandler(handlers, "previewLink.openTargetNote", "openPreviewTargetNote")(assertPreviewTargetNotePayload(payload)),
     "linksBlank.refresh": (payload) => requireHandler(handlers, "linksBlank.refresh", "refreshLinks")(assertLinksBlankPayload(payload)),
+    "linksBlank.showSidebar": (payload) => requireHandler(handlers, "linksBlank.showSidebar", "showLinksSidebar")(assertLinksBlankPayload(payload)),
+    "linkItem.open": (payload) => requireHandler(handlers, "linkItem.open", "openLinkItem")(assertLinkItemPayload(payload)),
+    "linkItem.openTargetNote": (payload) => requireHandler(handlers, "linkItem.openTargetNote", "openLinkTargetNote")(assertLinkTargetPayload(payload)),
+    "linkItem.copy": (payload) => requireHandler(handlers, "linkItem.copy", "copyLinkItem")(assertLinkItemPayload(payload)),
     "relationBlank.create": (payload) => requireHandler(handlers, "relationBlank.create", "createRelation")(assertRelationBlankPayload(payload)),
     "relationBlank.refresh": (payload) => requireHandler(handlers, "relationBlank.refresh", "refreshRelations")(assertRelationBlankPayload(payload)),
+    "relationBlank.showSidebar": (payload) => requireHandler(handlers, "relationBlank.showSidebar", "showRelationSidebar")(assertRelationBlankPayload(payload)),
     "relationItem.openTarget": (payload) => requireHandler(handlers, "relationItem.openTarget", "openRelationTarget")(assertRelationTargetPayload(payload)),
     "relationItem.delete": (payload) => requireHandler(handlers, "relationItem.delete", "deleteRelation")(assertRelationItemPayload(payload)),
   };

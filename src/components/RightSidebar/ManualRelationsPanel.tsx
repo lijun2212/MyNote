@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../api/commands";
+import { useOpenNote } from "../../hooks/useOpenNote";
 import { useAppStore } from "../../store/useAppStore";
 import type { NoteRelations, RelationItem, RelationType, SearchResult } from "../../types";
+import { useContextMenu } from "../ContextMenu/useContextMenu";
 
 interface Props {
   noteId: string | null;
@@ -59,8 +61,17 @@ function relationTypeLabel(type: RelationType) {
   return relationTypeOptions.find((option) => option.value === type)?.label ?? type;
 }
 
+function getEventElement(target: EventTarget | null): Element | null {
+  if (target instanceof Element) return target;
+  if (target instanceof Text) return target.parentElement;
+  return null;
+}
+
 export function ManualRelationsPanel({ noteId }: Props) {
   const kb = useAppStore((state) => state.kb);
+  const setRightSidebarVisible = useAppStore((state) => state.setRightSidebarVisible);
+  const { openNote } = useOpenNote();
+  const { openContextMenu } = useContextMenu();
   const mountedRef = useRef(true);
   const activeNoteIdRef = useRef<string | null>(noteId);
   const [relations, setRelations] = useState<NoteRelations>(emptyRelations);
@@ -242,6 +253,61 @@ export function ManualRelationsPanel({ noteId }: Props) {
     }
   };
 
+  const openRelationTarget = async (notePath?: string) => {
+    if (!notePath) {
+      return;
+    }
+
+    try {
+      await openNote(notePath);
+    } catch (error) {
+      console.error("Failed to open relation target note:", error);
+    }
+  };
+
+  const handleRelationBlankContextMenu = (event: React.MouseEvent<HTMLDivElement>) => {
+    const target = getEventElement(event.target);
+    if (target?.closest("[data-relation-item='true'], [data-relation-form='true'], [data-relation-add-button='true']")) {
+      return;
+    }
+
+    event.preventDefault();
+
+    openContextMenu({
+      position: { x: event.clientX, y: event.clientY },
+      payload: {
+        type: "relationBlank",
+        handlers: {
+          create: () => {
+            setShowForm(true);
+            setError(null);
+          },
+          refresh: noteId ? async () => {
+            await reloadRelations(noteId);
+          } : undefined,
+          showSidebar: () => setRightSidebarVisible(true),
+        },
+      },
+    });
+  };
+
+  const handleRelationItemContextMenu = (item: RelationItem, event: React.MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+
+    openContextMenu({
+      position: { x: event.clientX, y: event.clientY },
+      payload: {
+        type: "relationItem",
+        relationId: item.id,
+        notePath: item.note_path || undefined,
+        handlers: {
+          openTarget: item.note_path ? () => openRelationTarget(item.note_path) : undefined,
+          delete: () => handleDeleteRelation(item.id),
+        },
+      },
+    });
+  };
+
   const sectionStyle: React.CSSProperties = {
     marginBottom: 12,
   };
@@ -298,9 +364,10 @@ export function ManualRelationsPanel({ noteId }: Props) {
   const hasRelations = relations.outgoing.length > 0 || relations.incoming.length > 0;
 
   return (
-    <div style={{ padding: 8, fontSize: 13 }}>
+    <div data-testid="manual-relations-surface" onContextMenu={handleRelationBlankContextMenu} style={{ padding: 8, fontSize: 13 }}>
       <button
         type="button"
+        data-relation-add-button="true"
         style={actionButtonStyle}
         onClick={() => {
           setShowForm((current) => !current);
@@ -311,7 +378,7 @@ export function ManualRelationsPanel({ noteId }: Props) {
       </button>
 
       {showForm && (
-        <div style={{ ...itemCardStyle, marginBottom: 8, background: "#fafbfc" }}>
+        <div data-relation-form="true" style={{ ...itemCardStyle, marginBottom: 8, background: "#fafbfc" }}>
           <div style={{ marginBottom: 8 }}>
             <input
               value={query}
@@ -480,6 +547,7 @@ export function ManualRelationsPanel({ noteId }: Props) {
                   kind="outgoing"
                   deleting={deletingId === item.id}
                   onDelete={() => handleDeleteRelation(item.id)}
+                  onContextMenu={(event) => handleRelationItemContextMenu(item, event)}
                 />
               ))
             ) : (
@@ -495,6 +563,7 @@ export function ManualRelationsPanel({ noteId }: Props) {
                   key={item.id}
                   item={item}
                   kind="incoming"
+                  onContextMenu={(event) => handleRelationItemContextMenu(item, event)}
                 />
               ))
             ) : (
@@ -512,14 +581,18 @@ function RelationCard({
   kind,
   deleting = false,
   onDelete,
+  onContextMenu,
 }: {
   item: RelationItem;
   kind: "outgoing" | "incoming";
   deleting?: boolean;
   onDelete?: () => void;
+  onContextMenu?: (event: React.MouseEvent<HTMLDivElement>) => void;
 }) {
   return (
     <div
+      data-relation-item="true"
+      onContextMenu={onContextMenu}
       style={{
         padding: "8px",
         border: "1px solid #eceef3",
