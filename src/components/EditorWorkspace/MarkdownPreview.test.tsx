@@ -1,6 +1,9 @@
+import type { ReactElement } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { ContextMenuHost } from "../ContextMenu/ContextMenuHost";
+import { ContextMenuProvider } from "../ContextMenu/useContextMenu";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { useAppStore } from "../../store/useAppStore";
 import { useEditorStore } from "../../store/useEditorStore";
@@ -9,6 +12,15 @@ import { makeNote, makeNoteDetail } from "../../test/testData";
 import type { SearchNavigationTarget, TagNavigationTarget } from "../../types";
 
 const invokeMock = vi.mocked(invoke);
+
+function renderWithContextMenu(ui: ReactElement) {
+  return render(
+    <ContextMenuProvider>
+      {ui}
+      <ContextMenuHost />
+    </ContextMenuProvider>,
+  );
+}
 
 describe("MarkdownPreview", () => {
   it("keeps rendered content constrained to the preview pane", () => {
@@ -691,6 +703,107 @@ describe("MarkdownPreview", () => {
 
     await waitFor(() => {
       expect(container.querySelector(".search-navigation-target")).toBeNull();
+    });
+  });
+
+  it("opens the preview blank context menu with return-to-editor and show-sidebar actions", async () => {
+    useEditorStore.getState().setEditorMode("split");
+    useAppStore.getState().setRightSidebarVisible(false);
+
+    const { container } = renderWithContextMenu(<MarkdownPreview content="Preview body" />);
+
+    fireEvent.contextMenu(container.querySelector("[data-testid='markdown-preview-content']") as HTMLElement, {
+      clientX: 60,
+      clientY: 80,
+    });
+
+    expect(await screen.findByRole("menuitem", { name: "返回编辑" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "显示侧栏" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "返回编辑" }));
+    expect(useEditorStore.getState().getEditorMode()).toBe("editor");
+
+    fireEvent.contextMenu(container.querySelector("[data-testid='markdown-preview-content']") as HTMLElement, {
+      clientX: 60,
+      clientY: 80,
+    });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "显示侧栏" }));
+    expect(useAppStore.getState().rightSidebarVisible).toBe(true);
+  });
+
+  it("enables open target note for internal and wiki links in the preview context menu", async () => {
+    const resolvedWikiNote = makeNote({
+      id: "wiki-note",
+      path: "notes/wiki-target.md",
+      title: "Wiki Target",
+      content_hash: "wiki-hash",
+    });
+
+    invokeMock.mockImplementation(async (command, args) => {
+      if (command === "get_note_by_title") {
+        expect(args).toEqual({ title: "Wiki Target" });
+        return resolvedWikiNote;
+      }
+      if (command === "get_note_by_path") {
+        expect(args).toEqual({ path: resolvedWikiNote.path });
+        return makeNoteDetail({ note: resolvedWikiNote, content: "# Wiki Target" });
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    renderWithContextMenu(
+      <MarkdownPreview
+        content={[
+          "[Internal](notes/internal-target.md)",
+          "",
+          "Open [[Wiki Target]]",
+        ].join("\n")}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByRole("link", { name: "Internal" }), { clientX: 32, clientY: 40 });
+    expect(await screen.findByRole("menuitem", { name: "打开目标笔记" })).toHaveAttribute("aria-disabled", "false");
+
+    fireEvent.contextMenu(screen.getByText("Wiki Target"), { clientX: 32, clientY: 40 });
+    expect(await screen.findByRole("menuitem", { name: "打开目标笔记" })).toHaveAttribute("aria-disabled", "false");
+  });
+
+  it("disables open target note for external links in the preview context menu", async () => {
+    renderWithContextMenu(<MarkdownPreview content="[External](https://example.com/docs)" />);
+
+    fireEvent.contextMenu(screen.getByRole("link", { name: "External" }), { clientX: 42, clientY: 48 });
+
+    expect(await screen.findByRole("menuitem", { name: "打开目标笔记" })).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("keeps normal left-click semantics after opening preview link context menus", async () => {
+    const internalNote = makeNote({
+      id: "internal-note",
+      path: "notes/internal-target.md",
+      title: "Internal Target",
+      content_hash: "internal-hash",
+    });
+
+    invokeMock.mockImplementation(async (command, args) => {
+      if (command === "get_note_by_path") {
+        expect(args).toEqual({ path: internalNote.path });
+        return makeNoteDetail({ note: internalNote, content: "# Internal Target" });
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    renderWithContextMenu(<MarkdownPreview content="[Internal](notes/internal-target.md)" />);
+
+    const link = screen.getByRole("link", { name: "Internal" });
+    fireEvent.contextMenu(link, { clientX: 20, clientY: 24 });
+    expect(await screen.findByRole("menuitem", { name: "打开链接" })).toBeInTheDocument();
+
+    fireEvent.click(link);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_note_by_path", { path: "notes/internal-target.md" });
+      expect(useEditorStore.getState().currentNote).toEqual(internalNote);
+      expect(useAppStore.getState().selectedNodePath).toBe("notes/internal-target.md");
     });
   });
 });

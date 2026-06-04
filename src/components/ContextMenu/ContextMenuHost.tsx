@@ -52,6 +52,11 @@ function createContextRunner(payload: ContextMenuPayload) {
     clearSelectedTags: (tagBlankPayload) => tagBlankPayload.handlers?.clearFilter?.(tagBlankPayload),
     openTagContextItemNote: (tagContextItemPayload) => tagContextItemPayload.handlers?.open?.(tagContextItemPayload),
     locateTagContextItem: (tagContextItemPayload) => tagContextItemPayload.handlers?.locate?.(tagContextItemPayload),
+    returnToEditor: (previewBlankPayload) => previewBlankPayload.handlers?.returnToEditor?.(previewBlankPayload),
+    showPreviewSidebar: (previewBlankPayload) => previewBlankPayload.handlers?.showSidebar?.(previewBlankPayload),
+    openPreviewLink: (previewLinkPayload) => previewLinkPayload.handlers?.open?.(previewLinkPayload),
+    copyPreviewLink: (previewLinkPayload) => previewLinkPayload.handlers?.copy?.(previewLinkPayload),
+    openPreviewTargetNote: (previewLinkPayload) => previewLinkPayload.handlers?.openTargetNote?.(previewLinkPayload),
     openShortcuts: noop,
     openAbout: noop,
   });

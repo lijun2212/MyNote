@@ -151,7 +151,7 @@ export function buildContextMenuSchema(payload: ContextMenuPayload): MenuSchemaI
 
   if (payload.type === "previewBlank") {
     return [
-      item("previewBlank.returnToEditor", "返回编辑器", isEnabled(payload.handlers?.returnToEditor)),
+      item("previewBlank.returnToEditor", "返回编辑", isEnabled(payload.handlers?.returnToEditor)),
       item("previewBlank.showSidebar", "显示侧栏", isEnabled(payload.handlers?.showSidebar)),
     ];
   }
@@ -164,7 +164,7 @@ export function buildContextMenuSchema(payload: ContextMenuPayload): MenuSchemaI
 
     return [
       item("previewLink.open", "打开链接", isEnabled(payload.handlers?.open)),
-      item("previewLink.copy", "复制链接", isEnabled(payload.handlers?.copy)),
+      item("previewLink.copy", "复制链接地址", isEnabled(payload.handlers?.copy)),
       item("previewLink.openTargetNote", "打开目标笔记", canOpenTargetNote),
     ];
   }
