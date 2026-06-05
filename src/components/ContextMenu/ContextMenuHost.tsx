@@ -46,6 +46,8 @@ function createContextRunner(payload: ContextMenuPayload) {
     insertLinkFromSelection: (selectionPayload) => selectionPayload.handlers?.insertLink?.(selectionPayload),
     insertTagFromSelection: (selectionPayload) => selectionPayload.handlers?.insertTag?.(selectionPayload),
     createWikiLinkFromSelection: (selectionPayload) => selectionPayload.handlers?.createWikiLink?.(selectionPayload),
+    insertLinkFromBlank: (blankPayload) => blankPayload.handlers?.insertLink?.(blankPayload),
+    createWikiLinkFromBlank: (blankPayload) => blankPayload.handlers?.createWikiLink?.(blankPayload),
     refreshIndex: (blankPayload) => blankPayload.handlers?.refreshIndex?.(blankPayload),
     showLeftSidebar: (blankPayload) => blankPayload.handlers?.showSidebar?.(blankPayload),
     refreshTagFilter: (tagBlankPayload) => tagBlankPayload.handlers?.refresh?.(tagBlankPayload),

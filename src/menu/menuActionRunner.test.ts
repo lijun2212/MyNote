@@ -24,6 +24,8 @@ function createHandlers() {
     insertLinkFromSelection: vi.fn().mockResolvedValue(undefined),
     insertTagFromSelection: vi.fn().mockResolvedValue(undefined),
     createWikiLinkFromSelection: vi.fn().mockResolvedValue(undefined),
+    insertLinkFromBlank: vi.fn().mockResolvedValue(undefined),
+    createWikiLinkFromBlank: vi.fn().mockResolvedValue(undefined),
     refreshIndex: vi.fn().mockResolvedValue(undefined),
     showLeftSidebar: vi.fn().mockResolvedValue(undefined),
     refreshTagFilter: vi.fn().mockResolvedValue(undefined),
@@ -127,7 +129,7 @@ describe("menuActionRunner", () => {
     const notebookActions = new Set(["notebook.createNote", "notebook.rename", "notebook.reorder", "notebook.delete"]);
     const tagActions = new Set(["tag.delete"]);
     const selectionActions = new Set(["selection.insertLink", "selection.insertTag", "selection.createWikiLink"]);
-    const blankActions = new Set(["blank.refreshIndex", "blank.showSidebar"]);
+    const blankActions = new Set(["blank.insertLink", "blank.createWikiLink", "blank.refreshIndex", "blank.showSidebar"]);
     const tagBlankActions = new Set(["tagBlank.refresh", "tagBlank.clearFilter"]);
     const tagContextItemActions = new Set(["tagContextItem.openNote", "tagContextItem.locate"]);
     const previewBlankActions = new Set(["previewBlank.returnToEditor", "previewBlank.showSidebar"]);

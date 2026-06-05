@@ -47,6 +47,8 @@ const fileTreeBlankPayload = {
 const editorBlankPayload = {
   type: "editorBlank" as const,
   handlers: {
+    insertLink: () => undefined,
+    createWikiLink: () => undefined,
     refreshIndex: () => undefined,
     showSidebar: () => undefined,
   },
@@ -284,6 +286,10 @@ describe("menuSchema", () => {
     expect(tagMenu.map((item) => item.id)).toContain("tag.delete");
     expect(fileTreeBlankMenu.map((item) => item.id)).toContain("file.newNotebook");
     expect(selectionMenu.map((item) => item.id)).toContain("selection.insertLink");
+    expect(selectionMenu[0]?.label).toBe("转为双链");
+    expect(selectionMenu[1]?.label).toBe("转为 Markdown 链接");
+    expect(editorBlankMenu.map((item) => item.id)).toContain("blank.insertLink");
+    expect(editorBlankMenu.map((item) => item.id)).toContain("blank.createWikiLink");
     expect(editorBlankMenu.map((item) => item.id)).toContain("blank.refreshIndex");
     expect(tagBlankMenu.map((item) => item.id)).toContain("tagBlank.clearFilter");
     expect(previewBlankMenu.map((item) => item.id)).toContain("previewBlank.returnToEditor");

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useEditorStore } from "../../store/useEditorStore";
 import { BacklinksPanel } from "./BacklinksPanel";
 
-type Tab = "outline" | "links";
+type Tab = "outline" | "associations";
 
 export function RightSidebar() {
   const [activeTab, setActiveTab] = useState<Tab>("outline");
@@ -22,7 +22,6 @@ export function RightSidebar() {
     fontSize: 12,
     fontWeight: active ? 600 : 400,
     color: active ? "var(--color-accent, #5b6af9)" : "#666",
-    borderBottom: active ? "2px solid var(--color-accent, #5b6af9)" : "2px solid transparent",
     cursor: "pointer",
     textAlign: "center",
     background: "none",
@@ -38,15 +37,15 @@ export function RightSidebar() {
         <button style={tabStyle(activeTab === "outline")} onClick={() => setActiveTab("outline")}>
           大纲
         </button>
-        <button style={tabStyle(activeTab === "links")} onClick={() => setActiveTab("links")}>
-          链接
+        <button style={tabStyle(activeTab === "associations")} onClick={() => setActiveTab("associations")}>
+          关联
         </button>
       </div>
       <div style={{ flex: 1, overflowY: "auto" }}>
         {activeTab === "outline" && (
           <div style={{ padding: 12, color: "#999" }}>大纲（待实现）</div>
         )}
-        {activeTab === "links" && <BacklinksPanel noteId={noteId} />}
+        {activeTab === "associations" && <BacklinksPanel noteId={noteId} />}
       </div>
     </div>
   );

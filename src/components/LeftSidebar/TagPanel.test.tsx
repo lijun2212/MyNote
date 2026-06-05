@@ -179,9 +179,14 @@ describe("TagPanel", () => {
     const tagButton = await screen.findByRole("button", { name: "标签 项目报告 3" });
     await user.click(tagButton);
 
+  const selectedTagRow = tagButton.closest("[data-tag-panel-tag-row='true']") as HTMLElement;
+  const deleteButton = screen.getByRole("button", { name: "删除标签 项目报告" });
+
+  expect(selectedTagRow.lastElementChild).not.toBe(deleteButton);
+
     expect(screen.queryByText("清除过滤")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "删除标签 项目报告" }));
+  await user.click(deleteButton);
 
     expect(confirmSpy).toHaveBeenCalledWith("删除标签“项目报告”会从所有笔记中移除，确认继续？");
     await waitFor(() => expect(apiMocks.deleteTag).toHaveBeenCalledWith("tag-1"));

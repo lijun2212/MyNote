@@ -145,6 +145,25 @@ fn is_tag_boundary(previous: Option<char>) -> bool {
     previous.map(|ch| !is_tag_name_char(ch)).unwrap_or(true)
 }
 
+fn is_inside_markdown_link_destination(chars: &[char], index: usize) -> bool {
+    let mut paren_depth = 0usize;
+
+    for cursor in (0..index).rev() {
+        match chars[cursor] {
+            ')' => paren_depth += 1,
+            '(' => {
+                if paren_depth == 0 {
+                    return cursor > 0 && chars[cursor - 1] == ']';
+                }
+                paren_depth -= 1;
+            }
+            _ => {}
+        }
+    }
+
+    false
+}
+
 fn extract_inline_tags_from_line(line: &str) -> Vec<String> {
     let mut tags = Vec::new();
     let mut in_inline_code = false;
@@ -166,6 +185,11 @@ fn extract_inline_tags_from_line(line: &str) -> Vec<String> {
         if chars[i] == '#' {
             let prefix: String = chars[..i].iter().collect();
             if prefix.ends_with("://") || prefix.ends_with('/') {
+                i += 1;
+                continue;
+            }
+
+            if is_inside_markdown_link_destination(&chars, i) {
                 i += 1;
                 continue;
             }
@@ -421,12 +445,12 @@ pub fn extract_links(body: &str) -> Vec<RawLink> {
     let mut offset = 0usize;
     for line in body.lines() {
         let trimmed = line.trim_start();
-        if trimmed.starts_with("```") {
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
             in_code_block = !in_code_block;
             offset += line.len() + 1;
             continue;
         }
-        if in_code_block {
+        if in_code_block || line.starts_with("    ") || line.starts_with('\t') {
             offset += line.len() + 1;
             continue;
         }
@@ -434,6 +458,11 @@ pub fn extract_links(body: &str) -> Vec<RawLink> {
         // Extract wiki links: [[target]], [[target|text]], [[target#anchor]]
         let mut search_from = 0;
         while let Some(start) = line[search_from..].find("[[") {
+            let candidate_start = search_from + start;
+            if is_inside_inline_code_span(line, candidate_start) {
+                search_from = candidate_start + 2;
+                continue;
+            }
             let abs_start = offset + search_from + start;
             let rest = &line[search_from + start + 2..];
             if let Some(end) = rest.find("]]") {
@@ -474,6 +503,11 @@ pub fn extract_links(body: &str) -> Vec<RawLink> {
                 line[search_from..].find('[').map(|p| p)
             };
             let Some(b_start) = bracket_offset else { break };
+            let candidate_start = search_from + b_start;
+            if is_inside_inline_code_span(line, candidate_start) {
+                search_from = candidate_start + 1;
+                continue;
+            }
             let actual_start = search_from + b_start + if is_image { 2 } else { 1 };
             let rest = &line[actual_start..];
             let Some(bracket_end) = rest.find(']') else {
@@ -520,6 +554,22 @@ pub fn extract_links(body: &str) -> Vec<RawLink> {
         offset += line.len() + 1;
     }
     links
+}
+
+fn is_inside_inline_code_span(line: &str, byte_index: usize) -> bool {
+    let mut in_inline_code = false;
+    let mut cursor = 0usize;
+
+    while cursor < byte_index && cursor < line.len() {
+        let mut chars = line[cursor..].chars();
+        let Some(ch) = chars.next() else { break };
+        if ch == '`' {
+            in_inline_code = !in_inline_code;
+        }
+        cursor += ch.len_utf8();
+    }
+
+    in_inline_code
 }
 
 #[cfg(test)]
@@ -614,6 +664,20 @@ mod tests {
 
         assert!(tags.contains(&"项目报告".to_string()));
         assert!(tags.contains(&"阶段一".to_string()));
+    }
+
+    #[test]
+    fn test_extract_inline_tags_skips_markdown_fragment_links() {
+        let body = [
+            "[项目概览](#项目概览)",
+            "[相对路径](docs/plan.md#执行计划)",
+            "真实标签 #项目报告",
+        ]
+        .join("\n");
+
+        let tags = extract_inline_tags(&body);
+
+        assert_eq!(tags, vec!["项目报告".to_string()]);
     }
 
     #[test]
@@ -734,5 +798,25 @@ mod tests {
         assert_eq!(links[0].target_raw, "https://google.com");
         assert_eq!(links[0].display_text, Some("google".to_string()));
         assert_eq!(links[0].link_type, "external");
+    }
+
+    #[test]
+    fn test_extract_links_skips_inline_code_spans() {
+        let body = "Inline code `[[假链接]]` and ` [假的](code.md) ` should be ignored, but [[真实笔记]] stays.";
+        let links = extract_links(body);
+
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].target_raw, "真实笔记");
+        assert_eq!(links[0].link_type, "wiki");
+    }
+
+    #[test]
+    fn test_extract_links_skips_indented_code_blocks() {
+        let body = "    [[代码块假链接]]\n    [假的](snippet.md)\nOutside [[真实链接]]";
+        let links = extract_links(body);
+
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].target_raw, "真实链接");
+        assert_eq!(links[0].link_type, "wiki");
     }
 }

@@ -83,6 +83,8 @@ export interface EditorSelectionContextMenuPayload extends ContextMenuPayloadBas
 export interface EditorBlankContextMenuPayload extends ContextMenuPayloadBase {
   type: "editorBlank";
   handlers?: {
+    insertLink?: (payload: EditorBlankContextMenuPayload) => MaybePromise;
+    createWikiLink?: (payload: EditorBlankContextMenuPayload) => MaybePromise;
     refreshIndex?: (payload: EditorBlankContextMenuPayload) => MaybePromise;
     showSidebar?: (payload: EditorBlankContextMenuPayload) => MaybePromise;
   };

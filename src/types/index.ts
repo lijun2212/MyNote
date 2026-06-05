@@ -127,9 +127,17 @@ export interface LinkItem {
   note_id: string;
   note_title: string;
   note_path: string;
+  source_note_id: string;
+  source_note_title: string;
+  source_note_path: string;
+  source_line_start?: number | null;
+  source_line_end?: number | null;
   link_text: string;
   link_url: string;
   link_type: string;
+  target_anchor?: string | null;
+  target_line_start?: number | null;
+  target_line_end?: number | null;
   resolved: boolean;
 }
 
@@ -138,7 +146,7 @@ export interface NoteLinks {
   incoming: LinkItem[];
 }
 
-export type SearchMatchSource = "title" | "body";
+export type SearchMatchSource = "title" | "link" | "body";
 
 interface SearchHitLocation {
   note_id: string;
@@ -153,6 +161,9 @@ export interface SearchResult extends SearchHitLocation {
   title: string;
   path: string;
   snippet: string;
+  link_target_path?: string | null;
+  link_target_title?: string | null;
+  link_target_href?: string | null;
   score: number;
 }
 

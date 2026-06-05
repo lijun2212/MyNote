@@ -4,11 +4,13 @@ import { EditorView } from "@codemirror/view";
 import userEvent from "@testing-library/user-event";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { setActiveDraggedTagName, clearActiveDraggedTagName } from "./tagDragState";
+import { api } from "../../api/commands";
 import type { SearchNavigationTarget, TagNavigationTarget } from "../../types";
 import { useEditorStore } from "../../store/useEditorStore";
 import { ContextMenuHost } from "../ContextMenu/ContextMenuHost";
 import { ContextMenuProvider } from "../ContextMenu/useContextMenu";
 import { useAppStore } from "../../store/useAppStore";
+import { makeKnowledgeBase, makeSearchResult } from "../../test/testData";
 
 describe("MarkdownEditor", () => {
   beforeEach(() => {
@@ -477,9 +479,9 @@ describe("MarkdownEditor", () => {
     view?.dispatch({ selection: { anchor: 0, head: 4 } });
     fireEvent.contextMenu(editorRoot, { clientX: 24, clientY: 32 });
 
-    expect(await screen.findByRole("menuitem", { name: "添加链接" })).toBeInTheDocument();
+    expect(await screen.findByRole("menuitem", { name: "转为 Markdown 链接" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "添加标签" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "创建双链" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "转为双链" })).toBeInTheDocument();
   });
 
   it("applies the selected knowledge action from the context menu", async () => {
@@ -497,7 +499,7 @@ describe("MarkdownEditor", () => {
     view?.dispatch({ selection: { anchor: 0, head: 4 } });
 
     fireEvent.contextMenu(editorRoot, { clientX: 24, clientY: 32 });
-    await user.click(await screen.findByRole("menuitem", { name: "创建双链" }));
+    await user.click(await screen.findByRole("menuitem", { name: "转为双链" }));
 
     await waitFor(() => {
       expect(onChange.mock.lastCall?.[0]).toContain("[[项目周报]]");
@@ -521,7 +523,7 @@ describe("MarkdownEditor", () => {
     fireEvent.contextMenu(editorRoot, { clientX: 24, clientY: 32 });
     view?.dispatch({ selection: { anchor: 5, head: 8 } });
 
-    await user.click(await screen.findByRole("menuitem", { name: "创建双链" }));
+    await user.click(await screen.findByRole("menuitem", { name: "转为双链" }));
 
     await waitFor(() => {
       expect(onChange.mock.lastCall?.[0]).toContain("[[项目周报]] 第二段");
@@ -549,7 +551,9 @@ describe("MarkdownEditor", () => {
     const editorRoot = container.querySelector(".cm-editor") as HTMLElement;
     fireEvent.contextMenu(editorRoot, { clientX: 24, clientY: 32 });
 
-    expect(await screen.findByRole("menuitem", { name: "刷新索引" })).toHaveAttribute("aria-disabled", "false");
+    expect(await screen.findByRole("menuitem", { name: "插入 Markdown 链接..." })).toHaveAttribute("aria-disabled", "false");
+    expect(screen.getByRole("menuitem", { name: "插入双链..." })).toHaveAttribute("aria-disabled", "false");
+    expect(screen.getByRole("menuitem", { name: "刷新索引" })).toHaveAttribute("aria-disabled", "false");
     expect(screen.getByRole("menuitem", { name: "显示侧栏" })).toHaveAttribute("aria-disabled", "false");
     expect(screen.getByRole("menuitem", { name: "新建笔记" })).toHaveAttribute("aria-disabled", "true");
     expect(screen.getByRole("menuitem", { name: "粘贴" })).toHaveAttribute("aria-disabled", "true");
@@ -565,6 +569,96 @@ describe("MarkdownEditor", () => {
     useAppStore.setState({
       refreshTree: previousState.refreshTree,
       setLeftSidebarVisible: previousState.setLeftSidebarVisible,
+    });
+  });
+
+  it("inserts a wiki link from the blank editor context menu using the note picker", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const searchNotes = vi.spyOn(api, "searchNotes").mockResolvedValue([
+      makeSearchResult({
+        note_id: "note-target",
+        title: "目标笔记",
+        path: "notes/target.md",
+      }),
+      makeSearchResult({
+        note_id: "note-target",
+        title: "目标笔记",
+        path: "notes/target.md",
+        occurrence_order: 2,
+      }),
+    ]);
+    const previousState = useAppStore.getState();
+
+    useAppStore.setState({
+      kb: makeKnowledgeBase({ id: "kb-picker" }),
+    });
+
+    const { container, unmount } = render(
+      <ContextMenuProvider>
+        <MarkdownEditor initialContent="" onChange={onChange} />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const editorRoot = container.querySelector(".cm-editor") as HTMLElement;
+    fireEvent.contextMenu(editorRoot, { clientX: 24, clientY: 32 });
+
+    await user.click(await screen.findByRole("menuitem", { name: "插入双链..." }));
+    await user.type(await screen.findByPlaceholderText("搜索笔记标题或直接输入"), "目标");
+    await user.click(await screen.findByRole("button", { name: "目标笔记" }));
+
+    expect(searchNotes).toHaveBeenCalledWith("目标", "kb-picker");
+
+    await waitFor(() => {
+      expect(onChange.mock.lastCall?.[0]).toContain("[[目标笔记]]");
+    });
+
+    unmount();
+    useAppStore.setState({
+      kb: previousState.kb,
+    });
+  });
+
+  it("inserts a markdown link from the blank editor context menu using the note picker", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const searchNotes = vi.spyOn(api, "searchNotes").mockResolvedValue([
+      makeSearchResult({
+        note_id: "note-target",
+        title: "目标笔记",
+        path: "notes/target.md",
+      }),
+    ]);
+    const previousState = useAppStore.getState();
+
+    useAppStore.setState({
+      kb: makeKnowledgeBase({ id: "kb-picker" }),
+    });
+
+    const { container, unmount } = render(
+      <ContextMenuProvider>
+        <MarkdownEditor initialContent="" onChange={onChange} />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const editorRoot = container.querySelector(".cm-editor") as HTMLElement;
+    fireEvent.contextMenu(editorRoot, { clientX: 24, clientY: 32 });
+
+    await user.click(await screen.findByRole("menuitem", { name: "插入 Markdown 链接..." }));
+    await user.type(await screen.findByPlaceholderText("搜索笔记标题或直接输入"), "目标");
+    await user.click(await screen.findByRole("button", { name: "目标笔记" }));
+
+    expect(searchNotes).toHaveBeenCalledWith("目标", "kb-picker");
+
+    await waitFor(() => {
+      expect(onChange.mock.lastCall?.[0]).toContain("[目标笔记](notes/target.md)");
+    });
+
+    unmount();
+    useAppStore.setState({
+      kb: previousState.kb,
     });
   });
 });

@@ -356,7 +356,7 @@ export function ManualRelationsPanel({ noteId }: Props) {
   if (!noteId) {
     return (
       <div style={{ padding: "12px 8px", fontSize: 13, color: "#999" }}>
-        选择笔记以管理关系
+        选择笔记以管理关联
       </div>
     );
   }
@@ -365,6 +365,7 @@ export function ManualRelationsPanel({ noteId }: Props) {
 
   return (
     <div data-testid="manual-relations-surface" onContextMenu={handleRelationBlankContextMenu} style={{ padding: 8, fontSize: 13 }}>
+      <div style={headingStyle}>关系</div>
       <button
         type="button"
         data-relation-add-button="true"
@@ -538,7 +539,7 @@ export function ManualRelationsPanel({ noteId }: Props) {
       ) : (
         <>
           <div style={sectionStyle} data-testid="manual-relations-outgoing">
-            <div style={headingStyle}>传出关系</div>
+            <div style={headingStyle}>我关联到</div>
             {relations.outgoing.length > 0 ? (
               relations.outgoing.map((item) => (
                 <RelationCard
@@ -551,12 +552,12 @@ export function ManualRelationsPanel({ noteId }: Props) {
                 />
               ))
             ) : (
-              <div style={emptyStyle}>暂无传出关系</div>
+              <div style={emptyStyle}>暂无我关联到的笔记</div>
             )}
           </div>
 
           <div style={sectionStyle} data-testid="manual-relations-incoming">
-            <div style={headingStyle}>传入关系</div>
+            <div style={headingStyle}>关联到我</div>
             {relations.incoming.length > 0 ? (
               relations.incoming.map((item) => (
                 <RelationCard
@@ -567,7 +568,7 @@ export function ManualRelationsPanel({ noteId }: Props) {
                 />
               ))
             ) : (
-              <div style={emptyStyle}>暂无传入关系</div>
+              <div style={emptyStyle}>暂无关联到我的笔记</div>
             )}
           </div>
         </>

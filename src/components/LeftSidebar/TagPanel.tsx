@@ -403,7 +403,6 @@ export function TagPanel() {
               minWidth: 0,
               display: "flex",
               alignItems: "center",
-              justifyContent: "space-between",
               gap: 8,
               border: "none",
               background: "transparent",
@@ -415,7 +414,6 @@ export function TagPanel() {
             <span style={{ fontSize: 13, color: selectedTagIds.includes(tag.id) ? "#1a73e8" : "#333" }}>
               # {tag.name}
             </span>
-            <span style={{ fontSize: 11, color: "#999", flexShrink: 0 }}>{tag.note_count ?? 0}</span>
           </button>
           {selectedTagIds.includes(tag.id) && (
             <button
@@ -444,6 +442,7 @@ export function TagPanel() {
               ×
             </button>
           )}
+          <span style={{ fontSize: 11, color: "#999", flexShrink: 0 }}>{tag.note_count ?? 0}</span>
         </div>
       ))}
       </div>

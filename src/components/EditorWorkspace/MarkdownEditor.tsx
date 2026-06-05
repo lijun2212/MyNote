@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { EditorState, RangeSetBuilder, StateEffect, StateField } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, keymap, lineNumbers, ViewPlugin, type ViewUpdate } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
@@ -7,6 +7,8 @@ import type { SourceLineSyncSignal } from "./sourceLineSync";
 import { findInlineTagMatches } from "./inlineTags";
 import { clearActiveDraggedTagName, getActiveDraggedTagName } from "./tagDragState";
 import type { SearchNavigationTarget, TagNavigationTarget } from "../../types";
+import type { SearchResult } from "../../types";
+import { api } from "../../api/commands";
 import { useAppStore } from "../../store/useAppStore";
 import { useEditorStore } from "../../store/useEditorStore";
 import { useContextMenu } from "../ContextMenu/useContextMenu";
@@ -30,6 +32,8 @@ type SelectionSnapshot = {
   to: number;
   text: string;
 };
+
+type LinkInsertMode = "markdown" | "wiki";
 
 const INSERT_TAG_EVENT = "mynote:insert-tag";
 const DRAGGED_TAG_MIME = "application/x-mynote-tag";
@@ -240,6 +244,10 @@ function buildTagInsertText(tagName: string): string {
 
 function insertTagIntoView(view: EditorView, tagName: string, at?: number | null) {
   const text = buildTagInsertText(tagName);
+  insertTextIntoView(view, text, at);
+}
+
+function insertTextIntoView(view: EditorView, text: string, at?: number | null) {
   const fallbackPosition = view.hasFocus ? view.state.selection.main.head : view.state.doc.length;
   const from = Math.max(0, Math.min(view.state.doc.length, at ?? fallbackPosition));
   view.dispatch({
@@ -248,6 +256,17 @@ function insertTagIntoView(view: EditorView, tagName: string, at?: number | null
     scrollIntoView: true,
   });
   view.focus();
+}
+
+function dedupeSearchResultsByNote(results: SearchResult[]) {
+  const seenNoteIds = new Set<string>();
+  return results.filter((result) => {
+    if (seenNoteIds.has(result.note_id)) {
+      return false;
+    }
+    seenNoteIds.add(result.note_id);
+    return true;
+  });
 }
 
 function replaceSelectionSnapshot(
@@ -307,6 +326,7 @@ export function MarkdownEditor({
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const { openContextMenu } = useContextMenu();
+  const kb = useAppStore((state) => state.kb);
   const refreshTree = useAppStore((state) => state.refreshTree);
   const setLeftSidebarVisible = useAppStore((state) => state.setLeftSidebarVisible);
   const setIsComposing = useEditorStore((state) => state.setIsComposing);
@@ -315,6 +335,53 @@ export function MarkdownEditor({
   const isProgrammaticScroll = useRef(false);
   const programmaticScrollTimerRef = useRef<number | null>(null);
   const navigationHighlightTimerRef = useRef<number | null>(null);
+  const [linkPickerMode, setLinkPickerMode] = useState<LinkInsertMode | null>(null);
+  const [linkPickerQuery, setLinkPickerQuery] = useState("");
+  const [linkPickerResults, setLinkPickerResults] = useState<SearchResult[]>([]);
+  const [linkPickerLoading, setLinkPickerLoading] = useState(false);
+  const [linkPickerError, setLinkPickerError] = useState<string | null>(null);
+
+  const closeLinkPicker = () => {
+    setLinkPickerMode(null);
+    setLinkPickerQuery("");
+    setLinkPickerResults([]);
+    setLinkPickerLoading(false);
+    setLinkPickerError(null);
+  };
+
+  const openLinkPicker = (mode: LinkInsertMode) => {
+    setLinkPickerMode(mode);
+    setLinkPickerQuery("");
+    setLinkPickerResults([]);
+    setLinkPickerLoading(false);
+    setLinkPickerError(null);
+  };
+
+  const insertLinkFromPicker = (result?: SearchResult) => {
+    const view = viewRef.current;
+    const query = linkPickerQuery.trim();
+    if (!view || !linkPickerMode) {
+      return;
+    }
+
+    if (linkPickerMode === "wiki") {
+      const targetTitle = result?.title ?? query;
+      if (!targetTitle) {
+        return;
+      }
+      insertTextIntoView(view, `[[${targetTitle}]]`);
+      closeLinkPicker();
+      return;
+    }
+
+    const markdownLabel = result?.title ?? "链接";
+    const markdownTarget = result?.path ?? query;
+    if (!markdownTarget) {
+      return;
+    }
+    insertTextIntoView(view, `[${markdownLabel}](${markdownTarget})`);
+    closeLinkPicker();
+  };
 
   const releaseProgrammaticScrollSoon = () => {
     if (programmaticScrollTimerRef.current !== null) {
@@ -412,6 +479,8 @@ export function MarkdownEditor({
       payload: {
         type: "editorBlank",
         handlers: {
+          insertLink: () => openLinkPicker("markdown"),
+          createWikiLink: () => openLinkPicker("wiki"),
           refreshIndex: async () => {
             await refreshTree();
           },
@@ -422,6 +491,55 @@ export function MarkdownEditor({
       },
     });
   };
+
+  useEffect(() => {
+    if (!linkPickerMode) {
+      return;
+    }
+
+    const trimmedQuery = linkPickerQuery.trim();
+    if (!trimmedQuery) {
+      setLinkPickerResults([]);
+      setLinkPickerLoading(false);
+      setLinkPickerError(null);
+      return;
+    }
+
+    if (!kb) {
+      setLinkPickerResults([]);
+      setLinkPickerLoading(false);
+      setLinkPickerError("请先打开知识库后再插入内部链接");
+      return;
+    }
+
+    let isActive = true;
+    setLinkPickerLoading(true);
+    setLinkPickerError(null);
+
+    api.searchNotes(trimmedQuery, kb.id)
+      .then((results) => {
+        if (!isActive) {
+          return;
+        }
+        setLinkPickerResults(dedupeSearchResultsByNote(results));
+      })
+      .catch(() => {
+        if (!isActive) {
+          return;
+        }
+        setLinkPickerResults([]);
+        setLinkPickerError("笔记搜索失败，请稍后重试");
+      })
+      .finally(() => {
+        if (isActive) {
+          setLinkPickerLoading(false);
+        }
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [kb, linkPickerMode, linkPickerQuery]);
 
   useEffect(() => {
     if (!editorRef.current) return;
@@ -675,27 +793,169 @@ export function MarkdownEditor({
   }, []);
 
   return (
-    <div
-      onContextMenu={handleEditorContextMenu}
-      onDragOver={(event) => {
-        const tagName = readDraggedTagName(event.dataTransfer);
-        logTagDrag("wrapper-dragover", {
-          tagName,
-          dataTypes: Array.from(event.dataTransfer?.types ?? []),
-          clientX: event.clientX,
-          clientY: event.clientY,
-        });
-        if (!tagName) {
-          return;
-        }
-        event.preventDefault();
-      }}
-      onDrop={handleExternalTagDrop}
-      onPointerUp={handlePointerTagDrop}
-      data-mynote-editor-drop-target="true"
-      style={{ width: "100%", height: "100%", minWidth: 0, overflow: "hidden" }}
-    >
-      <div ref={editorRef} style={{ width: "100%", height: "100%", minWidth: 0, overflow: "hidden" }} />
-    </div>
+    <>
+      <div
+        onContextMenu={handleEditorContextMenu}
+        onDragOver={(event) => {
+          const tagName = readDraggedTagName(event.dataTransfer);
+          logTagDrag("wrapper-dragover", {
+            tagName,
+            dataTypes: Array.from(event.dataTransfer?.types ?? []),
+            clientX: event.clientX,
+            clientY: event.clientY,
+          });
+          if (!tagName) {
+            return;
+          }
+          event.preventDefault();
+        }}
+        onDrop={handleExternalTagDrop}
+        onPointerUp={handlePointerTagDrop}
+        data-mynote-editor-drop-target="true"
+        style={{ width: "100%", height: "100%", minWidth: 0, overflow: "hidden" }}
+      >
+        <div ref={editorRef} style={{ width: "100%", height: "100%", minWidth: 0, overflow: "hidden" }} />
+      </div>
+      {linkPickerMode ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={linkPickerMode === "wiki" ? "插入双链" : "插入 Markdown 链接"}
+          onClick={closeLinkPicker}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15, 23, 42, 0.22)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1200,
+            padding: 20,
+          }}
+        >
+          <div
+            onClick={(event) => event.stopPropagation()}
+            style={{
+              width: "min(520px, 100%)",
+              maxHeight: "min(540px, calc(100vh - 40px))",
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
+              background: "#ffffff",
+              borderRadius: 14,
+              border: "1px solid rgba(148, 163, 184, 0.28)",
+              boxShadow: "0 20px 48px rgba(15, 23, 42, 0.18)",
+            }}
+          >
+            <div style={{ padding: "18px 20px 10px" }}>
+              <div style={{ fontSize: 15, fontWeight: 600, color: "#0f172a", marginBottom: 6 }}>
+                {linkPickerMode === "wiki" ? "插入双链" : "插入 Markdown 链接"}
+              </div>
+              <div style={{ fontSize: 12, color: "#64748b" }}>
+                输入关键词搜索现有笔记，也可以直接输入标题或目标路径后插入。
+              </div>
+            </div>
+            <div style={{ padding: "0 20px 12px" }}>
+              <input
+                autoFocus
+                value={linkPickerQuery}
+                onChange={(event) => setLinkPickerQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    closeLinkPicker();
+                    return;
+                  }
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    insertLinkFromPicker(linkPickerResults[0]);
+                  }
+                }}
+                placeholder="搜索笔记标题或直接输入"
+                style={{
+                  width: "100%",
+                  boxSizing: "border-box",
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(148, 163, 184, 0.45)",
+                  fontSize: 14,
+                  color: "#0f172a",
+                  outline: "none",
+                }}
+              />
+            </div>
+            <div style={{ padding: "0 20px 16px", overflowY: "auto" }}>
+              {linkPickerError ? (
+                <div style={{ padding: "10px 12px", borderRadius: 10, background: "#fff1f2", color: "#be123c", fontSize: 12 }}>
+                  {linkPickerError}
+                </div>
+              ) : null}
+              {!linkPickerError && linkPickerLoading ? (
+                <div style={{ padding: "10px 12px", color: "#64748b", fontSize: 12 }}>正在搜索笔记…</div>
+              ) : null}
+              {!linkPickerError && !linkPickerLoading && linkPickerQuery.trim() && linkPickerResults.length === 0 ? (
+                <div style={{ padding: "10px 12px", color: "#64748b", fontSize: 12 }}>
+                  未找到匹配笔记，可以直接按回车插入当前输入内容。
+                </div>
+              ) : null}
+              {!linkPickerError && linkPickerResults.length > 0 ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {linkPickerResults.map((result) => (
+                    <button
+                      key={result.note_id}
+                      type="button"
+                      aria-label={result.title}
+                      onClick={() => insertLinkFromPicker(result)}
+                      style={{
+                        textAlign: "left",
+                        border: "1px solid rgba(148, 163, 184, 0.24)",
+                        borderRadius: 10,
+                        background: "#f8fafc",
+                        padding: "10px 12px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <div style={{ fontSize: 14, fontWeight: 600, color: "#0f172a", marginBottom: 4 }}>{result.title}</div>
+                      <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>{result.path}</div>
+                      <div style={{ fontSize: 12, color: "#475569" }}>{result.snippet.replace(/<[^>]+>/g, "")}</div>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            <div style={{ padding: "0 20px 18px", display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button
+                type="button"
+                onClick={closeLinkPicker}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(148, 163, 184, 0.4)",
+                  background: "#ffffff",
+                  color: "#334155",
+                  cursor: "pointer",
+                }}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => insertLinkFromPicker()}
+                disabled={!linkPickerQuery.trim()}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 10,
+                  border: "none",
+                  background: linkPickerQuery.trim() ? "#2450c5" : "#cbd5e1",
+                  color: "#ffffff",
+                  cursor: linkPickerQuery.trim() ? "pointer" : "not-allowed",
+                }}
+              >
+                插入当前输入
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }

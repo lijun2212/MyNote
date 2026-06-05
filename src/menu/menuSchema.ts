@@ -115,15 +115,17 @@ export function buildContextMenuSchema(payload: ContextMenuPayload): MenuSchemaI
 
   if (payload.type === "editorSelection") {
     return [
-      item("selection.insertLink", "添加链接", isEnabled(payload.handlers?.insertLink)),
+      item("selection.createWikiLink", "转为双链", isEnabled(payload.handlers?.createWikiLink)),
+      item("selection.insertLink", "转为 Markdown 链接", isEnabled(payload.handlers?.insertLink)),
       item("selection.insertTag", "添加标签", isEnabled(payload.handlers?.insertTag)),
-      item("selection.createWikiLink", "创建双链", isEnabled(payload.handlers?.createWikiLink)),
       item("selection.relation", "创建知识关联", false),
     ];
   }
 
   if (payload.type === "editorBlank") {
     return [
+      item("blank.insertLink", "插入 Markdown 链接...", isEnabled(payload.handlers?.insertLink)),
+      item("blank.createWikiLink", "插入双链...", isEnabled(payload.handlers?.createWikiLink)),
       item("blank.newNote", "新建笔记", false),
       item("blank.paste", "粘贴", false),
       item("blank.refreshIndex", "刷新索引", isEnabled(payload.handlers?.refreshIndex)),

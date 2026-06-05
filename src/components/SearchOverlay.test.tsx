@@ -112,6 +112,93 @@ describe("SearchOverlay", () => {
     expect(input).toHaveValue("project");
   });
 
+  it("styles history delete buttons like notebook delete actions and updates on hover", async () => {
+    const user = userEvent.setup();
+    useSearchSessionStore.setState({
+      recentQueries: ["alpha"],
+      recentHits: [
+        {
+          query: "project",
+          note_id: "note-project",
+          note_title: "Project Plan",
+          note_path: "notes/project.md",
+          line_start: 7,
+          line_end: 7,
+          occurrence_order: 1,
+          snippet: "Plan <mark>project</mark>",
+          source: "body",
+        },
+      ],
+    });
+
+    renderSearchOverlay();
+
+    const queryDeleteButton = screen.getByLabelText("删除最近搜索 alpha", { selector: "button" });
+    const hitDeleteButton = screen.getByLabelText("删除最近查看命中 Project Plan", { selector: "button" });
+    const queryHistoryButton = screen.getByRole("button", { name: "alpha" });
+
+    expect(queryDeleteButton).not.toBeVisible();
+    expect(hitDeleteButton).toHaveTextContent("×");
+
+    await user.hover(queryHistoryButton);
+
+    expect(queryDeleteButton).toHaveTextContent("×");
+    expect(queryDeleteButton).toBeVisible();
+    expect(queryDeleteButton).toHaveStyle({
+      width: "22px",
+      height: "22px",
+      borderRadius: "999px",
+      border: "1px solid #93c5fd",
+      background: "#eff6ff",
+      color: "#334155",
+    });
+
+    await user.unhover(queryHistoryButton);
+    expect(queryDeleteButton).not.toBeVisible();
+  });
+
+  it("only shows history delete buttons while hovering the target history item", async () => {
+    const user = userEvent.setup();
+    useSearchSessionStore.setState({
+      recentQueries: ["alpha"],
+      recentHits: [
+        {
+          query: "project",
+          note_id: "note-project",
+          note_title: "Project Plan",
+          note_path: "notes/project.md",
+          line_start: 7,
+          line_end: 7,
+          occurrence_order: 1,
+          snippet: "Plan <mark>project</mark>",
+          source: "body",
+        },
+      ],
+    });
+
+    renderSearchOverlay();
+
+    const queryHistoryButton = screen.getByRole("button", { name: "alpha" });
+    const hitHistoryButton = screen.getByRole("button", { name: "恢复最近查看命中 Project Plan" });
+    const queryDeleteButton = screen.getByLabelText("删除最近搜索 alpha", { selector: "button" });
+    const hitDeleteButton = screen.getByLabelText("删除最近查看命中 Project Plan", { selector: "button" });
+
+    expect(queryDeleteButton).not.toBeVisible();
+    expect(hitDeleteButton).not.toBeVisible();
+
+    await user.hover(queryHistoryButton);
+    expect(queryDeleteButton).toBeVisible();
+
+    await user.unhover(queryHistoryButton);
+    expect(queryDeleteButton).not.toBeVisible();
+
+    await user.hover(hitHistoryButton);
+    expect(hitDeleteButton).toBeVisible();
+
+    await user.unhover(hitHistoryButton);
+    expect(hitDeleteButton).not.toBeVisible();
+  });
+
   it("removes a single recent query and hit without restoring the query", async () => {
     const user = userEvent.setup();
     useSearchSessionStore.setState({
@@ -135,11 +222,17 @@ describe("SearchOverlay", () => {
 
     const input = screen.getByPlaceholderText("输入关键词搜索笔记");
 
-    await user.click(screen.getByRole("button", { name: "删除最近搜索 alpha" }));
+    const queryDeleteButton = screen.getByLabelText("删除最近搜索 alpha", { selector: "button" });
+    await user.hover(screen.getByRole("button", { name: "alpha" }));
+    expect(queryDeleteButton).toBeVisible();
+    fireEvent.click(queryDeleteButton);
     expect(useSearchSessionStore.getState().recentQueries).toEqual(["beta"]);
     expect(input).toHaveValue("");
 
-    await user.click(screen.getByRole("button", { name: "删除最近查看命中 Project Plan" }));
+    const hitDeleteButton = screen.getByLabelText("删除最近查看命中 Project Plan", { selector: "button" });
+    await user.hover(screen.getByRole("button", { name: "恢复最近查看命中 Project Plan" }));
+    expect(hitDeleteButton).toBeVisible();
+    fireEvent.click(hitDeleteButton);
     expect(useSearchSessionStore.getState().recentHits).toEqual([]);
     expect(input).toHaveValue("");
   });
@@ -368,6 +461,38 @@ describe("SearchOverlay", () => {
 
     expect(screen.getByText("标题命中")).toBeInTheDocument();
     expect(screen.getByText("第 12 行")).toBeInTheDocument();
+  });
+
+  it("surfaces an explicit open-target action for link hits", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    setSearchResults([
+      makeSearchResult({
+        note_id: "source-note",
+        title: "Source Note",
+        path: "notes/source.md",
+        line_start: 8,
+        line_end: 8,
+        source: "link",
+        snippet: "See [[<mark>Target</mark> Note]] for details",
+        link_target_path: "notes/target.md",
+        link_target_title: "Target Note",
+        link_target_href: "[[Target Note]]",
+      }),
+    ]);
+
+    renderSearchOverlay(onClose);
+
+    await user.type(screen.getByPlaceholderText("输入关键词搜索笔记"), "Target");
+
+    expect(screen.getByText("链接命中")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "打开目标笔记 Target Note" }));
+
+    expect(hookMocks.beginOpenNote).toHaveBeenCalledTimes(1);
+    expect(hookMocks.openNote).toHaveBeenCalledWith("notes/target.md", 101);
+    expect(useEditorStore.getState().searchNavigationTarget).toBeNull();
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
   it("does not close or store navigation when the open request is stale", async () => {

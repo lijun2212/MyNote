@@ -241,6 +241,99 @@ function normalizeInternalNotePath(href: string): string | undefined {
   return normalizedPath;
 }
 
+function decodeHrefFragment(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function normalizeHeadingText(text: string): string {
+  return text.trim().toLowerCase();
+}
+
+function slugifyHeadingText(text: string): string {
+  let slug = "";
+  let lastWasDash = false;
+
+  for (const originalChar of text.trim()) {
+    const char = originalChar.toLowerCase();
+    const isChinese = char >= "\u4e00" && char <= "\u9fff";
+    if (/\p{Letter}|\p{Number}/u.test(char) || isChinese) {
+      slug += char;
+      lastWasDash = false;
+      continue;
+    }
+
+    if ((/\s/.test(char) || char === "-" || char === "_") && !lastWasDash && slug) {
+      slug += "-";
+      lastWasDash = true;
+    }
+  }
+
+  return slug.replace(/^-+|-+$/g, "");
+}
+
+function extractHeadingText(line: string): string | null {
+  const trimmed = line.trimStart();
+  const atxMatch = trimmed.match(/^#{1,6}\s+(.*?)\s*#*\s*$/);
+  if (atxMatch?.[1]) {
+    return atxMatch[1].trim();
+  }
+
+  return null;
+}
+
+function findHeadingLineNumber(content: string, anchor: string): number | null {
+  const trimmedAnchor = decodeHrefFragment(anchor).trim();
+  if (!trimmedAnchor) {
+    return null;
+  }
+
+  const normalizedAnchor = normalizeHeadingText(trimmedAnchor);
+  const slugAnchor = slugifyHeadingText(trimmedAnchor);
+  const lines = content.split(/\r?\n/);
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const atxHeading = extractHeadingText(lines[index]);
+    if (atxHeading) {
+      const normalizedHeading = normalizeHeadingText(atxHeading);
+      const slugHeading = slugifyHeadingText(atxHeading);
+      if (normalizedHeading === normalizedAnchor || (slugAnchor && slugHeading === slugAnchor)) {
+        return index + 1;
+      }
+    }
+
+    const currentLine = lines[index]?.trim();
+    const nextLine = lines[index + 1]?.trim();
+    const isSetext = Boolean(
+      currentLine
+      && nextLine
+      && (/^=+$/.test(nextLine) || /^-+$/.test(nextLine)),
+    );
+    if (isSetext) {
+      const normalizedHeading = normalizeHeadingText(currentLine);
+      const slugHeading = slugifyHeadingText(currentLine);
+      if (normalizedHeading === normalizedAnchor || (slugAnchor && slugHeading === slugAnchor)) {
+        return index + 1;
+      }
+    }
+  }
+
+  return null;
+}
+
+function extractHrefAnchor(href: string): string | undefined {
+  const hashIndex = href.indexOf("#");
+  if (hashIndex === -1) {
+    return undefined;
+  }
+
+  const anchor = href.slice(hashIndex + 1).trim();
+  return anchor ? decodeHrefFragment(anchor) : undefined;
+}
+
 function getPreviewLinkTarget(element: Element): {
   linkType: PreviewLinkKind;
   href: string;
@@ -543,6 +636,10 @@ export function MarkdownPreview({
   const openContextMenu = useContextMenu().openContextMenu;
   const { openNote, beginOpenNote, isOpenNoteRequestCurrent } = useOpenNote();
   const setEditorMode = useEditorStore((s) => s.setEditorMode);
+  const setSearchNavigationTarget = useEditorStore((s) => s.setSearchNavigationTarget);
+  const currentNote = useEditorStore((s) => s.currentNote);
+  const currentEditorContent = useEditorStore((s) => s.content);
+  const selectedNodePath = useAppStore((s) => s.selectedNodePath);
   const setRightSidebarVisible = useAppStore((s) => s.setRightSidebarVisible);
 
   const openWikiNote = async (title: string, requestId = beginOpenNote()) => {
@@ -572,8 +669,52 @@ export function MarkdownPreview({
       return;
     }
 
+    const anchor = extractHrefAnchor(linkTarget.href);
+
     if (linkTarget.notePath) {
       await openNote(linkTarget.notePath, beginOpenNote());
+      if (anchor) {
+        try {
+          const detail = await api.getNoteByPath(linkTarget.notePath);
+          const lineNumber = findHeadingLineNumber(detail.content, anchor);
+          if (lineNumber) {
+            setSearchNavigationTarget({
+              note_id: detail.note.id,
+              note_path: detail.note.path,
+              note_title: detail.note.title,
+              line_start: lineNumber,
+              line_end: lineNumber,
+              occurrence_order: 1,
+              match_text: anchor,
+              source: "body",
+              context_snippet: anchor,
+              revision: Date.now(),
+            });
+          }
+        } catch (error) {
+          console.error("Failed to resolve preview anchor target:", error);
+        }
+      }
+      return;
+    }
+
+    if (linkTarget.linkType === "internal" && anchor) {
+      const currentPath = currentNote?.path ?? selectedNodePath ?? undefined;
+      const lineNumber = findHeadingLineNumber(currentEditorContent, anchor);
+      if (currentPath && lineNumber) {
+        setSearchNavigationTarget({
+          note_id: currentNote?.id ?? "",
+          note_path: currentPath,
+          note_title: currentNote?.title ?? "",
+          line_start: lineNumber,
+          line_end: lineNumber,
+          occurrence_order: 1,
+          match_text: anchor,
+          source: "body",
+          context_snippet: anchor,
+          revision: Date.now(),
+        });
+      }
       return;
     }
 

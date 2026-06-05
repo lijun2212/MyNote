@@ -44,6 +44,8 @@ export const MENU_ACTION_IDS = [
 	"selection.insertLink",
 	"selection.insertTag",
 	"selection.createWikiLink",
+	"blank.insertLink",
+	"blank.createWikiLink",
 	"blank.refreshIndex",
 	"blank.showSidebar",
 	"tagBlank.refresh",

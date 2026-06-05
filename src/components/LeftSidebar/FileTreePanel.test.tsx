@@ -171,6 +171,28 @@ describe("FileTreePanel", () => {
     expect(screen.getByText("案例.md")).toBeInTheDocument();
   });
 
+  it("keeps notebook rows neutral and only uses notebook color on the leading color trigger", () => {
+    render(<FileTreePanel />);
+
+    const notebookColorTrigger = screen.getByRole("button", { name: "编辑笔记本颜色 法律" });
+    const directoryTitle = screen.getByRole("button", { name: "法律" });
+    const directoryToggle = screen.getByRole("button", { name: "切换笔记本 法律" });
+    const directoryCount = screen.getByTestId("directory-count:notes/法律");
+    const rowSurface = directoryTitle.closest("div");
+
+    expect(rowSurface).toHaveStyle({
+      background: "transparent",
+      color: "#555",
+      boxShadow: "none",
+    });
+    expect(directoryToggle).toHaveStyle({ color: "#555" });
+    expect(directoryCount).toHaveStyle({
+      background: "#f8fafc",
+      color: "#667085",
+    });
+    expect(notebookColorTrigger).toHaveStyle({ background: "#4b5563" });
+  });
+
   it("uses the default cursor for directories and notes", () => {
     render(<FileTreePanel />);
 
@@ -358,6 +380,29 @@ describe("FileTreePanel", () => {
     expect(screen.queryByRole("button", { name: /更多操作/ })).not.toBeInTheDocument();
   });
 
+  it("hides notebook inline actions until the notebook row is hovered", async () => {
+    const user = userEvent.setup();
+
+    render(<FileTreePanel />);
+
+    const notebookTitle = screen.getByRole("button", { name: "法律" });
+    const moveGroup = screen.getByTestId("notebook-move-group:notes/法律");
+    const deleteButton = screen.getByRole("button", { name: "删除笔记本 法律" });
+
+    expect(moveGroup).not.toBeVisible();
+    expect(deleteButton).not.toBeVisible();
+
+    await user.hover(notebookTitle);
+
+    expect(moveGroup).toBeVisible();
+    expect(deleteButton).toBeVisible();
+
+    await user.unhover(notebookTitle);
+
+    expect(moveGroup).not.toBeVisible();
+    expect(deleteButton).not.toBeVisible();
+  });
+
   it("enters inline rename mode on notebook title double click and saves on Enter", async () => {
     const user = userEvent.setup();
     hookMocks.renameNotebook.mockResolvedValue({
@@ -468,7 +513,10 @@ describe("FileTreePanel", () => {
 
     render(<FileTreePanel />);
 
-    await user.click(screen.getByRole("button", { name: "删除笔记本 空笔记本" }));
+  await user.hover(screen.getByRole("button", { name: "空笔记本" }));
+  const deleteNotebookButton = screen.getByRole("button", { name: "删除笔记本 空笔记本" });
+  await waitFor(() => expect(deleteNotebookButton).toBeVisible());
+  fireEvent.click(deleteNotebookButton);
     expect(screen.getByText("确认删除该笔记本？")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "确认删除笔记本 空笔记本" }));
@@ -483,7 +531,10 @@ describe("FileTreePanel", () => {
 
     render(<FileTreePanel />);
 
-    await user.click(screen.getByRole("button", { name: "删除笔记本 法律" }));
+    await user.hover(screen.getByRole("button", { name: "法律" }));
+  const deleteNotebookButton = screen.getByRole("button", { name: "删除笔记本 法律" });
+  await waitFor(() => expect(deleteNotebookButton).toBeVisible());
+    fireEvent.click(deleteNotebookButton);
     expect(screen.getByText("确认删除该笔记本？")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "确认删除笔记本 法律" }));
@@ -535,7 +586,10 @@ describe("FileTreePanel", () => {
     expect(screen.getByRole("button", { name: "上移笔记本 法律" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "下移笔记本 研发" })).toBeDisabled();
 
-    await user.click(screen.getByRole("button", { name: "上移笔记本 产品" }));
+    await user.hover(screen.getByRole("button", { name: "产品" }));
+    const moveUpButton = screen.getByRole("button", { name: "上移笔记本 产品" });
+    await waitFor(() => expect(moveUpButton).toBeVisible());
+    fireEvent.click(moveUpButton);
     await waitFor(() => expect(hookMocks.reorderNotebooks).toHaveBeenCalledWith([
       "notes/产品",
       "notes/法律",
@@ -543,7 +597,10 @@ describe("FileTreePanel", () => {
     ]));
 
     hookMocks.reorderNotebooks.mockClear();
-    await user.click(screen.getByRole("button", { name: "下移笔记本 产品" }));
+    await user.hover(screen.getByRole("button", { name: "产品" }));
+    const moveDownButton = screen.getByRole("button", { name: "下移笔记本 产品" });
+    await waitFor(() => expect(moveDownButton).toBeVisible());
+    fireEvent.click(moveDownButton);
     await waitFor(() => expect(hookMocks.reorderNotebooks).toHaveBeenCalledWith([
       "notes/法律",
       "notes/研发",

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum SearchResultSource {
     Title,
+    Link,
     Body,
 }
 
@@ -18,5 +19,8 @@ pub struct SearchResult {
     pub occurrence_order: i64,
     pub match_text: String,
     pub source: SearchResultSource,
+    pub link_target_path: Option<String>,
+    pub link_target_title: Option<String>,
+    pub link_target_href: Option<String>,
     pub score: f64,
 }

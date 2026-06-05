@@ -126,11 +126,41 @@ export function FileTreeNode({
   const directoryPalette = NOTEBOOK_COLOR_STYLES[directoryColor] ?? NOTEBOOK_COLOR_STYLES.gray;
   const noteCount = countNotes(node);
   const isExpandedState = expanded && dragOverPath !== node.path;
-  const directoryBackground = dragOverPath === node.path ? "#dbeafe" : isExpandedState ? directoryPalette.background : "transparent";
-  const directoryTextColor = dragOverPath === node.path ? "#1d4ed8" : isExpandedState ? directoryPalette.color : "#555";
+  const directoryBackground = dragOverPath === node.path
+    ? "#dbeafe"
+    : isNotebook
+      ? "transparent"
+      : isExpandedState
+        ? directoryPalette.background
+        : "transparent";
+  const directoryTextColor = dragOverPath === node.path
+    ? "#1d4ed8"
+    : isNotebook
+      ? "#555"
+      : isExpandedState
+        ? directoryPalette.color
+        : "#555";
+  const directorySurfaceBoxShadow = dragOverPath === node.path
+    ? "none"
+    : isNotebook
+      ? "none"
+      : isExpandedState
+        ? `inset 0 0 0 1px ${directoryPalette.background}`
+        : "none";
+  const directoryCountBackground = isNotebook
+    ? "#f8fafc"
+    : isExpandedState
+      ? "rgba(255,255,255,0.72)"
+      : directoryPalette.background;
+  const directoryCountColor = isNotebook ? "#667085" : directoryPalette.color;
   const showNotebookSlots = isNotebook && (isPickingNotebookColor || isConfirmingNotebookDelete || Boolean(notebookError));
   const areNotebookActionsHighlighted =
     isNotebookRowHovered || isRenamingNotebook || isPickingNotebookColor || isConfirmingNotebookDelete;
+  const areNotebookActionsVisible =
+    areNotebookActionsHighlighted ||
+    isToggleFocusVisible ||
+    isTitleFocusVisible ||
+    focusVisibleAction !== null;
   const isColorTriggerFocusVisible = focusVisibleAction === "color";
   const isMoveUpFocusVisible = focusVisibleAction === "move-up";
   const isMoveDownFocusVisible = focusVisibleAction === "move-down";
@@ -234,7 +264,7 @@ export function FileTreeNode({
               flex: 1,
               minWidth: 0,
               transition: "background 220ms ease, color 180ms ease, box-shadow 220ms ease, transform 180ms ease",
-              boxShadow: isExpandedState ? `inset 0 0 0 1px ${directoryPalette.background}` : "none",
+              boxShadow: directorySurfaceBoxShadow,
               transform: expanded ? "translateX(0px)" : "translateX(-1px)",
             }}
           >
@@ -483,8 +513,9 @@ export function FileTreeNode({
                   display: "inline-flex",
                   alignItems: "center",
                   gap: 4,
-                  opacity: areNotebookActionsHighlighted ? 1 : 0.44,
-                  transform: areNotebookActionsHighlighted ? "translateX(0px)" : "translateX(1px)",
+                  opacity: areNotebookActionsVisible ? 1 : 0,
+                  pointerEvents: areNotebookActionsVisible ? "auto" : "none",
+                  transform: areNotebookActionsVisible ? "translateX(0px)" : "translateX(4px)",
                   transition: "opacity 180ms ease, transform 180ms ease",
                 }}
               >
@@ -604,8 +635,8 @@ export function FileTreeNode({
                 borderRadius: 999,
                 fontSize: 11,
                 lineHeight: 1.5,
-                background: isExpandedState ? "rgba(255,255,255,0.72)" : directoryPalette.background,
-                color: directoryPalette.color,
+                background: directoryCountBackground,
+                color: directoryCountColor,
                 flexShrink: 0,
                 transition: "background 180ms ease, color 180ms ease, transform 180ms ease",
                 transform: expanded ? "translateX(0px)" : "translateX(-1px)",

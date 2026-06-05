@@ -1,6 +1,7 @@
 use crate::domain::search::{SearchResult, SearchResultSource};
 use crate::error::AppError;
 use crate::infrastructure::fs::resolve_kb_path;
+use crate::infrastructure::markdown::extract_links;
 use crate::state::AppState;
 use rusqlite::Connection;
 use std::cmp::Ordering;
@@ -25,6 +26,13 @@ struct MatchOccurrence {
     start: usize,
     end: usize,
     text: String,
+}
+
+#[derive(Debug)]
+struct SearchLinkContext {
+    href: String,
+    target_path: Option<String>,
+    target_title: Option<String>,
 }
 
 #[tauri::command]
@@ -109,7 +117,7 @@ fn search_notes_in_conn(
 
     let mut results = Vec::new();
     for candidate in candidates {
-        results.extend(expand_candidate_hits(kb_root, &candidate, trimmed)?);
+        results.extend(expand_candidate_hits(conn, kb_root, &candidate, trimmed)?);
     }
 
     results.sort_by(compare_search_results);
@@ -119,6 +127,7 @@ fn search_notes_in_conn(
 }
 
 fn expand_candidate_hits(
+    conn: &Connection,
     kb_root: &Path,
     candidate: &CandidateNote,
     query: &str,
@@ -143,6 +152,9 @@ fn expand_candidate_hits(
             occurrence_order,
             match_text: occurrence.text,
             source: SearchResultSource::Title,
+            link_target_path: None,
+            link_target_title: None,
+            link_target_href: None,
             score: candidate.rank - TITLE_SCORE_BOOST + occurrence_order as f64 / 1_000_000.0,
         });
     }
@@ -154,6 +166,7 @@ fn expand_candidate_hits(
 
         for occurrence in collect_match_occurrences(line, query) {
             occurrence_order += 1;
+            let link_context = detect_link_hit(conn, line, occurrence.start, occurrence.end);
             results.push(SearchResult {
                 note_id: candidate.note_id.clone(),
                 title: candidate.title.clone(),
@@ -163,7 +176,14 @@ fn expand_candidate_hits(
                 line_end: line_index as i64 + 1,
                 occurrence_order,
                 match_text: occurrence.text,
-                source: SearchResultSource::Body,
+                source: if link_context.is_some() {
+                    SearchResultSource::Link
+                } else {
+                    SearchResultSource::Body
+                },
+                link_target_path: link_context.as_ref().and_then(|context| context.target_path.clone()),
+                link_target_title: link_context.as_ref().and_then(|context| context.target_title.clone()),
+                link_target_href: link_context.as_ref().map(|context| context.href.clone()),
                 score: candidate.rank
                     + line_index as f64 / 1_000.0
                     + occurrence_order as f64 / 1_000_000.0,
@@ -176,6 +196,88 @@ fn expand_candidate_hits(
 
 fn build_snippet(line: &str, start: usize, end: usize) -> String {
     format!("{}<mark>{}</mark>{}", &line[..start], &line[start..end], &line[end..])
+}
+
+fn detect_link_hit(
+    conn: &Connection,
+    line: &str,
+    match_start: usize,
+    match_end: usize,
+) -> Option<SearchLinkContext> {
+    let raw_link = extract_links(line)
+        .into_iter()
+        .find(|link| match_start < link.end_offset && match_end > link.start_offset)?;
+
+    let href = build_link_href(&raw_link.target_raw, raw_link.anchor.as_deref(), &raw_link.link_type);
+    let (target_path, target_title) = match raw_link.link_type.as_str() {
+        "wiki" => resolve_note_by_title(conn, &raw_link.target_raw).unwrap_or((None, None)),
+        "markdown" => normalize_internal_markdown_target(&raw_link.target_raw)
+            .and_then(|target_path| resolve_note_by_path(conn, &target_path))
+            .unwrap_or((None, None)),
+        _ => (None, None),
+    };
+
+    Some(SearchLinkContext {
+        href,
+        target_path,
+        target_title,
+    })
+}
+
+fn build_link_href(target_raw: &str, anchor: Option<&str>, link_type: &str) -> String {
+    let anchor_suffix = anchor.map(|value| format!("#{value}")).unwrap_or_default();
+    match link_type {
+        "wiki" => format!("[[{target_raw}{anchor_suffix}]]"),
+        _ => format!("{target_raw}{anchor_suffix}"),
+    }
+}
+
+fn normalize_internal_markdown_target(target_raw: &str) -> Option<String> {
+    let trimmed = target_raw.trim().trim_start_matches('/');
+    if trimmed.is_empty() || trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        return None;
+    }
+
+    if !trimmed.starts_with("notes/") || !trimmed.ends_with(".md") {
+        return None;
+    }
+
+    Some(trimmed.to_string())
+}
+
+fn resolve_note_by_path(conn: &Connection, path: &str) -> Option<(Option<String>, Option<String>)> {
+    conn.query_row(
+        "SELECT path, title
+         FROM notes
+         WHERE deleted_at IS NULL AND path = ?1
+         LIMIT 1",
+        rusqlite::params![path],
+        |row| Ok((Some(row.get::<_, String>(0)?), Some(row.get::<_, String>(1)?))),
+    )
+    .ok()
+}
+
+fn resolve_note_by_title(conn: &Connection, title: &str) -> Option<(Option<String>, Option<String>)> {
+    conn.query_row(
+        "SELECT path, title
+         FROM notes
+         WHERE deleted_at IS NULL AND title = ?1
+         LIMIT 1",
+        rusqlite::params![title],
+        |row| Ok((Some(row.get::<_, String>(0)?), Some(row.get::<_, String>(1)?))),
+    )
+    .ok()
+    .or_else(|| {
+        conn.query_row(
+            "SELECT path, title
+             FROM notes
+             WHERE deleted_at IS NULL AND lower(title) = lower(?1)
+             LIMIT 1",
+            rusqlite::params![title],
+            |row| Ok((Some(row.get::<_, String>(0)?), Some(row.get::<_, String>(1)?))),
+        )
+        .ok()
+    })
 }
 
 fn collect_match_occurrences(haystack: &str, query: &str) -> Vec<MatchOccurrence> {
@@ -297,7 +399,8 @@ fn compare_search_results(left: &SearchResult, right: &SearchResult) -> Ordering
 fn source_priority(source: SearchResultSource) -> u8 {
     match source {
         SearchResultSource::Title => 0,
-        SearchResultSource::Body => 1,
+        SearchResultSource::Link => 1,
+        SearchResultSource::Body => 2,
     }
 }
 
@@ -617,5 +720,42 @@ mod tests {
             .unwrap();
 
         assert_eq!(title_result.line_start, 1);
+    }
+
+    #[test]
+    fn search_notes_marks_wiki_link_hits_and_resolves_target_note() {
+        let conn = setup_search_db();
+        let root = setup_search_root();
+        insert_note(
+            &conn,
+            &root,
+            "target",
+            "notes/target.md",
+            "Target Note",
+            "",
+            "",
+            "# Target Note\n",
+        );
+        insert_note(
+            &conn,
+            &root,
+            "source",
+            "notes/source.md",
+            "Source Note",
+            "",
+            "See [[Target Note]] for details",
+            "See [[Target Note]] for details\n",
+        );
+
+        let results = search_notes_in_conn(&conn, root.path(), "Target").unwrap();
+        let link_result = results
+            .iter()
+            .find(|result| result.note_id == "source")
+            .expect("expected source note result");
+
+        assert_eq!(link_result.source, SearchResultSource::Link);
+        assert_eq!(link_result.link_target_path.as_deref(), Some("notes/target.md"));
+        assert_eq!(link_result.link_target_title.as_deref(), Some("Target Note"));
+        assert_eq!(link_result.link_target_href.as_deref(), Some("[[Target Note]]"));
     }
 }

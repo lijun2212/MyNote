@@ -41,7 +41,7 @@ function isSearchHistoryHitItem(value: unknown): value is SearchHistoryHitItem {
     && typeof item.line_end === "number"
     && typeof item.occurrence_order === "number"
     && typeof item.snippet === "string"
-    && (item.source === "title" || item.source === "body");
+    && (item.source === "title" || item.source === "link" || item.source === "body");
 }
 
 function isSearchResult(value: unknown): value is SearchResult {
@@ -58,7 +58,7 @@ function isSearchResult(value: unknown): value is SearchResult {
     && typeof result.line_end === "number"
     && typeof result.occurrence_order === "number"
     && typeof result.match_text === "string"
-    && (result.source === "title" || result.source === "body")
+    && (result.source === "title" || result.source === "link" || result.source === "body")
     && typeof result.score === "number";
 }
 

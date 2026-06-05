@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type { SearchResult } from "../types";
 import { useSearch } from "../hooks/useSearch";
 import { useOpenNote } from "../hooks/useOpenNote";
@@ -64,6 +65,18 @@ function getSearchResultKey(result: SearchResult) {
   ].join(":");
 }
 
+function getSearchSourceLabel(result: Pick<SearchResult, "source" | "line_start">) {
+  if (result.source === "title") {
+    return "标题命中";
+  }
+
+  if (result.source === "link") {
+    return "链接命中";
+  }
+
+  return `第 ${result.line_start} 行`;
+}
+
 interface SearchOverlayProps {
   onClose: () => void;
 }
@@ -73,6 +86,7 @@ export function SearchOverlay({ onClose }: SearchOverlayProps) {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [hoveredDeleteKey, setHoveredDeleteKey] = useState<string | null>(null);
+  const [focusedDeleteKey, setFocusedDeleteKey] = useState<string | null>(null);
   const { results, isLoading } = useSearch(query);
   const inputRef = useRef<HTMLInputElement>(null);
   const queryRecordTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -154,6 +168,44 @@ export function SearchOverlay({ onClose }: SearchOverlayProps) {
     onClose();
   };
 
+  const openResultTarget = async (result: SearchResult) => {
+    const targetPath = result.link_target_path?.trim();
+    const targetHref = result.link_target_href?.trim();
+
+    if (targetPath) {
+      const requestId = beginOpenNote();
+      try {
+        await openNote(targetPath, requestId);
+      } catch {
+        return;
+      }
+
+      if (!isOpenNoteRequestCurrent(requestId)) return;
+
+      const trimmedQuery = query.trim();
+      if (trimmedQuery) {
+        recordQuery(trimmedQuery);
+      }
+      onClose();
+      return;
+    }
+
+    if (!targetHref) {
+      return;
+    }
+
+    try {
+      await openUrl(targetHref);
+      const trimmedQuery = query.trim();
+      if (trimmedQuery) {
+        recordQuery(trimmedQuery);
+      }
+      onClose();
+    } catch {
+      // Ignore target-open failures and keep the overlay open.
+    }
+  };
+
   const handleClearRecentQueries = () => {
     if (!window.confirm("确认清空最近搜索吗？")) {
       return;
@@ -190,7 +242,13 @@ export function SearchOverlay({ onClose }: SearchOverlayProps) {
 
   const getDeleteButtonStyle = (key: string): React.CSSProperties => ({
     ...styles.historyDeleteIconButton,
-    ...(hoveredDeleteKey === key ? styles.historyDeleteIconButtonHovered : styles.historyDeleteIconButtonIdle),
+    ...(hoveredDeleteKey === key || focusedDeleteKey === key
+      ? styles.historyDeleteIconButtonVisible
+      : styles.historyDeleteIconButtonHidden),
+    ...(hoveredDeleteKey === key || focusedDeleteKey === key
+      ? styles.historyDeleteIconButtonHovered
+      : styles.historyDeleteIconButtonIdle),
+    ...(focusedDeleteKey === key ? styles.historyDeleteIconButtonFocused : {}),
   });
 
   return (
@@ -239,7 +297,19 @@ export function SearchOverlay({ onClose }: SearchOverlayProps) {
                 {recentQueries.length > 0 ? (
                   <div style={styles.historyQueryList}>
                     {recentQueries.map((item) => (
-                      <div key={item} style={styles.historyQueryChip}>
+                      <div
+                        key={item}
+                        style={styles.historyQueryChip}
+                        onMouseEnter={() => setHoveredDeleteKey(`query:${item}`)}
+                        onMouseLeave={() => setHoveredDeleteKey((current) => (current === `query:${item}` ? null : current))}
+                        onFocus={() => setFocusedDeleteKey(`query:${item}`)}
+                        onBlur={(event) => {
+                          if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                            return;
+                          }
+                          setFocusedDeleteKey((current) => (current === `query:${item}` ? null : current));
+                        }}
+                      >
                         <button
                           type="button"
                           style={styles.historyQueryButton}
@@ -258,10 +328,8 @@ export function SearchOverlay({ onClose }: SearchOverlayProps) {
                             event.stopPropagation();
                             removeRecentQuery(item);
                           }}
-                          onMouseEnter={() => setHoveredDeleteKey(`query:${item}`)}
-                          onMouseLeave={() => setHoveredDeleteKey((current) => (current === `query:${item}` ? null : current))}
                         >
-                          x
+                          ×
                         </button>
                       </div>
                     ))}
@@ -289,6 +357,15 @@ export function SearchOverlay({ onClose }: SearchOverlayProps) {
                   <div
                     key={`${item.query}:${item.note_id}:${item.line_start}:${item.occurrence_order}`}
                     style={styles.historyHitRow}
+                    onMouseEnter={() => setHoveredDeleteKey(`hit:${item.query}:${item.note_id}:${item.line_start}:${item.occurrence_order}`)}
+                    onMouseLeave={() => setHoveredDeleteKey((current) => (current === `hit:${item.query}:${item.note_id}:${item.line_start}:${item.occurrence_order}` ? null : current))}
+                    onFocus={() => setFocusedDeleteKey(`hit:${item.query}:${item.note_id}:${item.line_start}:${item.occurrence_order}`)}
+                    onBlur={(event) => {
+                      if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                        return;
+                      }
+                      setFocusedDeleteKey((current) => (current === `hit:${item.query}:${item.note_id}:${item.line_start}:${item.occurrence_order}` ? null : current));
+                    }}
                   >
                     <button
                       type="button"
@@ -301,7 +378,7 @@ export function SearchOverlay({ onClose }: SearchOverlayProps) {
                     >
                       <div style={styles.historyHitTitle}>{item.note_title}</div>
                       <div style={styles.historyHitMeta}>
-                        {item.source === "title" ? "标题命中" : `第 ${item.line_start} 行`} · 来自搜索：{item.query}
+                        {getSearchSourceLabel(item)} · 来自搜索：{item.query}
                       </div>
                       <div style={styles.historyHitSnippet}>{renderSnippet(item.snippet)}</div>
                     </button>
@@ -313,10 +390,8 @@ export function SearchOverlay({ onClose }: SearchOverlayProps) {
                         event.stopPropagation();
                         removeRecentHit(item.query, item.note_id, item.line_start, item.occurrence_order);
                       }}
-                      onMouseEnter={() => setHoveredDeleteKey(`hit:${item.query}:${item.note_id}:${item.line_start}:${item.occurrence_order}`)}
-                      onMouseLeave={() => setHoveredDeleteKey((current) => (current === `hit:${item.query}:${item.note_id}:${item.line_start}:${item.occurrence_order}` ? null : current))}
                     >
-                      x
+                      ×
                     </button>
                   </div>
                 )) : (
@@ -338,8 +413,23 @@ export function SearchOverlay({ onClose }: SearchOverlayProps) {
               onClick={() => openResult(r, i)}
               onMouseEnter={() => setSelectedIndex(i)}
             >
-              <div style={styles.resultTitle}>{r.title}</div>
-              <div style={styles.resultMeta}>{r.source === "title" ? "标题命中" : `第 ${r.line_start} 行`}</div>
+              <div style={styles.resultHeader}>
+                <div style={styles.resultTitle}>{r.title}</div>
+                {r.source === "link" && (r.link_target_path || r.link_target_href) && (
+                  <button
+                    type="button"
+                    style={styles.resultTargetAction}
+                    aria-label={`打开目标笔记 ${r.link_target_title ?? r.link_target_path ?? r.title}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void openResultTarget(r);
+                    }}
+                  >
+                    打开目标
+                  </button>
+                )}
+              </div>
+              <div style={styles.resultMeta}>{getSearchSourceLabel(r)}</div>
               <div style={styles.resultSnippet}>{renderSnippet(r.snippet)}</div>
               <div style={styles.resultPath}>{r.path}</div>
             </div>
@@ -448,32 +538,42 @@ const styles: Record<string, React.CSSProperties> = {
   },
   historyDeleteIconButton: {
     alignItems: "center",
-    border: "none",
+    border: "1px solid #d0d7de",
     borderRadius: 999,
-    color: "#fff",
+    color: "#334155",
     cursor: "pointer",
     display: "inline-flex",
-    transition: "background-color 140ms ease, box-shadow 140ms ease, transform 140ms ease",
-    fontSize: 11,
-    fontWeight: 700,
-    height: 18,
+    transition: "border-color 180ms ease, box-shadow 180ms ease, background 180ms ease",
+    fontSize: 12,
+    height: 22,
     justifyContent: "center",
     lineHeight: 1,
     padding: 0,
     position: "absolute",
     right: -4,
     top: -4,
-    width: 18,
+    width: 22,
     zIndex: 1,
   },
+  historyDeleteIconButtonHidden: {
+    opacity: 0,
+    pointerEvents: "none",
+    visibility: "hidden",
+  },
+  historyDeleteIconButtonVisible: {
+    opacity: 1,
+    pointerEvents: "auto",
+    visibility: "visible",
+  },
   historyDeleteIconButtonIdle: {
-    background: "#fb7185",
-    boxShadow: "0 2px 6px rgba(244, 63, 94, 0.18)",
+    background: "#fff",
   },
   historyDeleteIconButtonHovered: {
-    background: "#e11d48",
-    boxShadow: "0 6px 14px rgba(225, 29, 72, 0.32)",
-    transform: "scale(1.08)",
+    border: "1px solid #93c5fd",
+    background: "#eff6ff",
+  },
+  historyDeleteIconButtonFocused: {
+    boxShadow: "0 0 0 3px rgba(37, 99, 235, 0.18)",
   },
   historyHitTitle: {
     fontSize: 13,
@@ -509,6 +609,12 @@ const styles: Record<string, React.CSSProperties> = {
   resultTitle: {
     fontWeight: 600,
     fontSize: 14,
+  },
+  resultHeader: {
+    alignItems: "center",
+    display: "flex",
+    gap: 12,
+    justifyContent: "space-between",
     marginBottom: 2,
   },
   resultMeta: {
@@ -524,5 +630,16 @@ const styles: Record<string, React.CSSProperties> = {
   resultPath: {
     fontSize: 11,
     color: "#aaa",
+  },
+  resultTargetAction: {
+    background: "#eff6ff",
+    border: "1px solid #bfdbfe",
+    borderRadius: 999,
+    color: "#1d4ed8",
+    cursor: "pointer",
+    flexShrink: 0,
+    fontSize: 11,
+    fontWeight: 600,
+    padding: "5px 10px",
   },
 };

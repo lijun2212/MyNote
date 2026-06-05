@@ -40,6 +40,8 @@ export interface MenuActionRunnerHandlers {
   insertLinkFromSelection?: (payload: EditorSelectionContextMenuPayload) => MaybePromise;
   insertTagFromSelection?: (payload: EditorSelectionContextMenuPayload) => MaybePromise;
   createWikiLinkFromSelection?: (payload: EditorSelectionContextMenuPayload) => MaybePromise;
+  insertLinkFromBlank?: (payload: EditorBlankContextMenuPayload) => MaybePromise;
+  createWikiLinkFromBlank?: (payload: EditorBlankContextMenuPayload) => MaybePromise;
   refreshIndex?: (payload: EditorBlankContextMenuPayload) => MaybePromise;
   showLeftSidebar?: (payload: EditorBlankContextMenuPayload) => MaybePromise;
   refreshTagFilter?: (payload: TagBlankContextMenuPayload) => MaybePromise;
@@ -230,6 +232,8 @@ export function createMenuActionRunner(handlers: MenuActionRunnerHandlers) {
     "selection.insertLink": (payload) => requireHandler(handlers, "selection.insertLink", "insertLinkFromSelection")(assertEditorSelectionPayload(payload)),
     "selection.insertTag": (payload) => requireHandler(handlers, "selection.insertTag", "insertTagFromSelection")(assertEditorSelectionPayload(payload)),
     "selection.createWikiLink": (payload) => requireHandler(handlers, "selection.createWikiLink", "createWikiLinkFromSelection")(assertEditorSelectionPayload(payload)),
+    "blank.insertLink": (payload) => requireHandler(handlers, "blank.insertLink", "insertLinkFromBlank")(assertEditorBlankPayload(payload)),
+    "blank.createWikiLink": (payload) => requireHandler(handlers, "blank.createWikiLink", "createWikiLinkFromBlank")(assertEditorBlankPayload(payload)),
     "blank.refreshIndex": (payload) => requireHandler(handlers, "blank.refreshIndex", "refreshIndex")(assertEditorBlankPayload(payload)),
     "blank.showSidebar": (payload) => requireHandler(handlers, "blank.showSidebar", "showLeftSidebar")(assertEditorBlankPayload(payload)),
     "tagBlank.refresh": (payload) => requireHandler(handlers, "tagBlank.refresh", "refreshTagFilter")(assertTagBlankPayload(payload)),

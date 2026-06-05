@@ -97,7 +97,7 @@ describe("ManualRelationsPanel", () => {
   it("shows an empty state when no note is selected", () => {
     renderPanel(null);
 
-    expect(screen.getByText("选择笔记以管理关系")).toBeInTheDocument();
+    expect(screen.getByText("选择笔记以管理关联")).toBeInTheDocument();
     expect(apiMocks.listRelations).not.toHaveBeenCalled();
   });
 

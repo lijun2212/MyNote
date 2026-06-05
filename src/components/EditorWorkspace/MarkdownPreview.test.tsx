@@ -922,4 +922,67 @@ describe("MarkdownPreview", () => {
       expect(useAppStore.getState().selectedNodePath).toBe(encodedNote.path);
     });
   });
+
+  it("navigates preview clicks to the anchored heading in another note", async () => {
+    const anchoredNote = makeNote({
+      id: "anchored-note",
+      path: "notes/target.md",
+      title: "Target",
+      content_hash: "target-hash",
+    });
+
+    invokeMock.mockImplementation(async (command, args) => {
+      if (command === "get_note_by_path") {
+        expect(args).toEqual({ path: anchoredNote.path });
+        return makeNoteDetail({
+          note: anchoredNote,
+          content: ["# 目标文档", "", "## 执行摘要", "内容"].join("\n"),
+        });
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    render(<MarkdownPreview content="[Open target](notes/target.md#执行摘要)" />);
+
+    fireEvent.click(screen.getByRole("link", { name: "Open target" }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_note_by_path", { path: anchoredNote.path });
+      expect(useEditorStore.getState().currentNote).toEqual(anchoredNote);
+      expect(useEditorStore.getState().searchNavigationTarget).toMatchObject({
+        note_path: anchoredNote.path,
+        line_start: 3,
+        line_end: 3,
+        match_text: "执行摘要",
+        source: "body",
+      });
+    });
+  });
+
+  it("navigates preview clicks to anchored headings in the current note", async () => {
+    useAppStore.setState({ selectedNodePath: "notes/current.md" });
+    useEditorStore.setState({
+      currentNote: makeNote({
+        id: "current-note",
+        path: "notes/current.md",
+        title: "Current",
+        content_hash: "current-hash",
+      }),
+      content: ["# 当前文档", "", "## 结论", "正文"].join("\n"),
+    });
+
+    render(<MarkdownPreview content="[Jump local](#结论)" />);
+
+    fireEvent.click(screen.getByRole("link", { name: "Jump local" }));
+
+    await waitFor(() => {
+      expect(useEditorStore.getState().searchNavigationTarget).toMatchObject({
+        note_path: "notes/current.md",
+        line_start: 3,
+        line_end: 3,
+        match_text: "结论",
+        source: "body",
+      });
+    });
+  });
 });
