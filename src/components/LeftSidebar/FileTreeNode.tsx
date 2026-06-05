@@ -43,6 +43,8 @@ interface Props {
   depth?: number;
   inheritedDirectoryColor?: string;
   onSelectFile: (node: NoteTreeNode) => void;
+  onHoverFile?: (node: NoteTreeNode, event: React.MouseEvent<HTMLDivElement>) => void;
+  onLeaveFile?: (node: NoteTreeNode) => void;
   selectedPath: string | null;
   dragOverPath: string | null;
   onStartDragFile: (node: NoteTreeNode, event: React.DragEvent<HTMLDivElement>) => void;
@@ -79,6 +81,8 @@ export function FileTreeNode({
   depth = 0,
   inheritedDirectoryColor = "gray",
   onSelectFile,
+  onHoverFile,
+  onLeaveFile,
   selectedPath,
   dragOverPath,
   onStartDragFile,
@@ -680,6 +684,8 @@ export function FileTreeNode({
                   depth={depth + 1}
                   inheritedDirectoryColor={directoryColor}
                   onSelectFile={onSelectFile}
+                  onHoverFile={onHoverFile}
+                  onLeaveFile={onLeaveFile}
                   selectedPath={selectedPath}
                   dragOverPath={dragOverPath}
                   onStartDragFile={onStartDragFile}
@@ -706,6 +712,8 @@ export function FileTreeNode({
       data-note-drag-source={node.path}
       data-note-drag-label={node.name}
       onClick={() => onSelectFile(node)}
+      onMouseEnter={(event) => onHoverFile?.(node, event)}
+      onMouseLeave={() => onLeaveFile?.(node)}
       onContextMenu={(event) => onContextMenu?.(node, event)}
       onDragStart={(event) => onStartDragFile(node, event)}
       onPointerDown={(event) => onStartPointerDragFile(node, event)}

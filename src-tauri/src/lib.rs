@@ -37,6 +37,8 @@ pub fn run() {
             commands::relation::delete_relation,
             commands::relation::list_relations,
             commands::search::search_notes,
+            commands::summary::generate_summary_candidate,
+            commands::summary::save_note_summary,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

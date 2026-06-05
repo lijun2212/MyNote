@@ -9,6 +9,18 @@ import { deferred, makeNote, makeSearchResult } from "../../test/testData";
 const capturedProps = vi.hoisted(() => ({
   editor: null as Record<string, unknown> | null,
   preview: null as Record<string, unknown> | null,
+  lookbackSummaryCard: null as Record<string, unknown> | null,
+}));
+
+const lookbackSummaryState = vi.hoisted(() => ({
+  candidate: "候选摘要",
+  savedSummary: "已保存摘要",
+  isGenerating: false,
+  isSaving: false,
+  error: null as string | null,
+  generateCandidate: vi.fn(),
+  saveCandidate: vi.fn(),
+  setCandidate: vi.fn(),
 }));
 
 const openNoteMock = vi.hoisted(() => vi.fn<(...args: unknown[]) => Promise<void>>());
@@ -39,6 +51,10 @@ vi.mock("../../hooks/useOpenNote", () => ({
   }),
 }));
 
+vi.mock("../../hooks/useLookbackSummary", () => ({
+  useLookbackSummary: () => lookbackSummaryState,
+}));
+
 vi.mock("./MarkdownEditor", () => ({
   MarkdownEditor: (props: Record<string, unknown>) => {
     capturedProps.editor = props;
@@ -53,13 +69,29 @@ vi.mock("./MarkdownPreview", () => ({
   },
 }));
 
+vi.mock("./LookbackSummaryCard", () => ({
+  LookbackSummaryCard: (props: Record<string, unknown>) => {
+    capturedProps.lookbackSummaryCard = props;
+    return <div data-testid="mock-lookback-summary-card">Mock lookback summary</div>;
+  },
+}));
+
 describe("EditorWorkspace", () => {
   beforeEach(() => {
     capturedProps.editor = null;
     capturedProps.preview = null;
+    capturedProps.lookbackSummaryCard = null;
     openNoteMock.mockReset();
     beginOpenNoteMock.mockClear();
     isOpenNoteRequestCurrentMock.mockClear();
+    lookbackSummaryState.candidate = "候选摘要";
+    lookbackSummaryState.savedSummary = "已保存摘要";
+    lookbackSummaryState.isGenerating = false;
+    lookbackSummaryState.isSaving = false;
+    lookbackSummaryState.error = null;
+    lookbackSummaryState.generateCandidate.mockReset();
+    lookbackSummaryState.saveCandidate.mockReset();
+    lookbackSummaryState.setCandidate.mockReset();
     useSearchSessionStore.getState().resetForTest();
     useEditorStore.setState({
       currentNote: makeNote({ path: "notes/demo.md", title: "Demo" }),
@@ -73,6 +105,25 @@ describe("EditorWorkspace", () => {
       searchNavigationTarget: null,
       tagNavigationTarget: null,
     });
+  });
+
+  it("mounts one lookback summary card below the title bar for the open note", () => {
+    render(<EditorWorkspace />);
+
+    const title = screen.getByText("Demo");
+    const card = screen.getByTestId("mock-lookback-summary-card");
+    const editor = screen.getByTestId("mock-editor");
+
+    expect(capturedProps.lookbackSummaryCard).toMatchObject({
+      savedSummary: "已保存摘要",
+      candidate: "候选摘要",
+      isGenerating: false,
+      isSaving: false,
+      error: null,
+    });
+    expect(screen.getAllByTestId("mock-lookback-summary-card")).toHaveLength(1);
+    expect(title.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(card.compareDocumentPosition(editor) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("passes only the latest navigation target to editor and preview", () => {

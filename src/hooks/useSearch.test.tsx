@@ -44,6 +44,7 @@ describe("useSearch", () => {
       makeSearchResult({
         note_id: "note2",
         title: "Second hit",
+        summary: "A concise lookback summary",
         line_start: 8,
         occurrence_order: 2,
         score: 0.25,
@@ -79,6 +80,7 @@ describe("useSearch", () => {
     await flushMicrotasks();
     expect(result.current.results).toEqual(searchResults);
     expect(result.current.results[0]).toMatchObject({
+      summary: "A concise lookback summary",
       line_start: 8,
       occurrence_order: 2,
       match_text: "note",

@@ -13,6 +13,7 @@ pub struct SearchResult {
     pub note_id: String,
     pub title: String,
     pub path: String,
+    pub summary: Option<String>,
     pub snippet: String,
     pub line_start: i64,
     pub line_end: i64,

@@ -160,6 +160,7 @@ interface SearchHitLocation {
 export interface SearchResult extends SearchHitLocation {
   title: string;
   path: string;
+  summary?: string | null;
   snippet: string;
   link_target_path?: string | null;
   link_target_title?: string | null;

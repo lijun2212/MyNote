@@ -1,11 +1,11 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FileTreePanel } from "./FileTreePanel";
 import { ContextMenuHost } from "../ContextMenu/ContextMenuHost";
 import { ContextMenuProvider } from "../ContextMenu/useContextMenu";
 import { useAppStore } from "../../store/useAppStore";
-import { makeKnowledgeBase } from "../../test/testData";
+import { makeKnowledgeBase, makeNoteDetail, makeNoteWithSummary } from "../../test/testData";
 import type { NoteTreeNode } from "../../types";
 
 function renderWithContextMenu() {
@@ -31,6 +31,7 @@ const hookMocks = vi.hoisted(() => ({
 const apiMocks = vi.hoisted(() => ({
   listNotesByTag: vi.fn(),
   getNoteTree: vi.fn(),
+  getNoteByPath: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({
@@ -76,7 +77,9 @@ describe("FileTreePanel", () => {
     hookMocks.openNote.mockReset();
     apiMocks.listNotesByTag.mockReset();
     apiMocks.getNoteTree.mockReset();
+    apiMocks.getNoteByPath.mockReset();
     apiMocks.listNotesByTag.mockResolvedValue([]);
+    apiMocks.getNoteByPath.mockResolvedValue(makeNoteDetail());
 
     const tree: NoteTreeNode[] = [
       {
@@ -228,6 +231,57 @@ describe("FileTreePanel", () => {
     expect(screen.getByRole("menuitem", { name: "打开笔记" })).toHaveAttribute("aria-disabled", "false");
     expect(screen.getByRole("menuitem", { name: "重命名" })).toHaveAttribute("aria-disabled", "true");
     expect(screen.getByRole("menuitem", { name: "移动" })).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("shows note summary in the file-tree hover tooltip", async () => {
+    const user = userEvent.setup();
+    apiMocks.getNoteByPath.mockResolvedValue(
+      makeNoteDetail({
+        note: makeNoteWithSummary("案例要点摘要", { path: "notes/法律/案例.md" }),
+        content: "# 案例\n\nBody",
+      }),
+    );
+
+    render(<FileTreePanel />);
+
+    await user.hover(screen.getByText("案例.md"));
+
+    expect(await screen.findByText("案例要点摘要")).toBeInTheDocument();
+  });
+
+  it("invalidates cached hover summaries after the tree refreshes", async () => {
+    const user = userEvent.setup();
+    apiMocks.getNoteByPath
+      .mockResolvedValueOnce(makeNoteDetail({
+        note: makeNoteWithSummary("", { path: "notes/法律/案例.md", summary: null }),
+        content: "# 案例\n\nBody",
+      }))
+      .mockResolvedValueOnce(makeNoteDetail({
+        note: makeNoteWithSummary("刷新后的摘要", { path: "notes/法律/案例.md" }),
+        content: "# 案例\n\nBody",
+      }));
+
+    render(<FileTreePanel />);
+
+    const noteRow = screen.getByText("案例.md");
+    await user.hover(noteRow);
+    await waitFor(() => expect(apiMocks.getNoteByPath).toHaveBeenCalledTimes(1));
+    await user.unhover(noteRow);
+
+    await user.hover(screen.getByText("案例.md"));
+    expect(apiMocks.getNoteByPath).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("刷新后的摘要")).not.toBeInTheDocument();
+    await user.unhover(screen.getByText("案例.md"));
+
+    act(() => {
+      const nextTree = structuredClone(useAppStore.getState().tree) as NoteTreeNode[];
+      useAppStore.setState({ tree: nextTree });
+    });
+
+    await user.hover(screen.getByText("案例.md"));
+
+    expect(await screen.findByText("刷新后的摘要")).toBeInTheDocument();
+    expect(apiMocks.getNoteByPath).toHaveBeenCalledTimes(2);
   });
 
   it("does not render top-level notebook icons or nested directory icons", () => {

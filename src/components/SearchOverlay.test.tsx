@@ -463,6 +463,21 @@ describe("SearchOverlay", () => {
     expect(screen.getByText("第 12 行")).toBeInTheDocument();
   });
 
+  it("renders lookback summary text when a search result includes it", async () => {
+    const user = userEvent.setup();
+    setSearchResults([
+      makeSearchResult({
+        title: "Demo",
+        summary: "这是一条用于快速回看的摘要",
+      }),
+    ]);
+
+    renderSearchOverlay();
+    await user.type(screen.getByPlaceholderText("输入关键词搜索笔记"), "demo");
+
+    expect(await screen.findByText("回看摘要：这是一条用于快速回看的摘要")).toBeInTheDocument();
+  });
+
   it("surfaces an explicit open-target action for link hits", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
