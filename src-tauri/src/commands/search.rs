@@ -18,6 +18,7 @@ struct CandidateNote {
     note_id: String,
     title: String,
     path: String,
+    summary: Option<String>,
     rank: f64,
 }
 
@@ -77,21 +78,21 @@ fn search_notes_in_conn(
 
     let mut stmt = conn.prepare(
         "WITH fts_matches AS (
-              SELECT n.id, n.title, n.path, bm25(note_fts) AS rank,
+                SELECT n.id, n.title, n.path, n.summary, bm25(note_fts) AS rank,
                   0 AS source_order
              FROM note_fts
              JOIN notes n ON note_fts.note_id = n.id AND n.deleted_at IS NULL
              WHERE note_fts MATCH ?1
          ),
          metadata_matches AS (
-              SELECT n.id, n.title, n.path, 0.0 AS rank,
+                SELECT n.id, n.title, n.path, n.summary, 0.0 AS rank,
                     1 AS source_order
              FROM notes n
              WHERE n.deleted_at IS NULL
                              AND n.title LIKE ?2 ESCAPE '\\'
                AND n.id NOT IN (SELECT id FROM fts_matches)
          )
-         SELECT id, title, path, rank
+            SELECT id, title, path, summary, rank
          FROM (
              SELECT * FROM fts_matches
              UNION ALL
@@ -109,7 +110,8 @@ fn search_notes_in_conn(
                 note_id: row.get(0)?,
                 title: row.get(1)?,
                 path: row.get(2)?,
-                    rank: row.get(3)?,
+                    summary: row.get(3)?,
+                    rank: row.get(4)?,
                 })
             },
         )?
@@ -146,6 +148,7 @@ fn expand_candidate_hits(
             note_id: candidate.note_id.clone(),
             title: candidate.title.clone(),
             path: candidate.path.clone(),
+            summary: candidate.summary.clone(),
             snippet: build_snippet(&candidate.title, occurrence.start, occurrence.end),
             line_start: title_line,
             line_end: title_line,
@@ -171,6 +174,7 @@ fn expand_candidate_hits(
                 note_id: candidate.note_id.clone(),
                 title: candidate.title.clone(),
                 path: candidate.path.clone(),
+                summary: candidate.summary.clone(),
                 snippet: build_snippet(line, occurrence.start, occurrence.end),
                 line_start: line_index as i64 + 1,
                 line_end: line_index as i64 + 1,
@@ -468,8 +472,8 @@ mod tests {
         }
         fs::write(&abs_path, file_content).unwrap();
         conn.execute(
-            "INSERT INTO notes (id, path, title, summary, deleted_at) VALUES (?1, ?2, ?3, NULL, NULL)",
-            rusqlite::params![id, path, title],
+            "INSERT INTO notes (id, path, title, summary, deleted_at) VALUES (?1, ?2, ?3, ?4, NULL)",
+            rusqlite::params![id, path, title, summary],
         )
         .unwrap();
         conn.execute(
@@ -541,7 +545,7 @@ mod tests {
             "n1",
             "notes/neutral.md",
             "Neutral Note",
-            "",
+            "一句话概括",
             "sqlite performance tuning",
             "# Neutral Note\n\nsqlite performance tuning\n",
         );
@@ -550,6 +554,7 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].note_id, "n1");
+        assert_eq!(results[0].summary.as_deref(), Some("一句话概括"));
     }
 
     #[test]

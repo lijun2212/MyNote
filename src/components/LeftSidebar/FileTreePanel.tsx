@@ -102,12 +102,17 @@ export function FileTreePanel() {
   const [renamingNotebookPath, setRenamingNotebookPath] = useState<string | null>(null);
   const [colorPickerNotebookPath, setColorPickerNotebookPath] = useState<string | null>(null);
   const [deleteConfirmNotebookPath, setDeleteConfirmNotebookPath] = useState<string | null>(null);
+  const [hoverSummary, setHoverSummary] = useState<{ path: string; summary: string; top: number } | null>(null);
   const [renameDrafts, setRenameDrafts] = useState<Record<string, string>>({});
   const [notebookErrors, setNotebookErrors] = useState<Record<string, string | null>>({});
   const pointerDragSourcePathRef = useRef<string | null>(null);
   const internalNoteDragRef = useRef<InternalNoteDrag | null>(null);
   const fullTreeRef = useRef<NoteTreeNode[]>(tree);
   const [importFiles, setImportFiles] = useState<string[] | null>(null);
+  const hoverPreviewRequestIdRef = useRef(0);
+  const hoveredNotePathRef = useRef<string | null>(null);
+  const hoverSummaryCacheRef = useRef<Map<string, string | null>>(new Map());
+  const treeScrollRef = useRef<HTMLDivElement | null>(null);
   const treeView = selectedTagIds.length > 0 ? tree : buildNotebookTreeView(tree);
   const notebookSourceTree = selectedTagIds.length > 0 ? fullTreeRef.current : tree;
 
@@ -147,11 +152,65 @@ export function FileTreePanel() {
     await navigator.clipboard.writeText(text);
   }
 
+  function clearHoverSummary(path?: string) {
+    if (!path || hoveredNotePathRef.current === path) {
+      hoveredNotePathRef.current = null;
+      setHoverSummary((current) => (path && current?.path !== path ? current : null));
+    }
+  }
+
+  function resetHoverSummaryCache() {
+    hoverSummaryCacheRef.current.clear();
+    clearHoverSummary();
+  }
+
+  async function handleNoteHover(node: NoteTreeNode, event: React.MouseEvent<HTMLDivElement>) {
+    if (node.is_dir) {
+      return;
+    }
+
+    const containerRect = treeScrollRef.current?.getBoundingClientRect();
+    const rowRect = event.currentTarget.getBoundingClientRect();
+    const top = containerRect ? Math.max(rowRect.top - containerRect.top - 4, 8) : 8;
+    const cachedSummary = hoverSummaryCacheRef.current.get(node.path);
+    hoveredNotePathRef.current = node.path;
+
+    if (cachedSummary !== undefined) {
+      setHoverSummary(cachedSummary ? { path: node.path, summary: cachedSummary, top } : null);
+      return;
+    }
+
+    const requestId = hoverPreviewRequestIdRef.current + 1;
+    hoverPreviewRequestIdRef.current = requestId;
+
+    try {
+      const detail = await api.getNoteByPath(node.path);
+      if (hoverPreviewRequestIdRef.current !== requestId || hoveredNotePathRef.current !== node.path) {
+        return;
+      }
+
+      const summary = detail.note.summary?.trim() ?? null;
+      hoverSummaryCacheRef.current.set(node.path, summary);
+      setHoverSummary(summary ? { path: node.path, summary, top } : null);
+    } catch {
+      if (hoverPreviewRequestIdRef.current !== requestId || hoveredNotePathRef.current !== node.path) {
+        return;
+      }
+
+      hoverSummaryCacheRef.current.set(node.path, null);
+      setHoverSummary(null);
+    }
+  }
+
   useEffect(() => {
     if (tree.some((node) => node.path === "notes" && node.is_dir)) {
       fullTreeRef.current = tree;
     }
   }, [tree]);
+
+  useEffect(() => {
+    resetHoverSummaryCache();
+  }, [tree, selectedTagIds]);
 
   useEffect(() => {
     if (selectedTagIds.length > 0) {
@@ -987,7 +1046,8 @@ export function FileTreePanel() {
         onContextMenu={handleBlankAreaContextMenu}
         onPointerUp={handlePointerDragEnd}
         onPointerCancel={handlePointerDragEnd}
-        style={{ flex: 1, overflowY: "auto", paddingTop: 4 }}
+        ref={treeScrollRef}
+        style={{ flex: 1, overflowY: "auto", paddingTop: 4, position: "relative" }}
       >
         {treeView.map((node) => {
           const isNotebook = node.is_dir && isTopLevelNotebookPath(node.path);
@@ -1000,6 +1060,8 @@ export function FileTreePanel() {
               node={node}
               depth={0}
               isNotebook={isNotebook}
+              onHoverFile={handleNoteHover}
+              onLeaveFile={(note) => clearHoverSummary(note.path)}
               isRenamingNotebook={renamingNotebookPath === node.path}
               isPickingNotebookColor={colorPickerNotebookPath === node.path}
               isConfirmingNotebookDelete={deleteConfirmNotebookPath === node.path}
@@ -1098,6 +1160,30 @@ export function FileTreePanel() {
             />
           );
         })}
+        {hoverSummary && (
+          <div
+            role="status"
+            aria-label={`笔记摘要预览 ${hoverSummary.path}`}
+            style={{
+              position: "absolute",
+              top: hoverSummary.top,
+              right: 8,
+              width: 220,
+              padding: "10px 12px",
+              borderRadius: 10,
+              border: "1px solid #f3d5a5",
+              background: "rgba(255, 251, 235, 0.98)",
+              boxShadow: "0 8px 24px rgba(15, 23, 42, 0.12)",
+              color: "#7c2d12",
+              fontSize: 12,
+              lineHeight: 1.5,
+              pointerEvents: "none",
+              zIndex: 1,
+            }}
+          >
+            {hoverSummary.summary}
+          </div>
+        )}
       </div>
 
       {importFiles && (

@@ -34,6 +34,10 @@ export function makeNote(overrides: Partial<Note> = {}): Note {
   };
 }
 
+export function makeNoteWithSummary(summary = "已保存摘要", overrides: Partial<Note> = {}): Note {
+  return makeNote({ summary, ...overrides });
+}
+
 export function makeNoteDetail(overrides: Partial<NoteDetail> = {}): NoteDetail {
   const note = overrides.note ?? makeNote();
   return { note, content: "# Note 1\n\nBody", ...overrides };
@@ -44,6 +48,7 @@ export function makeSearchResult(overrides: Partial<SearchResult> = {}): SearchR
     note_id: "note1",
     title: "Note 1",
     path: "notes/note1.md",
+    summary: null,
     snippet: "A <mark>note</mark> result",
     line_start: 3,
     line_end: 3,

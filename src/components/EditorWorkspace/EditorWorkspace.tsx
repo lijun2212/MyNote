@@ -6,7 +6,9 @@ import { MarkdownEditor } from "./MarkdownEditor";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { useAutoSave } from "../../hooks/useAutoSave";
 import { useEditorSplitResize } from "../../hooks/useEditorSplitResize";
+import { useLookbackSummary } from "../../hooks/useLookbackSummary";
 import { SearchSessionBar } from "./SearchSessionBar";
+import { LookbackSummaryCard } from "./LookbackSummaryCard";
 import type { SourceLineSyncSignal, SourceLineSyncSource } from "./sourceLineSync";
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -58,6 +60,16 @@ export function EditorWorkspace() {
     resize,
     stopResize,
   } = useEditorSplitResize({ containerRef: splitContainerRef });
+  const {
+    candidate,
+    savedSummary,
+    isGenerating,
+    isSaving,
+    error,
+    generateCandidate,
+    saveCandidate,
+    setCandidate,
+  } = useLookbackSummary();
 
   const handleChange = useCallback((newContent: string) => {
     setContent(newContent);
@@ -225,6 +237,16 @@ export function EditorWorkspace() {
           {showPreview ? "隐藏预览" : "显示预览"}
         </button>
       </div>
+      <LookbackSummaryCard
+        savedSummary={savedSummary}
+        candidate={candidate}
+        isGenerating={isGenerating}
+        isSaving={isSaving}
+        error={error}
+        onCandidateChange={setCandidate}
+        onGenerate={generateCandidate}
+        onSave={saveCandidate}
+      />
       <div
         ref={splitContainerRef}
         style={{

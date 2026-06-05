@@ -431,6 +431,7 @@ export function SearchOverlay({ onClose }: SearchOverlayProps) {
               </div>
               <div style={styles.resultMeta}>{getSearchSourceLabel(r)}</div>
               <div style={styles.resultSnippet}>{renderSnippet(r.snippet)}</div>
+              {r.summary && <div style={styles.resultSummary}>回看摘要：{r.summary}</div>}
               <div style={styles.resultPath}>{r.path}</div>
             </div>
           ))}
@@ -626,6 +627,11 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 12,
     color: "#555",
     marginBottom: 2,
+  },
+  resultSummary: {
+    fontSize: 12,
+    color: "#9a6700",
+    marginBottom: 4,
   },
   resultPath: {
     fontSize: 11,

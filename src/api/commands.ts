@@ -74,6 +74,12 @@ export const api = {
   getNoteByTitle: (title: string) =>
     invoke<Note | null>("get_note_by_title", { title }),
 
+  generateSummaryCandidate: (path: string) =>
+    invoke<string>("generate_summary_candidate", { path }),
+
+  saveNoteSummary: (path: string, summary: string) =>
+    invoke<Note>("save_note_summary", { path, summary }),
+
   searchNotes: (query: string, kbId: string) =>
     invoke<SearchResult[]>("search_notes", { query, kbId }),
 

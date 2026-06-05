@@ -3,12 +3,19 @@ use crate::error::{AppError, AppResult};
 
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize, Clone)]
 pub struct FrontMatter {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub aliases: Option<Vec<String>>,
 }
 
@@ -124,6 +131,10 @@ pub fn parse_note(content: &str, filename_stem: &str) -> AppResult<ParsedNote> {
 /// 将 Front Matter 序列化并与正文重新组合
 pub fn render_note(fm: &FrontMatter, body: &str) -> AppResult<String> {
     let fm_str = serde_yaml::to_string(fm).map_err(|e| AppError::Parse(e.to_string()))?;
+    if fm_str.trim() == "{}" {
+        return Ok(body.to_string());
+    }
+
     Ok(format!("---\n{}---\n\n{}", fm_str, body))
 }
 
