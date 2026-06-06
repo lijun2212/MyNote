@@ -27,6 +27,9 @@ pub struct ParsedNote {
     pub word_count: usize,
 }
 
+const LOOKBACK_SUMMARY_LEGACY_TITLE_LINE: &str = "> **回看摘要**";
+const LOOKBACK_SUMMARY_PREFIX: &str = "> 摘要：";
+
 /// 分离 Front Matter 和正文
 pub fn split_front_matter(content: &str) -> (Option<&str>, &str) {
     if !content.starts_with("---") {
@@ -106,11 +109,16 @@ pub fn strip_markdown(text: &str) -> String {
 /// 完整解析一篇笔记内容
 pub fn parse_note(content: &str, filename_stem: &str) -> AppResult<ParsedNote> {
     let (fm_str, body) = split_front_matter(content);
-    let front_matter = if let Some(fm) = fm_str {
+    let mut front_matter = if let Some(fm) = fm_str {
         parse_front_matter(fm)?
     } else {
         FrontMatter::default()
     };
+
+    let summary_in_body = extract_lookback_summary(body);
+    if summary_in_body.is_some() {
+        front_matter.summary = summary_in_body;
+    }
 
     let title = front_matter
         .title
@@ -126,6 +134,133 @@ pub fn parse_note(content: &str, filename_stem: &str) -> AppResult<ParsedNote> {
         title,
         word_count,
     })
+}
+
+fn find_lookback_summary_block_lines(body: &str) -> Option<(usize, usize, String)> {
+    let lines: Vec<&str> = body.lines().collect();
+
+    for i in 0..lines.len() {
+        let current = lines[i].trim();
+        let (mut j, mut content_lines): (usize, Vec<String>) = if current == LOOKBACK_SUMMARY_LEGACY_TITLE_LINE {
+            (i + 1, Vec::new())
+        } else if current.starts_with(LOOKBACK_SUMMARY_PREFIX) || current.starts_with(">摘要：") {
+            let inline_summary = if let Some(rest) = current.strip_prefix(LOOKBACK_SUMMARY_PREFIX) {
+                rest.to_string()
+            } else {
+                current
+                    .trim_start_matches('>')
+                    .trim_start()
+                    .trim_start_matches("摘要：")
+                    .to_string()
+            };
+            (i + 1, vec![inline_summary])
+        } else {
+            continue;
+        };
+
+        while j < lines.len() {
+            let trimmed = lines[j].trim_start();
+            if let Some(content) = trimmed.strip_prefix('>') {
+                content_lines.push(content.trim_start().to_string());
+                j += 1;
+                continue;
+            }
+
+            break;
+        }
+
+        let mut block_end = j;
+        if block_end < lines.len() && lines[block_end].trim().is_empty() {
+            block_end += 1;
+        }
+
+        let summary = content_lines
+            .join("\n")
+            .trim()
+            .to_string();
+
+        return Some((i, block_end, summary));
+    }
+
+    None
+}
+
+pub fn extract_lookback_summary(body: &str) -> Option<String> {
+    let (_, _, summary) = find_lookback_summary_block_lines(body)?;
+    if summary.is_empty() {
+        None
+    } else {
+        Some(summary)
+    }
+}
+
+pub fn remove_lookback_summary_block(body: &str) -> String {
+    let lines: Vec<&str> = body.lines().collect();
+    let Some((start, end, _)) = find_lookback_summary_block_lines(body) else {
+        return body.to_string();
+    };
+
+    let kept = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            if index >= start && index < end {
+                None
+            } else {
+                Some((*line).to_string())
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    kept.trim().to_string()
+}
+
+pub fn upsert_lookback_summary_block(body: &str, summary: &str) -> String {
+    let cleaned_body = remove_lookback_summary_block(body);
+    let trimmed_summary = summary.trim();
+    if trimmed_summary.is_empty() {
+        return cleaned_body;
+    }
+
+    let summary_lines = trimmed_summary.lines().collect::<Vec<_>>();
+    let mut summary_block_lines = Vec::new();
+    if let Some(first_line) = summary_lines.first() {
+        summary_block_lines.push(format!("> 摘要：{}", first_line.trim_end()));
+        summary_block_lines.extend(
+            summary_lines
+                .iter()
+                .skip(1)
+                .map(|line| format!("> {}", line.trim_end())),
+        );
+    }
+    let summary_block = summary_block_lines.join("\n");
+
+    let lines: Vec<&str> = cleaned_body.lines().collect();
+    let h1_index = lines
+        .iter()
+        .position(|line| line.trim_start().starts_with("# "));
+
+    if let Some(index) = h1_index {
+        let mut before = lines[..=index].join("\n");
+        let after = lines[index + 1..].join("\n").trim().to_string();
+
+        if !before.ends_with("\n\n") {
+            before.push_str("\n\n");
+        }
+
+        if after.is_empty() {
+            return format!("{}{}", before, summary_block);
+        }
+
+        return format!("{}{}\n\n{}", before, summary_block, after);
+    }
+
+    if cleaned_body.trim().is_empty() {
+        summary_block
+    } else {
+        format!("{}\n\n{}", summary_block, cleaned_body.trim())
+    }
 }
 
 /// 将 Front Matter 序列化并与正文重新组合
@@ -829,5 +964,69 @@ mod tests {
         assert_eq!(links.len(), 1);
         assert_eq!(links[0].target_raw, "真实链接");
         assert_eq!(links[0].link_type, "wiki");
+    }
+
+    #[test]
+    fn test_extract_lookback_summary_from_body_block() {
+        let body = [
+            "# 标题",
+            "",
+            "> 摘要：第一行摘要",
+            "> 第二行摘要",
+            "",
+            "正文内容",
+        ]
+        .join("\n");
+
+        let summary = extract_lookback_summary(&body);
+        assert_eq!(summary.as_deref(), Some("第一行摘要\n第二行摘要"));
+    }
+
+    #[test]
+    fn test_upsert_lookback_summary_block_places_block_below_h1() {
+        let body = ["# 标题", "", "正文第一段"].join("\n");
+
+        let updated = upsert_lookback_summary_block(&body, "新的摘要");
+
+        let expected = [
+            "# 标题",
+            "",
+            "> 摘要：新的摘要",
+            "",
+            "正文第一段",
+        ]
+        .join("\n");
+        assert_eq!(updated, expected);
+    }
+
+    #[test]
+    fn test_remove_lookback_summary_block_removes_visible_summary_section() {
+        let body = [
+            "# 标题",
+            "",
+            "> 摘要：将被清除",
+            "",
+            "正文内容",
+        ]
+        .join("\n");
+
+        let updated = remove_lookback_summary_block(&body);
+        assert_eq!(updated, "# 标题\n\n正文内容");
+    }
+
+    #[test]
+    fn test_extract_lookback_summary_from_legacy_block() {
+        let body = [
+            "# 标题",
+            "",
+            "> **回看摘要**",
+            "> 兼容旧摘要",
+            "",
+            "正文内容",
+        ]
+        .join("\n");
+
+        let summary = extract_lookback_summary(&body);
+        assert_eq!(summary.as_deref(), Some("兼容旧摘要"));
     }
 }

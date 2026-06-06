@@ -140,6 +140,8 @@ function collectEnabledActionIds() {
     leftSidebarVisible: true,
     rightSidebarVisible: true,
     editorMode: "split",
+    hasDefaultAiProfile: true,
+    autoSummaryAgentEnabled: true,
   }).flatMap((item) => item.children ?? []).filter((item) => item.enabled !== false).map((item) => item.id);
 
   const notebookActions = buildContextMenuSchema(notebookPayload)
@@ -215,6 +217,8 @@ describe("menuSchema", () => {
       leftSidebarVisible: true,
       rightSidebarVisible: false,
       editorMode: "split",
+      hasDefaultAiProfile: false,
+      autoSummaryAgentEnabled: false,
     });
 
     expect(schema.map((item) => item.id)).toEqual([
@@ -222,6 +226,7 @@ describe("menuSchema", () => {
       "edit",
       "view",
       "note",
+      "ai",
       "help",
     ]);
   });
@@ -233,6 +238,8 @@ describe("menuSchema", () => {
       leftSidebarVisible: true,
       rightSidebarVisible: true,
       editorMode: "editor",
+      hasDefaultAiProfile: false,
+      autoSummaryAgentEnabled: false,
     });
 
     const viewMenu = schema.find((item) => item.id === "view");
@@ -247,6 +254,8 @@ describe("menuSchema", () => {
       leftSidebarVisible: true,
       rightSidebarVisible: false,
       editorMode: "editor",
+      hasDefaultAiProfile: false,
+      autoSummaryAgentEnabled: false,
     });
     const splitSchema = buildAppMenuSchema({
       hasKnowledgeBase: true,
@@ -254,6 +263,8 @@ describe("menuSchema", () => {
       leftSidebarVisible: true,
       rightSidebarVisible: false,
       editorMode: "split",
+      hasDefaultAiProfile: false,
+      autoSummaryAgentEnabled: false,
     });
 
     const editorViewMenu = editorSchema.find((item) => item.id === "view");
@@ -263,6 +274,41 @@ describe("menuSchema", () => {
     expect(editorViewMenu?.children?.find((item) => item.id === "view.split")?.checked).toBe(false);
     expect(splitViewMenu?.children?.find((item) => item.id === "view.editorOnly")?.checked).toBe(false);
     expect(splitViewMenu?.children?.find((item) => item.id === "view.split")?.checked).toBe(true);
+  });
+
+  it("exposes AI settings actions and reflects the auto-summary toggle state", () => {
+    const enabledSchema = buildAppMenuSchema({
+      hasKnowledgeBase: true,
+      hasCurrentNote: true,
+      leftSidebarVisible: true,
+      rightSidebarVisible: false,
+      editorMode: "split",
+      hasDefaultAiProfile: true,
+      autoSummaryAgentEnabled: true,
+    });
+    const disabledSchema = buildAppMenuSchema({
+      hasKnowledgeBase: true,
+      hasCurrentNote: true,
+      leftSidebarVisible: true,
+      rightSidebarVisible: false,
+      editorMode: "split",
+      hasDefaultAiProfile: false,
+      autoSummaryAgentEnabled: false,
+    });
+
+    const enabledAiMenu = enabledSchema.find((item) => item.id === "ai");
+    const disabledAiMenu = disabledSchema.find((item) => item.id === "ai");
+
+    expect(enabledAiMenu?.children?.map((item) => item.id)).toEqual([
+      "ai.settings",
+      "ai.testConnection",
+      "ai.toggleAutoSummaryAgent",
+    ]);
+    expect(enabledAiMenu?.children?.find((item) => item.id === "ai.testConnection")?.enabled).toBe(true);
+    expect(enabledAiMenu?.children?.find((item) => item.id === "ai.toggleAutoSummaryAgent")?.checked).toBe(true);
+    expect(disabledAiMenu?.children?.find((item) => item.id === "ai.testConnection")?.enabled).toBe(false);
+    expect(disabledAiMenu?.children?.find((item) => item.id === "ai.toggleAutoSummaryAgent")?.enabled).toBe(false);
+    expect(disabledAiMenu?.children?.find((item) => item.id === "ai.toggleAutoSummaryAgent")?.checked).toBe(false);
   });
 
   it("builds notebook and note context menus as different object menus", () => {

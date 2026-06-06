@@ -16,6 +16,13 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::knowledge_base::create_knowledge_base,
             commands::knowledge_base::open_knowledge_base,
+            commands::ai::get_ai_settings,
+            commands::ai::upsert_ai_profile,
+            commands::ai::save_ai_settings,
+            commands::ai::set_ai_profile_secret,
+            commands::ai::has_ai_profile_secret,
+            commands::ai::test_ai_profile,
+            commands::ai::test_ai_profile_input,
             commands::note::create_note,
             commands::note::create_notebook,
             commands::note::get_note_by_path,
@@ -38,6 +45,7 @@ pub fn run() {
             commands::relation::list_relations,
             commands::search::search_notes,
             commands::summary::generate_summary_candidate,
+            commands::summary::generate_summary_candidate_with_ai,
             commands::summary::save_note_summary,
         ])
         .run(tauri::generate_context!())

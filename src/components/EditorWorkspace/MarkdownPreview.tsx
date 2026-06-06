@@ -1063,6 +1063,17 @@ export function MarkdownPreview({
         .markdown-preview-content pre {
           margin-block: 0.65em;
         }
+        .markdown-preview-content blockquote {
+          margin-inline: 0;
+          padding: 0.55em 0.9em;
+          border-left: 4px solid #f59e0b;
+          background: #fffbeb;
+          color: #7c2d12;
+          border-radius: 0 8px 8px 0;
+        }
+        .markdown-preview-content blockquote p {
+          margin-block: 0.2em;
+        }
         .markdown-preview-content ul,
         .markdown-preview-content ol {
           padding-left: 2em;

@@ -29,6 +29,7 @@ export function LookbackSummaryCard({
   onSave,
 }: LookbackSummaryCardProps) {
   const hasSavedSummary = savedSummary !== null;
+  const [isExpanded, setIsExpanded] = useState(false);
   const [isEditing, setIsEditing] = useState(!hasSavedSummary);
   const canSave = !isSaving && (candidate.trim().length > 0 || hasSavedSummary);
 
@@ -53,6 +54,10 @@ export function LookbackSummaryCard({
     void onGenerate();
   }
 
+  const helperText = hasSavedSummary && !isEditing
+    ? "已保存摘要默认只读，可按需进入编辑或重新生成"
+    : "可手动录入、生成并保存候选摘要内容";
+
   return (
     <section
       aria-label="回看摘要"
@@ -70,11 +75,26 @@ export function LookbackSummaryCard({
         <div>
           <div style={{ fontSize: 13, fontWeight: 600, color: "#243041" }}>回看摘要</div>
           <div style={{ fontSize: 11, color: "#6f7c8b", marginTop: 2 }}>
-            {hasSavedSummary && !isEditing ? "已保存摘要默认只读，可按需进入编辑或重新生成" : "可手动录入、生成并保存候选摘要内容"}
+            {isExpanded ? helperText : "按需展开生成、编辑或保存摘要内容"}
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-          {hasSavedSummary && !isEditing ? (
+          <button
+            type="button"
+            onClick={() => setIsExpanded((current) => !current)}
+            style={{
+              fontSize: 12,
+              padding: "4px 10px",
+              cursor: "pointer",
+              borderRadius: 4,
+              border: "1px solid #c6cfdb",
+              background: "#ffffff",
+              color: "#243041",
+            }}
+          >
+            {isExpanded ? "隐藏摘要" : "展开摘要"}
+          </button>
+          {isExpanded && hasSavedSummary && !isEditing ? (
             <>
               <button
                 type="button"
@@ -108,7 +128,7 @@ export function LookbackSummaryCard({
                 {isGenerating ? "生成中..." : "重新生成"}
               </button>
             </>
-          ) : (
+          ) : isExpanded ? (
             <>
               <button
                 type="button"
@@ -143,11 +163,11 @@ export function LookbackSummaryCard({
                 {isSaving ? "保存中..." : "保存摘要"}
               </button>
             </>
-          )}
+          ) : null}
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: hasSavedSummary && isEditing ? "minmax(0, 1fr) minmax(0, 1fr)" : "minmax(0, 1fr)", gap: 12 }}>
+      {isExpanded && <div style={{ display: "grid", gridTemplateColumns: hasSavedSummary && isEditing ? "minmax(0, 1fr) minmax(0, 1fr)" : "minmax(0, 1fr)", gap: 12 }}>
         {hasSavedSummary && (
           <div style={{ minWidth: 0 }}>
             <div style={sectionLabelStyle}>已保存</div>
@@ -196,9 +216,9 @@ export function LookbackSummaryCard({
             />
           </label>
         )}
-      </div>
+      </div>}
 
-      {error && (
+      {isExpanded && error && (
         <div role="alert" style={{ fontSize: 12, color: "#b42318" }}>
           {error}
         </div>

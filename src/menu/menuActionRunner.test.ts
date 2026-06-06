@@ -8,6 +8,9 @@ function createHandlers() {
     createNotebook: vi.fn().mockResolvedValue(undefined),
     importNote: vi.fn().mockResolvedValue(undefined),
     openSearch: vi.fn().mockResolvedValue(undefined),
+    openAiSettings: vi.fn().mockResolvedValue(undefined),
+    testAiConnection: vi.fn().mockResolvedValue(undefined),
+    toggleAutoSummaryAgent: vi.fn().mockResolvedValue(undefined),
     toggleLeftSidebar: vi.fn().mockResolvedValue(undefined),
     toggleRightSidebar: vi.fn().mockResolvedValue(undefined),
     setEditorMode: vi.fn().mockResolvedValue(undefined),
@@ -186,6 +189,19 @@ describe("menuActionRunner", () => {
 
     await expect(runner.run("view.editorOnly")).resolves.toBe(true);
     expect(handlers.setEditorMode).toHaveBeenCalledWith("editor");
+  });
+
+  it("routes AI app-menu actions to the provided handlers", async () => {
+    const handlers = createHandlers();
+    const runner = createMenuActionRunner(handlers);
+
+    await expect(runner.run("ai.settings")).resolves.toBe(true);
+    await expect(runner.run("ai.testConnection")).resolves.toBe(true);
+    await expect(runner.run("ai.toggleAutoSummaryAgent")).resolves.toBe(true);
+
+    expect(handlers.openAiSettings).toHaveBeenCalledOnce();
+    expect(handlers.testAiConnection).toHaveBeenCalledOnce();
+    expect(handlers.toggleAutoSummaryAgent).toHaveBeenCalledOnce();
   });
 
   it("throws when a note-only action receives a non-note payload", async () => {

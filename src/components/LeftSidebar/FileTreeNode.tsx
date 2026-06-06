@@ -43,8 +43,6 @@ interface Props {
   depth?: number;
   inheritedDirectoryColor?: string;
   onSelectFile: (node: NoteTreeNode) => void;
-  onHoverFile?: (node: NoteTreeNode, event: React.MouseEvent<HTMLDivElement>) => void;
-  onLeaveFile?: (node: NoteTreeNode) => void;
   selectedPath: string | null;
   dragOverPath: string | null;
   onStartDragFile: (node: NoteTreeNode, event: React.DragEvent<HTMLDivElement>) => void;
@@ -81,8 +79,6 @@ export function FileTreeNode({
   depth = 0,
   inheritedDirectoryColor = "gray",
   onSelectFile,
-  onHoverFile,
-  onLeaveFile,
   selectedPath,
   dragOverPath,
   onStartDragFile,
@@ -684,8 +680,6 @@ export function FileTreeNode({
                   depth={depth + 1}
                   inheritedDirectoryColor={directoryColor}
                   onSelectFile={onSelectFile}
-                  onHoverFile={onHoverFile}
-                  onLeaveFile={onLeaveFile}
                   selectedPath={selectedPath}
                   dragOverPath={dragOverPath}
                   onStartDragFile={onStartDragFile}
@@ -712,8 +706,6 @@ export function FileTreeNode({
       data-note-drag-source={node.path}
       data-note-drag-label={node.name}
       onClick={() => onSelectFile(node)}
-      onMouseEnter={(event) => onHoverFile?.(node, event)}
-      onMouseLeave={() => onLeaveFile?.(node)}
       onContextMenu={(event) => onContextMenu?.(node, event)}
       onDragStart={(event) => onStartDragFile(node, event)}
       onPointerDown={(event) => onStartPointerDragFile(node, event)}
@@ -728,8 +720,31 @@ export function FileTreeNode({
         color: isSelected ? "#1d4ed8" : "#333",
         borderRadius: 4,
         userSelect: "none",
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
       }}
     >
+      {node.has_summary && (
+        <span
+          data-testid={`summary-badge:${node.path}`}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flex: "0 0 auto",
+            padding: "1px 6px",
+            borderRadius: 999,
+            background: "#fff1f2",
+            color: "#be123c",
+            fontSize: 11,
+            fontWeight: 600,
+            lineHeight: 1.4,
+          }}
+        >
+          摘要
+        </span>
+      )}
       {node.name}
     </div>
   );

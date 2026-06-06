@@ -24,11 +24,85 @@ export interface NoteDetail {
   content: string;
 }
 
+export type AiProviderKind = "open_ai_compatible" | "anthropic";
+
+export interface AiProfile {
+  id: string;
+  name: string;
+  provider: AiProviderKind;
+  model: string;
+  base_url: string | null;
+  max_tokens: number | null;
+  temperature: number | null;
+  enabled: boolean;
+}
+
+export interface AiProfileInput {
+  id?: string | null;
+  name: string;
+  provider: AiProviderKind;
+  model: string;
+  base_url?: string | null;
+  max_tokens?: number | null;
+  temperature?: number | null;
+  enabled: boolean;
+}
+
+export interface AiSettings {
+  enabled: boolean;
+  default_profile_id: string | null;
+  profiles: AiProfile[];
+}
+
+export type AiProfileTestStatus =
+  | "ok"
+  | "failed"
+  | "missing_secret"
+  | "keychain_unavailable"
+  | "not_implemented";
+
+export type AiProfileTestErrorKind =
+  | "provider_unavailable"
+  | "invalid_configuration"
+  | "invalid_response"
+  | "unknown";
+
+export interface AiProfileTestResult {
+  success: boolean;
+  status: AiProfileTestStatus;
+  message: string;
+  error_kind?: AiProfileTestErrorKind | null;
+  retryable?: boolean | null;
+  text?: string | null;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  total_tokens?: number | null;
+  latency_ms?: number | null;
+}
+
+export interface AiProviderTrace {
+  profile_id?: string | null;
+  provider?: AiProviderKind | null;
+  model?: string | null;
+  latency_ms?: number | null;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  total_tokens?: number | null;
+  error?: string | null;
+}
+
+export interface SummaryGenerationResult {
+  summary: string;
+  used_fallback: boolean;
+  provider_trace?: AiProviderTrace | null;
+}
+
 export interface NoteTreeNode {
   id: string | null;
   name: string;
   path: string;
   is_dir: boolean;
+  has_summary?: boolean;
   notebook_icon?: string | null;
   notebook_color?: string | null;
   children: NoteTreeNode[];

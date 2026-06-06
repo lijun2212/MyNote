@@ -76,12 +76,12 @@ pub async fn move_note(
         source_path, target_directory
     );
 
-    let root_guard = state.kb_root.lock().unwrap();
+    let root_guard = state.kb_root_guard();
     let root = root_guard
         .as_ref()
         .ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?
         .clone();
-    let db_guard = state.db.lock().unwrap();
+    let db_guard = state.db_guard();
     let conn = db_guard
         .as_ref()
         .ok_or_else(|| AppError::InvalidInput("No database open".into()))?;

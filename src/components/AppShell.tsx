@@ -3,16 +3,18 @@ import { StatusBar } from "./StatusBar";
 import { LeftSidebar } from "./LeftSidebar/LeftSidebar";
 import { EditorWorkspace } from "./EditorWorkspace/EditorWorkspace";
 import { RightSidebar } from "./RightSidebar/RightSidebar";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import type { MenuActionId } from "../menu/menuIds";
 import { buildAppMenuSchema } from "../menu/menuSchema";
 import { createMenuActionRunner } from "../menu/menuActionRunner";
 import { useAppMenu } from "../menu/useAppMenu";
 import { useSidebarResize } from "../hooks/useSidebarResize";
 import { useAppStore } from "../store/useAppStore";
+import { useAiSettingsStore } from "../store/useAiSettingsStore";
 import { useEditorStore } from "../store/useEditorStore";
 import { ContextMenuHost } from "./ContextMenu/ContextMenuHost";
 import { ContextMenuProvider } from "./ContextMenu/useContextMenu";
+import { AiSettingsDialog } from "./Settings/AiSettingsDialog";
 import "../styles/layout.css";
 
 const OPEN_SEARCH_EVENT = "mynote:open-search";
@@ -36,6 +38,10 @@ async function writeClipboardText(text: string) {
   await navigator.clipboard.writeText(text);
 }
 
+function ignoreAsyncError() {
+  return undefined;
+}
+
 export function AppShell() {
   const kb = useAppStore((s) => s.kb);
   const leftSidebarVisible = useAppStore((s) => s.leftSidebarVisible);
@@ -48,6 +54,16 @@ export function AppShell() {
   const currentNote = useEditorStore((s) => s.currentNote);
   const editorMode = useEditorStore((s) => s.getEditorMode());
   const setEditorMode = useEditorStore((s) => s.setEditorMode);
+  const aiSettings = useAiSettingsStore((s) => s.settings);
+  const defaultAiProfile = useAiSettingsStore((s) => s.defaultProfile);
+  const loadAiSettings = useAiSettingsStore((s) => s.loadSettings);
+  const openAiSettings = useAiSettingsStore((s) => s.openDialog);
+  const testAiConnection = useAiSettingsStore((s) => s.testDefaultProfile);
+  const toggleAutoSummaryAgent = useAiSettingsStore((s) => s.toggleAutoSummaryAgent);
+
+  useEffect(() => {
+    void loadAiSettings().catch(() => undefined);
+  }, [loadAiSettings]);
 
   const left = useSidebarResize({
     side: "left",
@@ -74,13 +90,18 @@ export function AppShell() {
     leftSidebarVisible,
     rightSidebarVisible,
     editorMode,
-  }), [currentNote, editorMode, kb, leftSidebarVisible, rightSidebarVisible]);
+    hasDefaultAiProfile: Boolean(defaultAiProfile),
+    autoSummaryAgentEnabled: Boolean(aiSettings?.enabled && defaultAiProfile?.enabled),
+  }), [aiSettings?.enabled, currentNote, defaultAiProfile, editorMode, kb, leftSidebarVisible, rightSidebarVisible]);
 
   const menuRunner = useMemo(() => createMenuActionRunner({
     createNote: () => dispatchWindowEvent(new Event(REQUEST_CREATE_NOTE_EVENT)),
     createNotebook: () => dispatchWindowEvent(new Event(REQUEST_CREATE_NOTEBOOK_EVENT)),
     importNote: () => dispatchWindowEvent(new Event(REQUEST_IMPORT_NOTE_EVENT)),
     openSearch: () => dispatchWindowEvent(new Event(OPEN_SEARCH_EVENT)),
+    openAiSettings: () => openAiSettings(),
+    testAiConnection: () => testAiConnection().catch(ignoreAsyncError),
+    toggleAutoSummaryAgent: () => toggleAutoSummaryAgent().catch(ignoreAsyncError),
     toggleLeftSidebar: () => toggleLeftSidebar(),
     toggleRightSidebar: () => toggleRightSidebar(),
     setEditorMode: (mode) => setEditorMode(mode),
@@ -111,7 +132,17 @@ export function AppShell() {
     showLeftSidebar: () => setLeftSidebarVisible(true),
     openShortcuts: () => dispatchWindowEvent(new Event(REQUEST_SHORTCUTS_EVENT)),
     openAbout: () => dispatchWindowEvent(new Event(REQUEST_ABOUT_EVENT)),
-  }), [currentNote, refreshTree, setEditorMode, setLeftSidebarVisible, toggleLeftSidebar, toggleRightSidebar]);
+  }), [
+    currentNote,
+    openAiSettings,
+    refreshTree,
+    setEditorMode,
+    setLeftSidebarVisible,
+    testAiConnection,
+    toggleAutoSummaryAgent,
+    toggleLeftSidebar,
+    toggleRightSidebar,
+  ]);
 
   const runMenuAction = useMemo(
     () => (actionId: MenuActionId) => {
@@ -187,6 +218,7 @@ export function AppShell() {
           </div>
         </div>
         <StatusBar />
+        <AiSettingsDialog />
         <ContextMenuHost />
       </div>
     </ContextMenuProvider>

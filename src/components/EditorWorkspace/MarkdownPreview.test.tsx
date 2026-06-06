@@ -178,6 +178,23 @@ describe("MarkdownPreview", () => {
     expect(container.querySelector("p")).toHaveStyle({ marginBlock: "0.85em" });
   });
 
+  it("renders quote syntax as a styled blockquote", () => {
+    const { container } = render(
+      <MarkdownPreview
+        content={[
+          "# 标题",
+          "",
+          "> 摘要：这是可见摘要",
+        ].join("\n")}
+      />,
+    );
+
+    const quote = container.querySelector("blockquote");
+    expect(quote).toBeInTheDocument();
+    expect(quote).toHaveTextContent("摘要：这是可见摘要");
+    expect(quote).toHaveStyle({ borderLeft: "4px solid #f59e0b", background: "#fffbeb" });
+  });
+
   it("uses a Typora-like reading font stack for Chinese, English, and numbers", () => {
     const { container } = render(<MarkdownPreview content="# 标题 Title 123\n\n正文 Body 456" />);
 

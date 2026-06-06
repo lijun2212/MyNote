@@ -1,8 +1,10 @@
+pub mod ai;
 pub mod index;
 pub mod knowledge_base;
 pub mod note;
 pub mod notebook_visual;
 pub mod relation;
 pub mod summary;
+pub mod summary_agent;
 pub mod tag;
 pub mod watcher;

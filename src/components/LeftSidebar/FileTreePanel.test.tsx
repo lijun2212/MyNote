@@ -99,6 +99,7 @@ describe("FileTreePanel", () => {
                 name: "案例.md",
                 path: "notes/法律/案例.md",
                 is_dir: false,
+                has_summary: true,
                 children: [],
               },
             ],
@@ -233,7 +234,14 @@ describe("FileTreePanel", () => {
     expect(screen.getByRole("menuitem", { name: "移动" })).toHaveAttribute("aria-disabled", "true");
   });
 
-  it("shows note summary in the file-tree hover tooltip", async () => {
+  it("shows a summary badge before note titles when the note has a summary", () => {
+    render(<FileTreePanel />);
+
+    expect(screen.getByTestId("summary-badge:notes/法律/案例.md")).toHaveTextContent("摘要");
+    expect(screen.queryByTestId("summary-badge:notes/我的笔记.md")).not.toBeInTheDocument();
+  });
+
+  it("does not fetch or show note summaries when hovering note titles", async () => {
     const user = userEvent.setup();
     apiMocks.getNoteByPath.mockResolvedValue(
       makeNoteDetail({
@@ -246,42 +254,9 @@ describe("FileTreePanel", () => {
 
     await user.hover(screen.getByText("案例.md"));
 
-    expect(await screen.findByText("案例要点摘要")).toBeInTheDocument();
-  });
-
-  it("invalidates cached hover summaries after the tree refreshes", async () => {
-    const user = userEvent.setup();
-    apiMocks.getNoteByPath
-      .mockResolvedValueOnce(makeNoteDetail({
-        note: makeNoteWithSummary("", { path: "notes/法律/案例.md", summary: null }),
-        content: "# 案例\n\nBody",
-      }))
-      .mockResolvedValueOnce(makeNoteDetail({
-        note: makeNoteWithSummary("刷新后的摘要", { path: "notes/法律/案例.md" }),
-        content: "# 案例\n\nBody",
-      }));
-
-    render(<FileTreePanel />);
-
-    const noteRow = screen.getByText("案例.md");
-    await user.hover(noteRow);
-    await waitFor(() => expect(apiMocks.getNoteByPath).toHaveBeenCalledTimes(1));
-    await user.unhover(noteRow);
-
-    await user.hover(screen.getByText("案例.md"));
-    expect(apiMocks.getNoteByPath).toHaveBeenCalledTimes(1);
-    expect(screen.queryByText("刷新后的摘要")).not.toBeInTheDocument();
-    await user.unhover(screen.getByText("案例.md"));
-
-    act(() => {
-      const nextTree = structuredClone(useAppStore.getState().tree) as NoteTreeNode[];
-      useAppStore.setState({ tree: nextTree });
-    });
-
-    await user.hover(screen.getByText("案例.md"));
-
-    expect(await screen.findByText("刷新后的摘要")).toBeInTheDocument();
-    expect(apiMocks.getNoteByPath).toHaveBeenCalledTimes(2);
+    expect(apiMocks.getNoteByPath).not.toHaveBeenCalled();
+    expect(screen.queryByRole("status", { name: "笔记摘要预览 notes/法律/案例.md" })).not.toBeInTheDocument();
+    expect(screen.queryByText("案例要点摘要")).not.toBeInTheDocument();
   });
 
   it("does not render top-level notebook icons or nested directory icons", () => {
@@ -828,6 +803,7 @@ describe("FileTreePanel", () => {
         id: "note-1",
         path: "notes/法律/案例.md",
         title: "案例.md",
+        summary: "标签摘要",
       },
     ]);
 
@@ -836,6 +812,7 @@ describe("FileTreePanel", () => {
     render(<FileTreePanel />);
 
     await waitFor(() => expect(apiMocks.listNotesByTag).toHaveBeenCalledWith(["tag-1"]));
+    expect(screen.getByTestId("summary-badge:notes/法律/案例.md")).toHaveTextContent("摘要");
     await user.click(screen.getByRole("button", { name: "新建笔记" }));
 
     const notebookSelect = screen.getByRole("combobox", { name: "目标笔记本" });

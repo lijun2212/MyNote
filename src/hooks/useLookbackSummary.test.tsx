@@ -2,12 +2,14 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useLookbackSummary } from "./useLookbackSummary";
 import { api } from "../api/commands";
+import { useAiSettingsStore } from "../store/useAiSettingsStore";
 import { useEditorStore } from "../store/useEditorStore";
 import { useLookbackSummaryStore } from "../store/useLookbackSummaryStore";
 import { deferred, makeNote, makeNoteDetail, makeNoteWithSummary } from "../test/testData";
 
 const apiMocks = vi.hoisted(() => ({
   generateSummaryCandidate: vi.fn(),
+  generateSummaryCandidateWithAi: vi.fn(),
   saveNoteSummary: vi.fn(),
   getNoteByPath: vi.fn(),
   getNoteLinks: vi.fn(),
@@ -20,10 +22,12 @@ vi.mock("../api/commands", () => ({
 describe("useLookbackSummary", () => {
   beforeEach(() => {
     apiMocks.generateSummaryCandidate.mockReset();
+    apiMocks.generateSummaryCandidateWithAi.mockReset();
     apiMocks.saveNoteSummary.mockReset();
     apiMocks.getNoteByPath.mockReset();
     apiMocks.getNoteLinks.mockReset();
     apiMocks.getNoteLinks.mockResolvedValue({ outgoing: [], incoming: [] });
+    useAiSettingsStore.getState().resetForTest();
     useLookbackSummaryStore.getState().resetForTest();
     useEditorStore.setState({
       currentNote: makeNote({ path: "notes/demo.md", summary: null, word_count: 420 }),
@@ -104,7 +108,7 @@ describe("useLookbackSummary", () => {
     expect(useEditorStore.getState().saveStatus).toBe("saved");
   });
 
-  it("keeps the saved summary state when detail refresh fails after save", async () => {
+  it("keeps editor content aligned with the saved summary when detail refresh fails after save", async () => {
     const savedNote = makeNoteWithSummary("更新后的摘要", { path: "notes/demo.md", content_hash: "saved-hash" });
     apiMocks.saveNoteSummary.mockResolvedValue(savedNote);
     apiMocks.getNoteByPath.mockRejectedValueOnce(new Error("刷新失败"));
@@ -113,7 +117,6 @@ describe("useLookbackSummary", () => {
 
     act(() => {
       useEditorStore.getState().setContent("# Demo\n\nOld body");
-      useEditorStore.getState().markDirty();
       result.current.setCandidate("更新后的摘要");
     });
 
@@ -128,7 +131,95 @@ describe("useLookbackSummary", () => {
     expect(result.current.savedSummary).toBe("更新后的摘要");
     expect(result.current.hasSummary).toBe(true);
     expect(useEditorStore.getState().currentNote).toEqual(savedNote);
-    expect(useEditorStore.getState().content).toBe("# Demo\n\nOld body");
+    expect(useEditorStore.getState().content).toBe("# Demo\n\n> 摘要：更新后的摘要\n\nOld body");
+    expect(useEditorStore.getState().isDirty).toBe(false);
+    expect(useEditorStore.getState().saveStatus).toBe("saved");
+  });
+
+  it("removes a front matter summary when save succeeds but detail refresh fails", async () => {
+    const savedNote = makeNoteWithSummary("更新后的摘要", { path: "notes/demo.md", content_hash: "saved-hash" });
+    apiMocks.saveNoteSummary.mockResolvedValue(savedNote);
+    apiMocks.getNoteByPath.mockRejectedValueOnce(new Error("刷新失败"));
+    useEditorStore.setState({
+      currentNote: makeNote({ path: "notes/demo.md", summary: null, word_count: 420 }),
+      content: "---\nsummary: 旧摘要\ntitle: Demo\n---\n\n# Demo\n\nBody",
+    });
+
+    const { result } = renderHook(() => useLookbackSummary());
+
+    act(() => {
+      result.current.setCandidate("更新后的摘要");
+    });
+
+    await act(async () => {
+      await result.current.saveCandidate();
+    });
+
+    expect(useEditorStore.getState().content).toBe("---\ntitle: Demo\n---\n\n# Demo\n\n> 摘要：更新后的摘要\n\nBody");
+    expect(useEditorStore.getState().isDirty).toBe(false);
+    expect(useEditorStore.getState().saveStatus).toBe("saved");
+  });
+
+  it("keeps editor content aligned when clearing the summary and detail refresh fails", async () => {
+    const clearedNote = makeNote({ path: "notes/demo.md", summary: null, word_count: 420, content_hash: "saved-hash" });
+    apiMocks.saveNoteSummary.mockResolvedValue(clearedNote);
+    apiMocks.getNoteByPath.mockRejectedValueOnce(new Error("刷新失败"));
+    useEditorStore.setState({
+      currentNote: makeNoteWithSummary("旧摘要", { path: "notes/demo.md", word_count: 420 }),
+      content: "# Demo\n\n> 摘要：旧摘要\n\nBody",
+    });
+
+    const { result } = renderHook(() => useLookbackSummary());
+
+    await act(async () => {
+      await result.current.clearSummary();
+    });
+
+    expect(useEditorStore.getState().currentNote).toEqual(clearedNote);
+    expect(useEditorStore.getState().content).toBe("# Demo\n\nBody");
+    expect(useEditorStore.getState().isDirty).toBe(false);
+    expect(useEditorStore.getState().saveStatus).toBe("saved");
+  });
+
+  it("removes a front matter summary when clearing and detail refresh fails", async () => {
+    const clearedNote = makeNote({ path: "notes/demo.md", summary: null, word_count: 420, content_hash: "saved-hash" });
+    apiMocks.saveNoteSummary.mockResolvedValue(clearedNote);
+    apiMocks.getNoteByPath.mockRejectedValueOnce(new Error("刷新失败"));
+    useEditorStore.setState({
+      currentNote: makeNoteWithSummary("旧摘要", { path: "notes/demo.md", word_count: 420 }),
+      content: "---\nsummary: 旧摘要\ntitle: Demo\n---\n\n# Demo\n\nBody",
+    });
+
+    const { result } = renderHook(() => useLookbackSummary());
+
+    await act(async () => {
+      await result.current.clearSummary();
+    });
+
+    expect(useEditorStore.getState().content).toBe("---\ntitle: Demo\n---\n\n# Demo\n\nBody");
+    expect(useEditorStore.getState().isDirty).toBe(false);
+    expect(useEditorStore.getState().saveStatus).toBe("saved");
+  });
+
+  it("keeps the editor unsaved when the note body was already dirty and detail refresh fails", async () => {
+    const savedNote = makeNoteWithSummary("更新后的摘要", { path: "notes/demo.md", content_hash: "saved-hash" });
+    apiMocks.saveNoteSummary.mockResolvedValue(savedNote);
+    apiMocks.getNoteByPath.mockRejectedValueOnce(new Error("刷新失败"));
+
+    const { result } = renderHook(() => useLookbackSummary());
+
+    act(() => {
+      useEditorStore.getState().setContent("# Demo\n\nDirty body");
+      useEditorStore.getState().markDirty();
+      result.current.setCandidate("更新后的摘要");
+    });
+
+    await act(async () => {
+      await result.current.saveCandidate();
+    });
+
+    expect(useEditorStore.getState().currentNote).toEqual(savedNote);
+    expect(useEditorStore.getState().content).toBe("# Demo\n\n> 摘要：更新后的摘要\n\nDirty body");
     expect(useEditorStore.getState().isDirty).toBe(true);
     expect(useEditorStore.getState().saveStatus).toBe("unsaved");
   });
@@ -316,6 +407,180 @@ describe("useLookbackSummary", () => {
     expect(result.current.error).toBe("生成失败");
     expect(result.current.isGenerating).toBe(false);
     expect(result.current.candidate).toBe("");
+  });
+
+  it("prefers AI generation when AI summary is enabled", async () => {
+    useAiSettingsStore.setState({
+      settings: {
+        enabled: true,
+        default_profile_id: "profile-1",
+        profiles: [{
+          id: "profile-1",
+          name: "Default",
+          provider: "anthropic",
+          model: "claude-sonnet",
+          base_url: null,
+          max_tokens: 1024,
+          temperature: 0.4,
+          enabled: true,
+        }],
+      },
+      defaultProfile: {
+        id: "profile-1",
+        name: "Default",
+        provider: "anthropic",
+        model: "claude-sonnet",
+        base_url: null,
+        max_tokens: 1024,
+        temperature: 0.4,
+        enabled: true,
+      },
+    });
+    apiMocks.generateSummaryCandidateWithAi.mockResolvedValue({
+      summary: "AI 候选摘要",
+      used_fallback: false,
+      provider_trace: null,
+    });
+
+    const { result } = renderHook(() => useLookbackSummary());
+
+    await act(async () => {
+      await result.current.generateCandidate();
+    });
+
+    expect(api.generateSummaryCandidateWithAi).toHaveBeenCalledWith("notes/demo.md", "profile-1");
+    expect(api.generateSummaryCandidate).not.toHaveBeenCalled();
+    expect(result.current.candidate).toBe("AI 候选摘要");
+  });
+
+  it("falls back to rule-based generation after AI errors and exposes fallback status", async () => {
+    useAiSettingsStore.setState({
+      settings: {
+        enabled: true,
+        default_profile_id: "profile-1",
+        profiles: [{
+          id: "profile-1",
+          name: "Default",
+          provider: "anthropic",
+          model: "claude-sonnet",
+          base_url: null,
+          max_tokens: 1024,
+          temperature: 0.4,
+          enabled: true,
+        }],
+      },
+      defaultProfile: {
+        id: "profile-1",
+        name: "Default",
+        provider: "anthropic",
+        model: "claude-sonnet",
+        base_url: null,
+        max_tokens: 1024,
+        temperature: 0.4,
+        enabled: true,
+      },
+    });
+    apiMocks.generateSummaryCandidateWithAi.mockRejectedValueOnce(new Error("provider unavailable"));
+    apiMocks.generateSummaryCandidate.mockResolvedValue("规则摘要");
+
+    const { result } = renderHook(() => useLookbackSummary());
+
+    await act(async () => {
+      await result.current.generateCandidate();
+    });
+
+    expect(api.generateSummaryCandidateWithAi).toHaveBeenCalledWith("notes/demo.md", "profile-1");
+    expect(api.generateSummaryCandidate).toHaveBeenCalledWith("notes/demo.md");
+    expect(result.current.candidate).toBe("规则摘要");
+    expect(result.current.generationStatus).toBe("AI 摘要失败，已回退到规则摘要：provider unavailable");
+  });
+
+  it("reports when the AI command already used a fallback summary", async () => {
+    useAiSettingsStore.setState({
+      settings: {
+        enabled: true,
+        default_profile_id: "profile-1",
+        profiles: [{
+          id: "profile-1",
+          name: "Default",
+          provider: "anthropic",
+          model: "claude-sonnet",
+          base_url: null,
+          max_tokens: 1024,
+          temperature: 0.4,
+          enabled: true,
+        }],
+      },
+      defaultProfile: {
+        id: "profile-1",
+        name: "Default",
+        provider: "anthropic",
+        model: "claude-sonnet",
+        base_url: null,
+        max_tokens: 1024,
+        temperature: 0.4,
+        enabled: true,
+      },
+    });
+    apiMocks.generateSummaryCandidateWithAi.mockResolvedValue({
+      summary: "后端回退摘要",
+      used_fallback: true,
+      provider_trace: null,
+    });
+
+    const { result } = renderHook(() => useLookbackSummary());
+
+    await act(async () => {
+      await result.current.generateCandidate();
+    });
+
+    expect(result.current.candidate).toBe("后端回退摘要");
+    expect(result.current.generationStatus).toBe("AI 服务已回退到规则摘要。");
+  });
+
+  it("surfaces the fallback reason when the AI summary endpoint returns provider trace details", async () => {
+    useAiSettingsStore.setState({
+      settings: {
+        enabled: true,
+        default_profile_id: "profile-1",
+        profiles: [{
+          id: "profile-1",
+          name: "Default",
+          provider: "anthropic",
+          model: "claude-sonnet",
+          base_url: null,
+          max_tokens: 1024,
+          temperature: 0.4,
+          enabled: true,
+        }],
+      },
+      defaultProfile: {
+        id: "profile-1",
+        name: "Default",
+        provider: "anthropic",
+        model: "claude-sonnet",
+        base_url: null,
+        max_tokens: 1024,
+        temperature: 0.4,
+        enabled: true,
+      },
+    });
+    apiMocks.generateSummaryCandidateWithAi.mockResolvedValue({
+      summary: "后端回退摘要",
+      used_fallback: true,
+      provider_trace: {
+        error: "AI profile secret not found: kb-hash:profile-1",
+      },
+    });
+
+    const { result } = renderHook(() => useLookbackSummary());
+
+    await act(async () => {
+      await result.current.generateCandidate();
+    });
+
+    expect(result.current.candidate).toBe("后端回退摘要");
+    expect(result.current.generationStatus).toBe("AI 服务已回退到规则摘要：默认 profile 未找到已保存的 API Key；如果刚测试过新配置，请先保存设置。");
   });
 
   it("surfaces save failures and keeps the current note unchanged", async () => {

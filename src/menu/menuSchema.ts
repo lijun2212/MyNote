@@ -8,6 +8,8 @@ export interface AppMenuSchemaOptions {
   leftSidebarVisible: boolean;
   rightSidebarVisible: boolean;
   editorMode: "editor" | "split";
+  hasDefaultAiProfile: boolean;
+  autoSummaryAgentEnabled: boolean;
 }
 
 export interface MenuSchemaItem {
@@ -31,7 +33,15 @@ function hasNotePath(notePath: string | undefined) {
 }
 
 export function buildAppMenuSchema(options: AppMenuSchemaOptions): MenuSchemaItem[] {
-  const { hasKnowledgeBase, hasCurrentNote, leftSidebarVisible, rightSidebarVisible, editorMode } = options;
+  const {
+    hasKnowledgeBase,
+    hasCurrentNote,
+    leftSidebarVisible,
+    rightSidebarVisible,
+    editorMode,
+    hasDefaultAiProfile,
+    autoSummaryAgentEnabled,
+  } = options;
 
   return [
     {
@@ -78,6 +88,20 @@ export function buildAppMenuSchema(options: AppMenuSchemaOptions): MenuSchemaIte
     },
     {
       id: APP_MENU_IDS[4],
+      label: "AI",
+      children: [
+        item("ai.settings", "AI 设置", true),
+        item("ai.testConnection", "测试模型连通性", hasDefaultAiProfile),
+        {
+          id: "ai.toggleAutoSummaryAgent",
+          label: "启用自动摘要 Agent",
+          enabled: hasDefaultAiProfile,
+          checked: autoSummaryAgentEnabled,
+        },
+      ],
+    },
+    {
+      id: APP_MENU_IDS[5],
       label: "帮助",
       children: [
         item("help.shortcuts", "快捷键", false),

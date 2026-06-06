@@ -24,6 +24,9 @@ export interface MenuActionRunnerHandlers {
   createNotebook?: () => MaybePromise;
   importNote?: () => MaybePromise;
   openSearch?: () => MaybePromise;
+  openAiSettings?: () => MaybePromise;
+  testAiConnection?: () => MaybePromise;
+  toggleAutoSummaryAgent?: () => MaybePromise;
   toggleLeftSidebar?: () => MaybePromise;
   toggleRightSidebar?: () => MaybePromise;
   setEditorMode?: (mode: EditorMode) => MaybePromise;
@@ -217,6 +220,9 @@ export function createMenuActionRunner(handlers: MenuActionRunnerHandlers) {
     "view.toggleRightSidebar": () => requireHandler(handlers, "view.toggleRightSidebar", "toggleRightSidebar")(),
     "view.editorOnly": () => requireHandler(handlers, "view.editorOnly", "setEditorMode")("editor"),
     "view.split": () => requireHandler(handlers, "view.split", "setEditorMode")("split"),
+    "ai.settings": () => requireHandler(handlers, "ai.settings", "openAiSettings")(),
+    "ai.testConnection": () => requireHandler(handlers, "ai.testConnection", "testAiConnection")(),
+    "ai.toggleAutoSummaryAgent": () => requireHandler(handlers, "ai.toggleAutoSummaryAgent", "toggleAutoSummaryAgent")(),
     "note.rename": (payload) => requireHandler(handlers, "note.rename", "renameCurrentNote")(assertNotePayload(payload)),
     "note.move": (payload) => requireHandler(handlers, "note.move", "moveCurrentNote")(assertNotePayload(payload)),
     "note.copyLink": (payload) => requireHandler(handlers, "note.copyLink", "copyCurrentNoteLink")(assertNotePayload(payload)),

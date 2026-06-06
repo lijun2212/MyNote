@@ -116,7 +116,18 @@ fn line_number_for_offset(content: &str, offset: i64) -> Option<i64> {
     }
 
     let clamped = usize::min(offset as usize, content.len());
-    Some(content[..clamped].bytes().filter(|byte| *byte == b'\n').count() as i64 + 1)
+    let safe_end = if content.is_char_boundary(clamped) {
+        clamped
+    } else {
+        content
+            .char_indices()
+            .take_while(|(index, _)| *index < clamped)
+            .last()
+            .map(|(index, ch)| index + ch.len_utf8())
+            .unwrap_or(0)
+    };
+
+    Some(content[..safe_end].bytes().filter(|byte| *byte == b'\n').count() as i64 + 1)
 }
 
 fn resolve_source_line_range(
@@ -200,8 +211,8 @@ pub async fn get_note_links(
     state: State<'_, AppState>,
     note_id: String,
 ) -> Result<NoteLinks, AppError> {
-    let kb_root = state.kb_root.lock().unwrap().clone();
-    let db_guard = state.db.lock().unwrap();
+    let kb_root = state.kb_root_guard().clone();
+    let db_guard = state.db_guard();
     let conn = db_guard.as_ref().ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
     let source_note = conn
         .query_row(
@@ -325,6 +336,7 @@ pub async fn get_note_links(
 mod tests {
     use super::{
         find_anchor_line_number,
+        line_number_for_offset,
         normalize_internal_markdown_target,
         resolve_outgoing_target_context,
         should_include_auto_link,
@@ -343,6 +355,11 @@ mod tests {
         let content = "# Heading One\n\n## Section Title\n内容";
 
         assert_eq!(find_anchor_line_number(content, "section-title"), Some(3));
+    }
+
+    #[test]
+    fn line_number_for_offset_handles_non_char_boundary_offsets() {
+        assert_eq!(line_number_for_offset("第一行\n我好", 11), Some(2));
     }
 
     #[test]
@@ -435,7 +452,7 @@ pub async fn get_note_by_title(
     state: State<'_, AppState>,
     title: String,
 ) -> Result<Option<Note>, AppError> {
-    let db_guard = state.db.lock().unwrap();
+    let db_guard = state.db_guard();
     let conn = db_guard.as_ref().ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
 
     let mut stmt = conn.prepare(

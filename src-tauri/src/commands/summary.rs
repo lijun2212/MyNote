@@ -1,7 +1,11 @@
+use crate::domain::ai::SummaryGenerationResult;
 use crate::domain::note::Note;
 use crate::error::AppError;
 use crate::infrastructure::fs::resolve_kb_path;
 use crate::services::summary::{build_summary_candidate, save_note_summary_in_conn};
+use crate::services::summary_agent::{
+    generate_summary_candidate_with_ai_for_root, prepare_default_summary_agent,
+};
 use crate::state::AppState;
 use rusqlite::Connection;
 use std::path::Path;
@@ -34,7 +38,7 @@ pub async fn generate_summary_candidate(
     state: State<'_, AppState>,
     path: String,
 ) -> Result<String, AppError> {
-    let root_guard = state.kb_root.lock().unwrap();
+    let root_guard = state.kb_root_guard();
     let root = root_guard
         .as_ref()
         .ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?;
@@ -48,16 +52,41 @@ pub async fn save_note_summary(
     path: String,
     summary: String,
 ) -> Result<Note, AppError> {
-    let root_guard = state.kb_root.lock().unwrap();
+    let root_guard = state.kb_root_guard();
     let root = root_guard
         .as_ref()
         .ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?;
-    let db_guard = state.db.lock().unwrap();
+    let db_guard = state.db_guard();
     let conn = db_guard
         .as_ref()
         .ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
 
     save_note_summary_for_root(conn, root, &path, &summary)
+}
+
+#[tauri::command]
+pub async fn generate_summary_candidate_with_ai(
+    state: State<'_, AppState>,
+    path: String,
+    profile_id: Option<String>,
+) -> Result<SummaryGenerationResult, AppError> {
+    let root = {
+        let root_guard = state.kb_root_guard();
+        root_guard
+            .as_ref()
+            .ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?
+            .clone()
+    };
+
+    let prepared = {
+        let db_guard = state.db_guard();
+        let conn = db_guard
+            .as_ref()
+            .ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
+        prepare_default_summary_agent(conn, &root, profile_id.as_deref())
+    };
+
+    generate_summary_candidate_with_ai_for_root(&root, &path, prepared).await
 }
 
 #[cfg(test)]

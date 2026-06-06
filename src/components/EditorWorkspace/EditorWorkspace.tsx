@@ -52,6 +52,19 @@ export function EditorWorkspace() {
 
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const {
+    candidate,
+    savedSummary,
+    hasSummary,
+    isGenerating,
+    isSaving,
+    error,
+    generationStatus,
+    generateCandidate,
+    saveCandidate,
+    clearSummary,
+    setCandidate,
+  } = useLookbackSummary();
+  const {
     editorRatio,
     isResizing,
     minRatio,
@@ -60,16 +73,6 @@ export function EditorWorkspace() {
     resize,
     stopResize,
   } = useEditorSplitResize({ containerRef: splitContainerRef });
-  const {
-    candidate,
-    savedSummary,
-    isGenerating,
-    isSaving,
-    error,
-    generateCandidate,
-    saveCandidate,
-    setCandidate,
-  } = useLookbackSummary();
 
   const handleChange = useCallback((newContent: string) => {
     setContent(newContent);
@@ -229,7 +232,26 @@ export function EditorWorkspace() {
         flexShrink: 0,
       }}>
         <span style={{ fontWeight: 500 }}>{currentNote.title}</span>
+        {error && <span style={{ color: "#b42318", fontSize: 11 }}>{error}</span>}
+        {!error && generationStatus && <span style={{ color: "#475467", fontSize: 11 }}>{generationStatus}</span>}
         <div style={{ flex: 1 }} />
+        {hasSummary && (
+          <button
+            onClick={() => void clearSummary()}
+            disabled={isSaving || isGenerating}
+            style={{
+              fontSize: 12,
+              padding: "2px 8px",
+              cursor: isSaving || isGenerating ? "default" : "pointer",
+              borderRadius: 4,
+              border: "1px solid #d5c4c4",
+              color: "#7a1f1f",
+              background: "#fff",
+            }}
+          >
+            清除摘要
+          </button>
+        )}
         <button
           onClick={() => togglePreview()}
           style={{ fontSize: 12, padding: "2px 8px", cursor: "pointer", borderRadius: 4, border: "1px solid #ccc" }}

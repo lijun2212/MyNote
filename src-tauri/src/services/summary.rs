@@ -1,7 +1,10 @@
 use crate::domain::note::Note;
 use crate::error::{AppError, AppResult};
 use crate::infrastructure::fs::{atomic_write, resolve_kb_path};
-use crate::infrastructure::markdown::{parse_front_matter, parse_note, render_note, split_front_matter, FrontMatter};
+use crate::infrastructure::markdown::{
+    parse_front_matter, parse_note, remove_lookback_summary_block, render_note, split_front_matter,
+    upsert_lookback_summary_block, FrontMatter,
+};
 use crate::services::index::index_note_full;
 use rusqlite::Connection;
 use std::path::Path;
@@ -10,9 +13,9 @@ const MAX_SUMMARY_CHARS: usize = 180;
 
 pub fn build_summary_candidate(content: &str, fallback_title: &str) -> AppResult<String> {
     let parsed = parse_note(content, fallback_title)?;
+    let body_without_summary = remove_lookback_summary_block(&parsed.body);
 
-    let intro = parsed
-        .body
+    let intro = body_without_summary
         .split("\n\n")
         .map(str::trim)
         .find(|segment| {
@@ -20,11 +23,11 @@ pub fn build_summary_candidate(content: &str, fallback_title: &str) -> AppResult
                 && !segment.starts_with('#')
                 && !segment.starts_with('-')
                 && !segment.starts_with('*')
+                && !segment.starts_with('>')
         })
         .unwrap_or("");
 
-    let headings = parsed
-        .body
+    let headings = body_without_summary
         .lines()
         .filter_map(|line| line.trim().strip_prefix("## ").map(str::trim))
         .filter(|heading| !heading.is_empty())
@@ -69,13 +72,15 @@ pub fn save_note_summary_in_conn(
     };
 
     let trimmed_summary = summary.trim();
-    front_matter.summary = if trimmed_summary.is_empty() {
-        None
+    front_matter.summary = None;
+
+    let next_body = if trimmed_summary.is_empty() {
+        remove_lookback_summary_block(body)
     } else {
-        Some(trimmed_summary.to_string())
+        upsert_lookback_summary_block(body, trimmed_summary)
     };
 
-    let rendered = render_note(&front_matter, body)?;
+    let rendered = render_note(&front_matter, &next_body)?;
     atomic_write(&abs, &rendered)?;
 
     match index_note_full(conn, root, rel_path, &rendered) {
@@ -153,7 +158,8 @@ mod tests {
         assert_eq!(note.summary.as_deref(), Some("新的回看摘要"));
 
         let saved = std::fs::read_to_string(&note_path).unwrap();
-        assert!(saved.contains("summary: 新的回看摘要"));
+        assert!(!saved.contains("summary:"));
+        assert!(saved.contains("> 摘要：新的回看摘要"));
     }
 
     #[test]
@@ -173,7 +179,10 @@ mod tests {
         assert_eq!(note.summary.as_deref(), Some("新的回看摘要"));
 
         let saved = std::fs::read_to_string(&note_path).unwrap();
-        assert_eq!(saved, "---\nsummary: 新的回看摘要\n---\n\n# Demo\n\nBody");
+        assert_eq!(
+            saved,
+            "# Demo\n\n> 摘要：新的回看摘要\n\nBody"
+        );
         assert!(!saved.contains("null"));
     }
 

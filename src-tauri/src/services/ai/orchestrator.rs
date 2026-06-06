@@ -1,0 +1,179 @@
+use crate::domain::ai::{AiProfile, AiProviderKind, AiTextRequest, AiTextResponse};
+use crate::error::{AppError, AppResult};
+use crate::services::ai::provider::AiProviderAdapter;
+use crate::services::ai::providers::{AnthropicProvider, OpenAiCompatibleProvider};
+use reqwest::Client;
+use std::time::{Duration, Instant};
+
+const HEALTHCHECK_PROMPT: &str = "Reply with exactly MYNOTE_HEALTHCHECK_OK and no extra words.";
+const HEALTHCHECK_EXPECTED_TEXT: &str = "MYNOTE_HEALTHCHECK_OK";
+
+#[derive(Debug, Clone)]
+pub struct AiOrchestrator {
+    client: Client,
+}
+
+impl Default for AiOrchestrator {
+    fn default() -> Self {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(20))
+            .build()
+            .expect("failed to construct AI HTTP client");
+        Self { client }
+    }
+}
+
+impl AiOrchestrator {
+    pub fn new(client: Client) -> Self {
+        Self { client }
+    }
+
+    pub async fn invoke_text(
+        &self,
+        profile: &AiProfile,
+        api_key: &str,
+        request: &AiTextRequest,
+    ) -> AppResult<AiTextResponse> {
+        let adapter: &dyn AiProviderAdapter = match profile.provider {
+            AiProviderKind::OpenAiCompatible => &OpenAiCompatibleProvider,
+            AiProviderKind::Anthropic => &AnthropicProvider,
+        };
+        let started_at = Instant::now();
+        let mut response = adapter.invoke(&self.client, profile, api_key, request).await?;
+        response.latency_ms = Some(started_at.elapsed().as_millis() as u64);
+
+        if let Some(expected_text) = request.expected_text.as_deref() {
+            let actual = response.text.trim();
+            if actual != expected_text {
+                return Err(AppError::Parse(format!(
+                    "AI provider healthcheck returned unexpected text: {actual}"
+                )));
+            }
+        }
+
+        Ok(response)
+    }
+
+    pub async fn test_profile(
+        &self,
+        profile: &AiProfile,
+        api_key: &str,
+    ) -> AppResult<AiTextResponse> {
+        self.invoke_text(
+            profile,
+            api_key,
+            &AiTextRequest {
+                prompt: HEALTHCHECK_PROMPT.into(),
+                max_tokens: Some(16),
+                temperature: Some(0.0),
+                expected_text: Some(HEALTHCHECK_EXPECTED_TEXT.into()),
+            },
+        )
+        .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AiOrchestrator;
+    use crate::domain::ai::{AiProfile, AiProviderKind};
+    use crate::error::AppError;
+    use mockito::{Matcher, Server};
+    use reqwest::Client;
+
+    fn openai_profile(base_url: String) -> AiProfile {
+        AiProfile {
+            id: "profile-1".into(),
+            name: "OpenAI".into(),
+            provider: AiProviderKind::OpenAiCompatible,
+            model: "gpt-4.1-mini".into(),
+            base_url: Some(base_url),
+            max_tokens: Some(16),
+            temperature: Some(0.0),
+            enabled: true,
+        }
+    }
+
+    fn anthropic_profile(base_url: String) -> AiProfile {
+        AiProfile {
+            id: "profile-1".into(),
+            name: "Anthropic".into(),
+            provider: AiProviderKind::Anthropic,
+            model: "claude-3-5-sonnet-latest".into(),
+            base_url: Some(base_url),
+            max_tokens: Some(16),
+            temperature: Some(0.0),
+            enabled: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn orchestrator_returns_text_from_openai_compatible_response() {
+        let mut server = Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/v1/chat/completions")
+            .match_header("authorization", Matcher::Regex("Bearer .+".into()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"choices":[{"message":{"content":"MYNOTE_HEALTHCHECK_OK"}}],"usage":{"prompt_tokens":12,"completion_tokens":9,"total_tokens":21}}"#)
+            .create_async()
+            .await;
+
+        let orchestrator = AiOrchestrator::new(Client::new());
+        let response = orchestrator
+            .test_profile(&openai_profile(format!("{}/v1", server.url())), "sk-demo")
+            .await
+            .unwrap();
+
+        assert_eq!(response.text, "MYNOTE_HEALTHCHECK_OK");
+        assert_eq!(response.input_tokens, Some(12));
+        assert_eq!(response.output_tokens, Some(9));
+        assert_eq!(response.total_tokens, Some(21));
+        assert!(response.latency_ms.is_some());
+    }
+
+    #[tokio::test]
+    async fn orchestrator_returns_text_from_anthropic_response() {
+        let mut server = Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/v1/messages")
+            .match_header("x-api-key", "sk-demo")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"content":[{"type":"text","text":"MYNOTE_HEALTHCHECK_OK"}],"usage":{"input_tokens":10,"output_tokens":7}}"#)
+            .create_async()
+            .await;
+
+        let orchestrator = AiOrchestrator::new(Client::new());
+        let response = orchestrator
+            .test_profile(&anthropic_profile(format!("{}/v1", server.url())), "sk-demo")
+            .await
+            .unwrap();
+
+        assert_eq!(response.text, "MYNOTE_HEALTHCHECK_OK");
+        assert_eq!(response.input_tokens, Some(10));
+        assert_eq!(response.output_tokens, Some(7));
+        assert_eq!(response.total_tokens, Some(17));
+        assert!(response.latency_ms.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_profile_rejects_unexpected_healthcheck_text() {
+        let mut server = Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/v1/chat/completions")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"choices":[{"message":{"content":"Hello"}}]}"#)
+            .create_async()
+            .await;
+
+        let orchestrator = AiOrchestrator::new(Client::new());
+        let error = orchestrator
+            .test_profile(&openai_profile(format!("{}/v1", server.url())), "sk-demo")
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, AppError::Parse(_)));
+    }
+}

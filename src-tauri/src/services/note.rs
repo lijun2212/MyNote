@@ -58,7 +58,7 @@ pub fn create_notebook_in_root(root: &Path, name: &str, _icon: &str, _color: &st
 }
 
 pub fn create_notebook_service(state: &State<AppState>, input: CreateNotebookInput) -> AppResult<String> {
-    let root_guard = state.kb_root.lock().unwrap();
+    let root_guard = state.kb_root_guard();
     let root = root_guard
         .as_ref()
         .ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?;
@@ -67,9 +67,9 @@ pub fn create_notebook_service(state: &State<AppState>, input: CreateNotebookInp
 }
 
 pub fn create_note_service(state: &State<AppState>, input: CreateNoteInput) -> AppResult<Note> {
-    let root_guard = state.kb_root.lock().unwrap();
+    let root_guard = state.kb_root_guard();
     let root = root_guard.as_ref().ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?;
-    let mut db_guard = state.db.lock().unwrap();
+    let mut db_guard = state.db_guard();
     let conn = db_guard.as_mut().ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
 
     let safe_title = safe_filename(&input.title);
@@ -101,9 +101,9 @@ pub fn create_note_service(state: &State<AppState>, input: CreateNoteInput) -> A
 
 pub fn get_note_by_path_service(state: &State<AppState>, rel_path: &str) -> AppResult<NoteDetail> {
     let rel_path = normalize_kb_relative_path(rel_path)?;
-    let root_guard = state.kb_root.lock().unwrap();
+    let root_guard = state.kb_root_guard();
     let root = root_guard.as_ref().ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?;
-    let db_guard = state.db.lock().unwrap();
+    let db_guard = state.db_guard();
     let conn = db_guard.as_ref().ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
 
     let abs = resolve_kb_path(root, &rel_path)?;
@@ -131,9 +131,9 @@ pub fn get_note_by_path_service(state: &State<AppState>, rel_path: &str) -> AppR
 }
 
 pub fn save_note_service(state: &State<AppState>, input: SaveNoteInput) -> AppResult<SaveNoteResult> {
-    let root_guard = state.kb_root.lock().unwrap();
+    let root_guard = state.kb_root_guard();
     let root = root_guard.as_ref().ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?;
-    let mut db_guard = state.db.lock().unwrap();
+    let mut db_guard = state.db_guard();
     let conn = db_guard.as_mut().ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
 
     let (path, current_hash): (String, String) = conn.query_row(
@@ -183,7 +183,7 @@ fn get_note_by_path_service_inner(conn: &rusqlite::Connection, _root: &Path, rel
 }
 
 pub fn list_notes_service(state: &State<AppState>) -> AppResult<Vec<Note>> {
-    let db_guard = state.db.lock().unwrap();
+    let db_guard = state.db_guard();
     let conn = db_guard.as_ref().ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
 
     let mut stmt = conn.prepare(
@@ -217,6 +217,7 @@ fn ensure_dir_node(children: &mut Vec<NoteTreeNode>, path: &str, name: &str) -> 
         name: name.to_string(),
         path: path.to_string(),
         is_dir: true,
+        has_summary: false,
         notebook_icon: None,
         notebook_color: None,
         children: vec![],
@@ -728,6 +729,7 @@ pub fn build_tree(notes: &[Note]) -> Vec<NoteTreeNode> {
                 name: parts[0].to_string(),
                 path: current_path,
                 is_dir: false,
+                has_summary: note.summary.as_ref().is_some_and(|summary| !summary.trim().is_empty()),
                 notebook_icon: None,
                 notebook_color: None,
                 children: vec![],
@@ -743,6 +745,7 @@ pub fn build_tree(notes: &[Note]) -> Vec<NoteTreeNode> {
                 name: parts[0].to_string(),
                 path: current_path.clone(),
                 is_dir: true,
+                has_summary: false,
                 notebook_icon: None,
                 notebook_color: None,
                 children: vec![],
@@ -816,12 +819,12 @@ pub fn rename_notebook_service(
     old_path: &str,
     new_name: &str,
 ) -> AppResult<RenameNotebookResult> {
-    let root_guard = state.kb_root.lock().unwrap();
+    let root_guard = state.kb_root_guard();
     let root = root_guard
         .as_ref()
         .ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?
         .clone();
-    let db_guard = state.db.lock().unwrap();
+    let db_guard = state.db_guard();
     let conn = db_guard
         .as_ref()
         .ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
@@ -835,12 +838,12 @@ pub fn update_notebook_visual_service(
     icon: &str,
     color: &str,
 ) -> AppResult<()> {
-    let root_guard = state.kb_root.lock().unwrap();
+    let root_guard = state.kb_root_guard();
     let root = root_guard
         .as_ref()
         .ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?
         .clone();
-    let db_guard = state.db.lock().unwrap();
+    let db_guard = state.db_guard();
     let conn = db_guard
         .as_ref()
         .ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
@@ -849,12 +852,12 @@ pub fn update_notebook_visual_service(
 }
 
 pub fn delete_notebook_service(state: &State<AppState>, notebook_path: &str) -> AppResult<()> {
-    let root_guard = state.kb_root.lock().unwrap();
+    let root_guard = state.kb_root_guard();
     let root = root_guard
         .as_ref()
         .ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?
         .clone();
-    let db_guard = state.db.lock().unwrap();
+    let db_guard = state.db_guard();
     let conn = db_guard
         .as_ref()
         .ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
@@ -866,12 +869,12 @@ pub fn reorder_notebooks_service(
     state: &State<AppState>,
     ordered_paths: &[String],
 ) -> AppResult<()> {
-    let root_guard = state.kb_root.lock().unwrap();
+    let root_guard = state.kb_root_guard();
     let root = root_guard
         .as_ref()
         .ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?
         .clone();
-    let db_guard = state.db.lock().unwrap();
+    let db_guard = state.db_guard();
     let conn = db_guard
         .as_ref()
         .ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
@@ -880,7 +883,7 @@ pub fn reorder_notebooks_service(
 }
 
 pub fn get_note_tree_service(state: &State<AppState>) -> AppResult<Vec<NoteTreeNode>> {
-    let root_guard = state.kb_root.lock().unwrap();
+    let root_guard = state.kb_root_guard();
     let root = root_guard
         .as_ref()
         .ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?
@@ -893,9 +896,9 @@ pub fn get_note_tree_service(state: &State<AppState>) -> AppResult<Vec<NoteTreeN
 
 pub fn index_note_from_file(state: &State<AppState>, rel_path: &str) -> AppResult<Note> {
     let rel_path = normalize_kb_relative_path(rel_path)?;
-    let root_guard = state.kb_root.lock().unwrap();
+    let root_guard = state.kb_root_guard();
     let root = root_guard.as_ref().ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?;
-    let mut db_guard = state.db.lock().unwrap();
+    let mut db_guard = state.db_guard();
     let conn = db_guard.as_mut().ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
 
     let abs = resolve_kb_path(root, &rel_path)?;
@@ -910,12 +913,12 @@ pub fn import_note_service(
     src_path: &str,
     dest_directory: &str,
 ) -> AppResult<Note> {
-    let root_guard = state.kb_root.lock().unwrap();
+    let root_guard = state.kb_root_guard();
     let root = root_guard
         .as_ref()
         .ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?
         .clone();
-    let mut db_guard = state.db.lock().unwrap();
+    let mut db_guard = state.db_guard();
     let conn = db_guard
         .as_mut()
         .ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
@@ -1053,6 +1056,22 @@ mod tests {
             .unwrap();
         assert!(!statute.is_dir);
         assert_eq!(statute.name, "条文.md");
+    }
+
+    #[test]
+    fn build_tree_marks_notes_with_summary() {
+        let mut note_with_summary = make_note("notes/法律/案例.md");
+        note_with_summary.summary = Some("案例摘要".into());
+
+        let tree = build_tree(&[note_with_summary, make_note("notes/法律/空白.md")]);
+
+        let notes_root = tree.iter().find(|node| node.path == "notes").unwrap();
+        let legal = notes_root.children.iter().find(|node| node.path == "notes/法律").unwrap();
+        let note_with_badge = legal.children.iter().find(|node| node.path == "notes/法律/案例.md").unwrap();
+        let note_without_badge = legal.children.iter().find(|node| node.path == "notes/法律/空白.md").unwrap();
+
+        assert!(note_with_badge.has_summary);
+        assert!(!note_without_badge.has_summary);
     }
 
     #[test]

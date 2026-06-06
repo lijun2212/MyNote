@@ -1,5 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AiProfile,
+  AiProfileInput,
+  AiProviderTrace,
+  AiProfileTestResult,
+  AiSettings,
   KnowledgeBase,
   LinkItem,
   Note,
@@ -12,6 +17,7 @@ import type {
   RelationType,
   SaveNoteResult,
   SearchResult,
+  SummaryGenerationResult,
   Tag,
   TagContext,
 } from "../types";
@@ -19,6 +25,27 @@ import type {
 export const api = {
   createKnowledgeBase: (rootPath: string, name: string) =>
     invoke<KnowledgeBase>("create_knowledge_base", { rootPath, name }),
+
+  getAiSettings: () =>
+    invoke<AiSettings>("get_ai_settings"),
+
+  upsertAiProfile: (input: AiProfileInput) =>
+    invoke<AiProfile>("upsert_ai_profile", { input }),
+
+  saveAiSettings: (enabled: boolean, defaultProfileId: string | null) =>
+    invoke<AiSettings>("save_ai_settings", { enabled, defaultProfileId }),
+
+  setAiProfileSecret: (profileId: string, apiKey: string) =>
+    invoke<void>("set_ai_profile_secret", { profileId, apiKey }),
+
+  hasAiProfileSecret: (profileId: string) =>
+    invoke<boolean>("has_ai_profile_secret", { profileId }),
+
+  testAiProfile: (profileId: string) =>
+    invoke<AiProfileTestResult>("test_ai_profile", { profileId }),
+
+  testAiProfileInput: (input: AiProfileInput, apiKey?: string | null) =>
+    invoke<AiProfileTestResult>("test_ai_profile_input", { input, apiKey }),
 
   openKnowledgeBase: (rootPath: string) =>
     invoke<KnowledgeBase>("open_knowledge_base", { rootPath }),
@@ -77,6 +104,12 @@ export const api = {
   generateSummaryCandidate: (path: string) =>
     invoke<string>("generate_summary_candidate", { path }),
 
+  generateSummaryCandidateWithAi: (path: string, profileId?: string) =>
+    invoke<SummaryGenerationResult>("generate_summary_candidate_with_ai", {
+      path,
+      profileId,
+    }),
+
   saveNoteSummary: (path: string, summary: string) =>
     invoke<Note>("save_note_summary", { path, summary }),
 
@@ -104,4 +137,4 @@ export const api = {
 };
 
 // suppress unused import warning for LinkItem (used via NoteLinks)
-export type { LinkItem };
+export type { AiProviderTrace, LinkItem };

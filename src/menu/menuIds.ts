@@ -1,4 +1,4 @@
-export const APP_MENU_IDS = ["file", "edit", "view", "note", "help"] as const;
+export const APP_MENU_IDS = ["file", "edit", "view", "note", "ai", "help"] as const;
 
 export const CONTEXT_MENU_TARGET_TYPES = [
 	"notebook",
@@ -29,6 +29,9 @@ export const MENU_ACTION_IDS = [
 	"view.toggleRightSidebar",
 	"view.editorOnly",
 	"view.split",
+	"ai.settings",
+	"ai.testConnection",
+	"ai.toggleAutoSummaryAgent",
 	"note.rename",
 	"note.move",
 	"note.copyLink",

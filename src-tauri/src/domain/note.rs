@@ -26,6 +26,7 @@ pub struct NoteTreeNode {
     pub name: String,
     pub path: String,
     pub is_dir: bool,
+    pub has_summary: bool,
     pub notebook_icon: Option<String>,
     pub notebook_color: Option<String>,
     pub children: Vec<NoteTreeNode>,
