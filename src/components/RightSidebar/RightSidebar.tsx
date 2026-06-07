@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useEditorStore } from "../../store/useEditorStore";
 import { BacklinksPanel } from "./BacklinksPanel";
+import { GraphAnalysisPanel } from "./GraphAnalysisPanel";
 import { OutlinePanel } from "./OutlinePanel";
 
-type Tab = "outline" | "associations";
+type Tab = "outline" | "associations" | "graph";
 
 export function RightSidebar() {
   const [activeTab, setActiveTab] = useState<Tab>("outline");
@@ -41,10 +42,14 @@ export function RightSidebar() {
         <button style={tabStyle(activeTab === "associations")} onClick={() => setActiveTab("associations")}>
           关联
         </button>
+        <button style={tabStyle(activeTab === "graph")} onClick={() => setActiveTab("graph")}>
+          图谱分析
+        </button>
       </div>
       <div style={{ flex: 1, overflowY: "auto" }}>
         {activeTab === "outline" && <OutlinePanel />}
         {activeTab === "associations" && <BacklinksPanel noteId={noteId} />}
+        {activeTab === "graph" && <GraphAnalysisPanel />}
       </div>
     </div>
   );
