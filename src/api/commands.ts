@@ -10,6 +10,7 @@ import type {
   Note,
   NoteDetail,
   NoteLinks,
+  NoteOutlineItem,
   NoteRelations,
   NoteTreeNode,
   RenameNotebookResult,
@@ -18,9 +19,40 @@ import type {
   SaveNoteResult,
   SearchResult,
   SummaryGenerationResult,
+  SummaryGenerationStreamStart,
   Tag,
   TagContext,
 } from "../types";
+
+interface RawNoteOutlineItem {
+  id: string;
+  text: string;
+  level: number;
+  line_start: number;
+  line_end: number;
+  anchor: string;
+  children: RawNoteOutlineItem[];
+}
+
+function mapNoteOutlineLevel(level: number): 1 | 2 | 3 {
+  if (level === 1 || level === 2 || level === 3) {
+    return level;
+  }
+
+  throw new Error(`Invalid note outline level: ${level}`);
+}
+
+function mapNoteOutlineItem(item: RawNoteOutlineItem): NoteOutlineItem {
+  return {
+    id: item.id,
+    text: item.text,
+    level: mapNoteOutlineLevel(item.level),
+    lineStart: item.line_start,
+    lineEnd: item.line_end,
+    anchor: item.anchor,
+    children: item.children.map(mapNoteOutlineItem),
+  };
+}
 
 export const api = {
   createKnowledgeBase: (rootPath: string, name: string) =>
@@ -58,6 +90,11 @@ export const api = {
 
   getNoteByPath: (path: string) =>
     invoke<NoteDetail>("get_note_by_path", { path }),
+
+  getNoteOutline: async (path: string) => {
+    const outline = await invoke<RawNoteOutlineItem[]>("get_note_outline", { path });
+    return outline.map(mapNoteOutlineItem);
+  },
 
   saveNote: (noteId: string, content: string, expectedHash?: string) =>
     invoke<SaveNoteResult>("save_note", { noteId, content, expectedHash }),
@@ -107,6 +144,13 @@ export const api = {
   generateSummaryCandidateWithAi: (path: string, profileId?: string) =>
     invoke<SummaryGenerationResult>("generate_summary_candidate_with_ai", {
       path,
+      profileId,
+    }),
+
+  generateSummaryCandidateWithAiStream: (path: string, requestId: string, profileId?: string) =>
+    invoke<SummaryGenerationStreamStart>("generate_summary_candidate_with_ai_stream", {
+      path,
+      requestId,
       profileId,
     }),
 

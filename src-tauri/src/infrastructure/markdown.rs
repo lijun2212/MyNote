@@ -27,6 +27,15 @@ pub struct ParsedNote {
     pub word_count: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteOutlineBlock {
+    pub text: String,
+    pub level: u8,
+    pub line_start: i64,
+    pub line_end: i64,
+    pub anchor: String,
+}
+
 const LOOKBACK_SUMMARY_LEGACY_TITLE_LINE: &str = "> **回看摘要**";
 const LOOKBACK_SUMMARY_PREFIX: &str = "> 摘要：";
 
@@ -35,15 +44,14 @@ pub fn split_front_matter(content: &str) -> (Option<&str>, &str) {
     if !content.starts_with("---") {
         return (None, content);
     }
-    let rest = &content[3..];
-    if let Some(end_pos) = rest.find("\n---") {
-        let fm = &rest[..end_pos];
-        let body_start = end_pos + 4; // 跳过 \n---
-        let body = rest.get(body_start..).unwrap_or("").trim_start_matches('\n');
-        (Some(fm), body)
-    } else {
-        (None, content)
-    }
+
+    let Some((fm_start, fm_end, body_start)) = front_matter_boundaries(content) else {
+        return (None, content);
+    };
+
+    let fm = &content[fm_start..fm_end];
+    let body = content.get(body_start..).unwrap_or("").trim_start_matches('\n');
+    (Some(fm), body)
 }
 
 /// 解析 Front Matter YAML
@@ -65,12 +73,39 @@ pub fn parse_front_matter(fm_str: &str) -> AppResult<FrontMatter> {
 
 /// 从正文提取第一个一级标题
 pub fn extract_h1(body: &str) -> Option<String> {
-    for line in body.lines() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("# ") {
-            return Some(rest.trim().to_string());
+    let lines: Vec<&str> = body.lines().collect();
+    let mut index = 0usize;
+    let mut in_code_fence = false;
+
+    while index < lines.len() {
+        if is_indented_code_block_line(lines[index]) {
+            index += 1;
+            continue;
         }
+
+        let trimmed = lines[index].trim_start();
+        if is_fence_delimiter_line(trimmed) {
+            in_code_fence = !in_code_fence;
+            index += 1;
+            continue;
+        }
+        if in_code_fence {
+            index += 1;
+            continue;
+        }
+
+        if let Some((level, text, consumed_lines)) = parse_heading_at(&lines, index) {
+            if level == 1 {
+                return Some(text);
+            }
+
+            index += consumed_lines;
+            continue;
+        }
+
+        index += 1;
     }
+
     None
 }
 
@@ -370,7 +405,39 @@ fn extract_inline_tags_from_line(line: &str) -> Vec<String> {
     tags
 }
 
-fn extract_heading_text(line: &str) -> Option<String> {
+fn is_fence_delimiter_line(trimmed: &str) -> bool {
+    trimmed.starts_with("```") || trimmed.starts_with("~~~")
+}
+
+fn is_indented_code_block_line(line: &str) -> bool {
+    line.starts_with("    ") || line.starts_with('\t')
+}
+
+fn front_matter_boundaries(content: &str) -> Option<(usize, usize, usize)> {
+    let mut cursor = 0usize;
+    let mut lines = content.split_inclusive('\n');
+    let first_line = lines.next()?;
+    if first_line.trim_end_matches(['\r', '\n']) != "---" {
+        return None;
+    }
+
+    cursor += first_line.len();
+    let fm_start = cursor;
+
+    for line in lines {
+        let line_text = line.trim_end_matches(['\r', '\n']);
+        if line_text == "---" {
+            let fm_end = cursor;
+            let body_start = cursor + line.len();
+            return Some((fm_start, fm_end, body_start));
+        }
+        cursor += line.len();
+    }
+
+    None
+}
+
+fn parse_atx_heading(line: &str) -> Option<(u8, String)> {
     let trimmed = line.trim_start();
     let level = trimmed.chars().take_while(|ch| *ch == '#').count();
     if level == 0 || level > 6 {
@@ -378,16 +445,245 @@ fn extract_heading_text(line: &str) -> Option<String> {
     }
 
     let rest = &trimmed[level..];
-    if !rest.starts_with(' ') {
+    if !rest.starts_with(char::is_whitespace) {
         return None;
     }
 
-    let heading = rest.trim();
+    let heading = strip_atx_closing_sequence(rest.trim());
     if heading.is_empty() {
         None
     } else {
-        Some(heading.to_string())
+        Some((level as u8, clean_heading_text(heading)))
     }
+}
+
+fn strip_atx_closing_sequence(text: &str) -> &str {
+    let trimmed = text.trim_end();
+    let bytes = trimmed.as_bytes();
+    let mut hash_start = bytes.len();
+
+    while hash_start > 0 && bytes[hash_start - 1] == b'#' {
+        hash_start -= 1;
+    }
+
+    if hash_start == bytes.len() || hash_start == 0 {
+        return trimmed;
+    }
+
+    if bytes[hash_start - 1].is_ascii_whitespace() {
+        trimmed[..hash_start].trim_end()
+    } else {
+        trimmed
+    }
+}
+
+fn parse_setext_heading(lines: &[&str], index: usize) -> Option<(u8, String, usize)> {
+    let current = lines.get(index)?.trim();
+    if current.is_empty() {
+        return None;
+    }
+
+    if is_indented_code_block_line(lines.get(index)?) {
+        return None;
+    }
+
+    let underline = lines.get(index + 1)?.trim();
+    if underline.is_empty() {
+        return None;
+    }
+
+    if is_indented_code_block_line(lines.get(index + 1)?) {
+        return None;
+    }
+
+    if underline.chars().all(|ch| ch == '=') {
+        return Some((1, clean_heading_text(current), 2));
+    }
+
+    if underline.chars().all(|ch| ch == '-') {
+        return Some((2, clean_heading_text(current), 2));
+    }
+
+    None
+}
+
+fn clean_heading_text(text: &str) -> String {
+    let chars: Vec<char> = text.trim().chars().collect();
+    let mut result = String::new();
+    let mut index = 0usize;
+
+    while index < chars.len() {
+        let current = chars[index];
+
+        if current == '[' {
+            if index + 1 < chars.len() && chars[index + 1] == '[' {
+                let mut end = index + 2;
+                while end + 1 < chars.len() {
+                    if chars[end] == ']' && chars[end + 1] == ']' {
+                        if end >= index + 2 {
+                            let inner: String = chars[index + 2..end].iter().collect();
+                            let visible = if let Some((_, display)) = inner.split_once('|') {
+                                display
+                            } else {
+                                inner.split('#').next().unwrap_or("")
+                            };
+                            result.push_str(visible);
+                            index = end + 2;
+                            continue;
+                        }
+                    }
+                    end += 1;
+                }
+
+                index += 1;
+                continue;
+            } else {
+                let mut text_end = index + 1;
+                while text_end < chars.len() && chars[text_end] != ']' {
+                    text_end += 1;
+                }
+
+                if text_end < chars.len() {
+                    let visible: String = chars[index + 1..text_end].iter().collect();
+                    result.push_str(&visible);
+                    index = text_end + 1;
+
+                    if index < chars.len() && chars[index] == '(' {
+                        let mut depth = 1usize;
+                        index += 1;
+                        while index < chars.len() && depth > 0 {
+                            match chars[index] {
+                                '(' => depth += 1,
+                                ')' => depth -= 1,
+                                _ => {}
+                            }
+                            index += 1;
+                        }
+                    }
+
+                    continue;
+                }
+
+                index += 1;
+                continue;
+            }
+        }
+
+        if current == '*' || current == '`' || current == ']' {
+            let mut span = 1usize;
+            while index + span < chars.len() && chars[index + span] == current && span < 2 {
+                span += 1;
+            }
+            index += span;
+            continue;
+        }
+
+        result.push(current);
+        index += 1;
+    }
+
+    result.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn parse_heading_at(lines: &[&str], index: usize) -> Option<(u8, String, usize)> {
+    if let Some((level, text)) = parse_atx_heading(lines.get(index)?) {
+        return Some((level, text, 1));
+    }
+
+    parse_setext_heading(lines, index)
+}
+
+pub fn normalize_heading_text(text: &str) -> String {
+    text.trim().to_lowercase()
+}
+
+pub fn slugify_heading_text(text: &str) -> String {
+    let mut slug = String::new();
+    let mut last_was_dash = false;
+
+    for ch in text.trim().chars().flat_map(|ch| ch.to_lowercase()) {
+        if ch.is_alphanumeric() || ('\u{4e00}'..='\u{9fff}').contains(&ch) {
+            slug.push(ch);
+            last_was_dash = false;
+            continue;
+        }
+
+        if (ch.is_whitespace() || ch == '-' || ch == '_') && !last_was_dash && !slug.is_empty() {
+            slug.push('-');
+            last_was_dash = true;
+        }
+    }
+
+    slug.trim_matches('-').to_string()
+}
+
+pub fn extract_note_outline_blocks(body: &str, max_level: u8) -> Vec<NoteOutlineBlock> {
+    let lines: Vec<&str> = body.lines().collect();
+    let mut blocks = Vec::new();
+    let mut index = 0usize;
+    let mut in_code_fence = false;
+
+    while index < lines.len() {
+        if is_indented_code_block_line(lines[index]) {
+            index += 1;
+            continue;
+        }
+
+        let trimmed = lines[index].trim_start();
+        if is_fence_delimiter_line(trimmed) {
+            in_code_fence = !in_code_fence;
+            index += 1;
+            continue;
+        }
+        if in_code_fence {
+            index += 1;
+            continue;
+        }
+
+        if let Some((level, text, consumed_lines)) = parse_heading_at(&lines, index) {
+            if level <= max_level {
+                blocks.push(NoteOutlineBlock {
+                    text: text.clone(),
+                    level,
+                    line_start: index as i64 + 1,
+                    line_end: lines.len() as i64,
+                    anchor: slugify_heading_text(&text),
+                });
+            }
+
+            index += consumed_lines;
+            continue;
+        }
+
+        index += 1;
+    }
+
+    for current in 0..blocks.len() {
+        let current_level = blocks[current].level;
+        let line_end = blocks
+            .iter()
+            .skip(current + 1)
+            .find(|candidate| candidate.level <= current_level)
+            .map(|candidate| candidate.line_start - 1)
+            .unwrap_or(lines.len() as i64);
+        blocks[current].line_end = line_end;
+    }
+
+    blocks
+}
+
+pub fn extract_note_outline_blocks_from_content(content: &str, max_level: u8) -> Vec<NoteOutlineBlock> {
+    let (_, body) = split_front_matter(content);
+    let line_offset = body_line_offset(content);
+
+    extract_note_outline_blocks(body, max_level)
+        .into_iter()
+        .map(|mut block| {
+            block.line_start += line_offset;
+            block.line_end += line_offset;
+            block
+        })
+        .collect()
 }
 
 pub fn extract_inline_tags(body: &str) -> Vec<String> {
@@ -396,7 +692,7 @@ pub fn extract_inline_tags(body: &str) -> Vec<String> {
 
     for line in body.lines() {
         let trimmed = line.trim_start();
-        if trimmed.starts_with("```") {
+        if is_fence_delimiter_line(trimmed) {
             in_code_block = !in_code_block;
             continue;
         }
@@ -412,19 +708,13 @@ pub fn extract_inline_tags(body: &str) -> Vec<String> {
 }
 
 pub fn body_line_offset(content: &str) -> i64 {
-    if !content.starts_with("---") {
-        return 0;
-    }
-
-    let rest = &content[3..];
-    let Some(end_pos) = rest.find("\n---") else {
+    let Some((_, _, body_start)) = front_matter_boundaries(content) else {
         return 0;
     };
 
-    let body_start = end_pos + 4;
-    let suffix = rest.get(body_start..).unwrap_or("");
+    let suffix = content.get(body_start..).unwrap_or("");
     let trimmed_newlines = suffix.len() - suffix.trim_start_matches('\n').len();
-    let absolute_body_start = 3 + body_start + trimmed_newlines;
+    let absolute_body_start = body_start + trimmed_newlines;
 
     content[..absolute_body_start]
         .chars()
@@ -443,10 +733,11 @@ pub fn extract_inline_tag_occurrences_with_offset(
     let mut occurrences = Vec::new();
     let mut in_code_block = false;
     let mut current_heading: Option<String> = None;
+    let lines: Vec<&str> = body.lines().collect();
 
-    for (index, line) in body.lines().enumerate() {
+    for (index, line) in lines.iter().enumerate() {
         let trimmed = line.trim_start();
-        if trimmed.starts_with("```") {
+        if is_fence_delimiter_line(trimmed) {
             in_code_block = !in_code_block;
             continue;
         }
@@ -454,7 +745,7 @@ pub fn extract_inline_tag_occurrences_with_offset(
             continue;
         }
 
-        if let Some(heading) = extract_heading_text(line) {
+        if let Some((_, heading, _)) = parse_heading_at(&lines, index) {
             current_heading = Some(heading);
         }
 
@@ -479,7 +770,7 @@ fn remove_inline_tag_mentions(body: &str, tag_name: &str) -> String {
 
     for line in body.lines() {
         let trimmed = line.trim_start();
-        if trimmed.starts_with("```") {
+        if is_fence_delimiter_line(trimmed) {
             in_code_block = !in_code_block;
             lines.push(line.to_string());
             continue;
@@ -757,6 +1048,151 @@ mod tests {
     fn test_extract_h1() {
         assert_eq!(extract_h1("# Hello World\nsome text"), Some("Hello World".into()));
         assert_eq!(extract_h1("no heading"), None);
+    }
+
+    #[test]
+    fn extracts_outline_blocks_up_to_level_three() {
+        let body = "# Alpha\ntext\n\n## Beta\nbody\n\n### Gamma\nmore\n\n#### Ignore Me\n";
+
+        let outline = extract_note_outline_blocks(body, 3);
+
+        assert_eq!(outline.len(), 3);
+        assert_eq!(outline[0].text, "Alpha");
+        assert_eq!(outline[0].level, 1);
+        assert_eq!(outline[0].line_start, 1);
+        assert_eq!(outline[0].line_end, 10);
+        assert_eq!(outline[0].anchor, "alpha");
+
+        assert_eq!(outline[1].text, "Beta");
+        assert_eq!(outline[1].level, 2);
+        assert_eq!(outline[1].line_start, 4);
+        assert_eq!(outline[1].line_end, 10);
+        assert_eq!(outline[1].anchor, "beta");
+
+        assert_eq!(outline[2].text, "Gamma");
+        assert_eq!(outline[2].level, 3);
+        assert_eq!(outline[2].line_start, 7);
+        assert_eq!(outline[2].line_end, 10);
+        assert_eq!(outline[2].anchor, "gamma");
+    }
+
+    #[test]
+    fn ignores_code_fences_and_supports_setext_headings() {
+        let body = "Title One\n========\n\n```md\n## fake\n```\n\nSection Two\n-----------\ncontent\n";
+
+        let outline = extract_note_outline_blocks(body, 3);
+
+        assert_eq!(outline.len(), 2);
+        assert_eq!(outline[0].text, "Title One");
+        assert_eq!(outline[0].level, 1);
+        assert_eq!(outline[0].line_start, 1);
+        assert_eq!(outline[0].line_end, 10);
+        assert_eq!(outline[0].anchor, "title-one");
+
+        assert_eq!(outline[1].text, "Section Two");
+        assert_eq!(outline[1].level, 2);
+        assert_eq!(outline[1].line_start, 8);
+        assert_eq!(outline[1].line_end, 10);
+        assert_eq!(outline[1].anchor, "section-two");
+    }
+
+    #[test]
+    fn preserves_trailing_hash_characters_that_are_part_of_heading_text() {
+        let body = "# C#\n\n## F#\n";
+
+        let outline = extract_note_outline_blocks(body, 3);
+
+        assert_eq!(outline.len(), 2);
+        assert_eq!(outline[0].text, "C#");
+        assert_eq!(outline[0].anchor, "c");
+        assert_eq!(outline[1].text, "F#");
+        assert_eq!(outline[1].anchor, "f");
+    }
+
+    #[test]
+    fn heading_text_is_plain_text_without_markdown_decorators() {
+        let body = "# **Bold** *Italic* `Code` [Label](https://example.com) [[Wiki]]\n";
+
+        let outline = extract_note_outline_blocks(body, 3);
+
+        assert_eq!(outline.len(), 1);
+        assert_eq!(outline[0].text, "Bold Italic Code Label Wiki");
+        assert_eq!(outline[0].anchor, "bold-italic-code-label-wiki");
+    }
+
+    #[test]
+    fn heading_text_preserves_real_characters_in_wiki_display_and_identifiers() {
+        let body = "# snake_case [[lang|C# 指南]]\n";
+
+        let outline = extract_note_outline_blocks(body, 3);
+
+        assert_eq!(outline.len(), 1);
+        assert_eq!(outline[0].text, "snake_case C# 指南");
+        assert_eq!(outline[0].anchor, "snake-case-c-指南");
+    }
+
+    #[test]
+    fn outline_line_end_stops_before_next_same_or_higher_heading() {
+        let body = "# Alpha\nalpha body\n\n## Beta\nbeta body\n\n### Gamma\ngamma body\n\n## Delta\ndelta body\n\n# Epsilon\nepsilon body\n";
+
+        let outline = extract_note_outline_blocks(body, 3);
+
+        assert_eq!(outline.len(), 5);
+        assert_eq!(outline[0].text, "Alpha");
+        assert_eq!(outline[0].line_start, 1);
+        assert_eq!(outline[0].line_end, 12);
+
+        assert_eq!(outline[1].text, "Beta");
+        assert_eq!(outline[1].line_start, 4);
+        assert_eq!(outline[1].line_end, 9);
+
+        assert_eq!(outline[2].text, "Gamma");
+        assert_eq!(outline[2].line_start, 7);
+        assert_eq!(outline[2].line_end, 9);
+
+        assert_eq!(outline[3].text, "Delta");
+        assert_eq!(outline[3].line_start, 10);
+        assert_eq!(outline[3].line_end, 12);
+
+        assert_eq!(outline[4].text, "Epsilon");
+        assert_eq!(outline[4].line_start, 13);
+        assert_eq!(outline[4].line_end, 14);
+    }
+
+    #[test]
+    fn outline_blocks_from_content_include_front_matter_line_offset() {
+        let content = "---\ntitle: Demo\ntags:\n  - rust\n---\n\n# Alpha\nalpha body\n\n## Beta\nbeta body\n";
+
+        let outline = extract_note_outline_blocks_from_content(content, 3);
+
+        assert_eq!(outline.len(), 2);
+        assert_eq!(outline[0].line_start, 7);
+        assert_eq!(outline[0].line_end, 11);
+        assert_eq!(outline[1].line_start, 10);
+        assert_eq!(outline[1].line_end, 11);
+    }
+
+    #[test]
+    fn ignores_indented_code_blocks_when_extracting_outline() {
+        let body = "    # not a heading\n\t## also not a heading\n\n# Real Heading\nbody\n";
+
+        let outline = extract_note_outline_blocks(body, 3);
+
+        assert_eq!(outline.len(), 1);
+        assert_eq!(outline[0].text, "Real Heading");
+        assert_eq!(outline[0].line_start, 4);
+    }
+
+    #[test]
+    fn split_front_matter_requires_a_real_closing_delimiter_line() {
+        let content = "---\ntitle: Demo\nsummary: |\n  first line\n  --- not a delimiter\n  second line\n---\n\n# Heading\n";
+
+        let (fm, body) = split_front_matter(content);
+
+        assert!(fm.is_some());
+        assert!(fm.unwrap().contains("--- not a delimiter"));
+        assert_eq!(body.trim(), "# Heading");
+        assert_eq!(body_line_offset(content), 8);
     }
 
     #[test]

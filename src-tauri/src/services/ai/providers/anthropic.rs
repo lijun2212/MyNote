@@ -5,11 +5,13 @@ use crate::services::ai::provider::{
     summarize_http_error, AiProviderAdapter,
 };
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const DEFAULT_ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com/v1";
+const DEFAULT_ANTHROPIC_MAX_TOKENS: u32 = 1024;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct AnthropicProvider;
@@ -21,6 +23,7 @@ struct AnthropicRequest<'a> {
     temperature: f32,
     messages: [AnthropicMessage<'a>; 1],
     thinking: AnthropicThinkingConfig<'a>,
+    stream: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -61,6 +64,23 @@ struct AnthropicUsage {
     output_tokens: Option<u32>,
 }
 
+#[derive(Debug, Deserialize)]
+struct AnthropicStreamPayload {
+    #[serde(rename = "type")]
+    payload_type: Option<String>,
+    delta: Option<AnthropicStreamDelta>,
+    usage: Option<AnthropicUsage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AnthropicStreamDelta {
+    text: Option<String>,
+}
+
+fn resolve_anthropic_max_tokens(profile: &AiProfile, request: &AiTextRequest) -> u32 {
+    resolve_request_max_tokens(profile, request).unwrap_or(DEFAULT_ANTHROPIC_MAX_TOKENS)
+}
+
 fn excerpt_for_error(body: &str) -> String {
     let trimmed = body.trim();
     let excerpt: String = trimmed.chars().take(240).collect();
@@ -91,7 +111,7 @@ impl AiProviderAdapter for AnthropicProvider {
             .header("anthropic-version", ANTHROPIC_VERSION)
             .json(&AnthropicRequest {
                 model: &profile.model,
-                max_tokens: resolve_request_max_tokens(profile, request),
+                max_tokens: resolve_anthropic_max_tokens(profile, request),
                 temperature: resolve_request_temperature(profile, request),
                 messages: [AnthropicMessage {
                     role: "user",
@@ -101,6 +121,7 @@ impl AiProviderAdapter for AnthropicProvider {
                     }],
                 }],
                 thinking: AnthropicThinkingConfig { mode: "disabled" },
+                stream: false,
             })
             .send()
             .await
@@ -153,11 +174,159 @@ impl AiProviderAdapter for AnthropicProvider {
             latency_ms: None,
         })
     }
+
+    async fn invoke_stream(
+        &self,
+        client: &Client,
+        profile: &AiProfile,
+        api_key: &str,
+        request: &AiTextRequest,
+        on_delta: &mut (dyn FnMut(String) -> AppResult<()> + Send),
+    ) -> AppResult<AiTextResponse> {
+        let endpoint = resolve_endpoint(
+            profile.base_url.as_deref(),
+            DEFAULT_ANTHROPIC_BASE_URL,
+            "messages",
+        )?;
+        let response = client
+            .post(endpoint)
+            .header("x-api-key", api_key)
+            .header("anthropic-version", ANTHROPIC_VERSION)
+            .header("accept", "text/event-stream")
+            .json(&AnthropicRequest {
+                model: &profile.model,
+                max_tokens: resolve_anthropic_max_tokens(profile, request),
+                temperature: resolve_request_temperature(profile, request),
+                messages: [AnthropicMessage {
+                    role: "user",
+                    content: [AnthropicTextContentBlock {
+                        block_type: "text",
+                        text: &request.prompt,
+                    }],
+                }],
+                thinking: AnthropicThinkingConfig { mode: "disabled" },
+                stream: true,
+            })
+            .send()
+            .await
+            .map_err(|error| AppError::Io(format!("AI provider request failed: {error}")))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "<unreadable response body>".into());
+            return Err(summarize_http_error(status, &body));
+        }
+
+        let mut full_text = String::new();
+        let mut usage: Option<AnthropicUsage> = None;
+        let mut buffer = Vec::new();
+        let mut lines = Vec::new();
+        let mut stream = response.bytes_stream();
+
+        while let Some(chunk) = stream.next().await {
+            let bytes = chunk
+                .map_err(|error| AppError::Io(format!("Failed to read Anthropic stream chunk: {error}")))?;
+            buffer.extend_from_slice(&bytes);
+
+            while let Some(line) = take_next_sse_line(&mut buffer)? {
+                if line.is_empty() {
+                    process_anthropic_stream_frame(&lines, &mut full_text, &mut usage, on_delta)?;
+                    lines.clear();
+                    continue;
+                }
+
+                lines.push(line);
+            }
+        }
+
+        process_anthropic_stream_frame(&lines, &mut full_text, &mut usage, on_delta)?;
+
+        let input_tokens = usage.as_ref().and_then(|value| value.input_tokens);
+        let output_tokens = usage.as_ref().and_then(|value| value.output_tokens);
+        let total_tokens = match (input_tokens, output_tokens) {
+            (Some(input), Some(output)) => Some(input + output),
+            _ => None,
+        };
+
+        Ok(AiTextResponse {
+            text: full_text,
+            input_tokens,
+            output_tokens,
+            total_tokens,
+            latency_ms: None,
+        })
+    }
+}
+
+fn process_anthropic_stream_frame(
+    lines: &[String],
+    full_text: &mut String,
+    usage: &mut Option<AnthropicUsage>,
+    on_delta: &mut (dyn FnMut(String) -> AppResult<()> + Send),
+) -> AppResult<()> {
+    let mut event_name: Option<&str> = None;
+    let mut data_lines = Vec::new();
+
+    for line in lines {
+        if let Some(value) = line.strip_prefix("event:") {
+            event_name = Some(value.trim());
+        } else if let Some(value) = line.strip_prefix("data:") {
+            data_lines.push(value.trim().to_string());
+        }
+    }
+
+    if data_lines.is_empty() {
+        return Ok(());
+    }
+
+    let payload_raw = data_lines.join("\n");
+    let payload: AnthropicStreamPayload = serde_json::from_str(&payload_raw).map_err(|error| {
+        AppError::Parse(format!("Invalid Anthropic stream event: {error}. Response excerpt: {}", excerpt_for_error(&payload_raw)))
+    })?;
+
+    let event_kind = event_name.or(payload.payload_type.as_deref()).unwrap_or("");
+    match event_kind {
+        "content_block_delta" => {
+            if let Some(delta) = payload.delta.and_then(|value| value.text).filter(|value| !value.is_empty()) {
+                full_text.push_str(&delta);
+                on_delta(delta)?;
+            }
+        }
+        "message_delta" | "message_start" => {
+            if payload.usage.is_some() {
+                *usage = payload.usage;
+            }
+        }
+        _ => {}
+    }
+
+    Ok(())
+}
+
+fn take_next_sse_line(buffer: &mut Vec<u8>) -> AppResult<Option<String>> {
+    let Some(newline_index) = buffer.iter().position(|byte| *byte == b'\n') else {
+        return Ok(None);
+    };
+
+    let mut line = buffer.drain(..=newline_index).collect::<Vec<_>>();
+    if line.last() == Some(&b'\n') {
+        line.pop();
+    }
+    if line.last() == Some(&b'\r') {
+        line.pop();
+    }
+
+    String::from_utf8(line)
+        .map(Some)
+        .map_err(|error| AppError::Parse(format!("Anthropic stream contained invalid UTF-8: {error}")))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::AnthropicProvider;
+    use super::{resolve_anthropic_max_tokens, AnthropicProvider, DEFAULT_ANTHROPIC_MAX_TOKENS};
     use crate::domain::ai::{AiProfile, AiProviderKind, AiTextRequest};
     use crate::services::ai::provider::AiProviderAdapter;
     use mockito::{Matcher, Server};
@@ -281,5 +450,75 @@ mod tests {
 
         mock.assert();
         assert_eq!(response.text, "MYNOTE_HEALTHCHECK_OK");
+    }
+
+    #[tokio::test]
+    async fn anthropic_streams_text_deltas() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("POST", "/messages")
+            .with_status(200)
+            .with_header("content-type", "text/event-stream")
+            .with_body(concat!(
+                "event: content_block_delta\n",
+                "data: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"MYNOTE_\"}}\n\n",
+                "event: content_block_delta\n",
+                "data: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"HEALTHCHECK_OK\"}}\n\n",
+                "event: message_delta\n",
+                "data: {\"type\":\"message_delta\",\"usage\":{\"input_tokens\":9,\"output_tokens\":4}}\n\n",
+                "event: message_stop\n",
+                "data: {\"type\":\"message_stop\"}\n\n"
+            ))
+            .create_async()
+            .await;
+
+        let provider = AnthropicProvider;
+        let client = reqwest::Client::new();
+        let mut chunks = Vec::new();
+        let response = provider
+            .invoke_stream(
+                &client,
+                &make_profile(server.url()),
+                "sk-anthropic-test",
+                &AiTextRequest {
+                    prompt: "hello".into(),
+                    max_tokens: Some(8),
+                    temperature: Some(0.0),
+                    expected_text: None,
+                },
+                &mut |chunk| {
+                    chunks.push(chunk);
+                    Ok(())
+                },
+            )
+            .await
+            .unwrap();
+
+        mock.assert();
+        assert_eq!(chunks, vec!["MYNOTE_", "HEALTHCHECK_OK"]);
+        assert_eq!(response.text, "MYNOTE_HEALTHCHECK_OK");
+        assert_eq!(response.total_tokens, Some(13));
+    }
+
+    #[test]
+    fn anthropic_defaults_to_large_max_tokens_when_unconfigured() {
+        let profile = AiProfile {
+            id: "profile-1".into(),
+            name: "Anthropic Test".into(),
+            provider: AiProviderKind::Anthropic,
+            model: "claude-3-5-haiku-latest".into(),
+            base_url: None,
+            max_tokens: None,
+            temperature: None,
+            enabled: true,
+        };
+        let request = AiTextRequest {
+            prompt: "hello".into(),
+            max_tokens: None,
+            temperature: None,
+            expected_text: None,
+        };
+
+        assert_eq!(resolve_anthropic_max_tokens(&profile, &request), DEFAULT_ANTHROPIC_MAX_TOKENS);
     }
 }

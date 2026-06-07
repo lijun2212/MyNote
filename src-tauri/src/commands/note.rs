@@ -1,12 +1,13 @@
 use crate::domain::note::{
-    CreateNoteInput, CreateNotebookInput, Note, NoteDetail, NoteTreeNode,
+    CreateNoteInput, CreateNotebookInput, Note, NoteDetail, NoteOutlineItem, NoteTreeNode,
     RenameNotebookResult, SaveNoteInput, SaveNoteResult,
 };
 use crate::error::AppError;
 use crate::services::note::{
     create_note_service, create_notebook_service, delete_notebook_service,
-    get_note_by_path_service, get_note_tree_service, import_note_service, move_note_in_root,
-    rename_notebook_service, reorder_notebooks_service, save_note_service,
+    get_note_by_path_service, get_note_outline_service, get_note_tree_service,
+    import_note_service, move_note_in_root, rename_notebook_service,
+    reorder_notebooks_service, save_note_service,
     update_notebook_visual_service,
 };
 use crate::state::AppState;
@@ -37,6 +38,14 @@ pub async fn get_note_by_path(
     path: String,
 ) -> Result<NoteDetail, AppError> {
     get_note_by_path_service(&state, &path)
+}
+
+#[tauri::command]
+pub async fn get_note_outline(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<Vec<NoteOutlineItem>, AppError> {
+    get_note_outline_service(&state, &path)
 }
 
 #[tauri::command]

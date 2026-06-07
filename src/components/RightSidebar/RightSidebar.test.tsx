@@ -9,10 +9,18 @@ describe("RightSidebar", () => {
     useEditorStore.setState({ currentNote: null });
   });
 
+  it("shows the outline panel by default", () => {
+    render(<RightSidebar />);
+
+    expect(screen.getByText("打开笔记后显示大纲")).toBeInTheDocument();
+  });
+
   it("uses 关联 as the unified knowledge association tab", async () => {
     const user = userEvent.setup();
 
     render(<RightSidebar />);
+
+    expect(screen.getByText("打开笔记后显示大纲")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "关联" }));
 

@@ -24,6 +24,16 @@ export interface NoteDetail {
   content: string;
 }
 
+export interface NoteOutlineItem {
+  id: string;
+  text: string;
+  level: 1 | 2 | 3;
+  lineStart: number;
+  lineEnd: number;
+  anchor: string;
+  children: NoteOutlineItem[];
+}
+
 export type AiProviderKind = "open_ai_compatible" | "anthropic";
 
 export interface AiProfile {
@@ -95,6 +105,20 @@ export interface SummaryGenerationResult {
   summary: string;
   used_fallback: boolean;
   provider_trace?: AiProviderTrace | null;
+}
+
+export interface SummaryGenerationStreamStart {
+  request_id: string;
+}
+
+export interface SummaryStreamEvent {
+  request_id: string;
+  type: "delta" | "completed" | "error";
+  chunk?: string | null;
+  summary?: string | null;
+  used_fallback?: boolean | null;
+  provider_trace?: AiProviderTrace | null;
+  error?: string | null;
 }
 
 export interface NoteTreeNode {

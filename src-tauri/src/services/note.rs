@@ -1,10 +1,10 @@
 use crate::domain::note::{
-    CreateNoteInput, CreateNotebookInput, Note, NoteDetail, NoteTreeNode,
+    CreateNoteInput, CreateNotebookInput, Note, NoteDetail, NoteOutlineItem, NoteTreeNode,
     RenameNotebookResult, SaveNoteInput, SaveNoteResult,
 };
 use crate::error::{AppError, AppResult};
 use crate::infrastructure::fs::{atomic_write, normalize_kb_relative_path, resolve_kb_path, safe_filename};
-use crate::infrastructure::markdown::{render_note, FrontMatter};
+use crate::infrastructure::markdown::{extract_note_outline_blocks_from_content, render_note, FrontMatter};
 use crate::services::index::index_note_full;
 use crate::services::notebook_visual::{
     delete_notebook_visual, load_notebook_visuals, rename_notebook_visual,
@@ -128,6 +128,101 @@ pub fn get_note_by_path_service(state: &State<AppState>, rel_path: &str) -> AppR
     ).map_err(|_| AppError::NotFound(format!("Note not found in DB: {}", rel_path)))?;
 
     Ok(NoteDetail { note, content })
+}
+
+fn note_outline_item_from_block(block: crate::infrastructure::markdown::NoteOutlineBlock) -> NoteOutlineItem {
+    NoteOutlineItem {
+        id: format!("{}:{}", block.anchor, block.line_start),
+        text: block.text,
+        level: block.level,
+        line_start: block.line_start,
+        line_end: block.line_end,
+        anchor: block.anchor,
+        children: Vec::new(),
+    }
+}
+
+fn push_outline_item(
+    roots: &mut Vec<NoteOutlineItem>,
+    current_h1_index: Option<usize>,
+    current_h2_index: Option<usize>,
+    item: NoteOutlineItem,
+    level: u8,
+) -> (Option<usize>, Option<usize>) {
+    match level {
+        1 => {
+            roots.push(item);
+            (Some(roots.len() - 1), None)
+        }
+        2 => {
+            if let Some(h1_index) = current_h1_index {
+                roots[h1_index].children.push(item);
+                (current_h1_index, Some(roots[h1_index].children.len() - 1))
+            } else {
+                roots.push(item);
+                (None, Some(roots.len() - 1))
+            }
+        }
+        3 => {
+            if let Some(h1_index) = current_h1_index {
+                if let Some(h2_index) = current_h2_index {
+                    roots[h1_index].children[h2_index].children.push(item);
+                    (current_h1_index, current_h2_index)
+                } else {
+                    roots[h1_index].children.push(item);
+                    (current_h1_index, None)
+                }
+            } else if let Some(h2_index) = current_h2_index {
+                roots[h2_index].children.push(item);
+                (None, current_h2_index)
+            } else {
+                roots.push(item);
+                (None, None)
+            }
+        }
+        _ => (current_h1_index, current_h2_index),
+    }
+}
+
+fn build_note_outline_tree(
+    blocks: Vec<crate::infrastructure::markdown::NoteOutlineBlock>,
+) -> Vec<NoteOutlineItem> {
+    let mut roots = Vec::new();
+    let mut current_h1_index = None;
+    let mut current_h2_index = None;
+
+    for block in blocks {
+        let level = block.level;
+        let item = note_outline_item_from_block(block);
+        (current_h1_index, current_h2_index) = push_outline_item(
+            &mut roots,
+            current_h1_index,
+            current_h2_index,
+            item,
+            level,
+        );
+    }
+
+    roots
+}
+
+pub fn get_note_outline_in_root(root: &Path, rel_path: &str) -> AppResult<Vec<NoteOutlineItem>> {
+    let rel_path = normalize_kb_relative_path(rel_path)?;
+    let abs = resolve_kb_path(root, &rel_path)?;
+    let content = std::fs::read_to_string(&abs)
+        .map_err(|_| AppError::NotFound(format!("File not found: {}", rel_path)))?;
+
+    let blocks = extract_note_outline_blocks_from_content(&content, 3);
+    Ok(build_note_outline_tree(blocks))
+}
+
+pub fn get_note_outline_service(state: &State<AppState>, rel_path: &str) -> AppResult<Vec<NoteOutlineItem>> {
+    let root_guard = state.kb_root_guard();
+    let root = root_guard
+        .as_ref()
+        .ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?;
+
+    get_note_outline_in_root(root, rel_path)
 }
 
 pub fn save_note_service(state: &State<AppState>, input: SaveNoteInput) -> AppResult<SaveNoteResult> {
@@ -968,8 +1063,8 @@ pub fn import_note_service(
 mod tests {
     use super::{
         build_tree, build_tree_with_directories, build_tree_with_visuals, create_notebook_in_root,
-        delete_notebook_in_root, move_note_in_root, rename_notebook_in_root,
-        reorder_notebooks_in_root, update_notebook_visual_in_root,
+        delete_notebook_in_root, get_note_outline_in_root, move_note_in_root,
+        rename_notebook_in_root, reorder_notebooks_in_root, update_notebook_visual_in_root,
     };
     use crate::domain::note::Note;
     use crate::error::AppError;
@@ -1030,6 +1125,104 @@ mod tests {
         let legal_visual = visuals.get("notes/法律").expect("expected visual metadata");
         assert_eq!(legal_visual.icon, "book");
         assert_eq!(legal_visual.color, "blue");
+    }
+
+    #[test]
+    fn get_note_outline_in_root_returns_nested_outline_items() {
+        let root = TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join("notes")).unwrap();
+
+        let rel_path = "notes/outline.md";
+        let content = concat!(
+            "---\n",
+            "title: Outline\n",
+            "---\n\n",
+            "# Alpha\n",
+            "intro\n\n",
+            "## Beta\n",
+            "beta body\n\n",
+            "### Gamma\n",
+            "gamma body\n\n",
+            "## Delta\n",
+            "delta body\n",
+        );
+        std::fs::write(root.path().join(rel_path), content).unwrap();
+
+        let outline = get_note_outline_in_root(root.path(), rel_path).unwrap();
+
+        assert_eq!(outline.len(), 1);
+        assert_eq!(outline[0].id, "alpha:5");
+        assert_eq!(outline[0].text, "Alpha");
+        assert_eq!(outline[0].level, 1);
+        assert_eq!(outline[0].line_start, 5);
+        assert_eq!(outline[0].line_end, 15);
+        assert_eq!(outline[0].anchor, "alpha");
+
+        assert_eq!(outline[0].children.len(), 2);
+
+        let beta = &outline[0].children[0];
+        assert_eq!(beta.id, "beta:8");
+        assert_eq!(beta.text, "Beta");
+        assert_eq!(beta.level, 2);
+        assert_eq!(beta.line_start, 8);
+        assert_eq!(beta.line_end, 13);
+        assert_eq!(beta.anchor, "beta");
+        assert_eq!(beta.children.len(), 1);
+
+        let gamma = &beta.children[0];
+        assert_eq!(gamma.id, "gamma:11");
+        assert_eq!(gamma.text, "Gamma");
+        assert_eq!(gamma.level, 3);
+        assert_eq!(gamma.line_start, 11);
+        assert_eq!(gamma.line_end, 13);
+        assert_eq!(gamma.anchor, "gamma");
+        assert!(gamma.children.is_empty());
+
+        let delta = &outline[0].children[1];
+        assert_eq!(delta.id, "delta:14");
+        assert_eq!(delta.text, "Delta");
+        assert_eq!(delta.level, 2);
+        assert_eq!(delta.line_start, 14);
+        assert_eq!(delta.line_end, 15);
+        assert_eq!(delta.anchor, "delta");
+        assert!(delta.children.is_empty());
+    }
+
+    #[test]
+    fn get_note_outline_in_root_supports_top_level_h2_and_duplicate_heading_ids() {
+        let root = TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join("notes")).unwrap();
+
+        let rel_path = "notes/h2-outline.md";
+        let content = concat!(
+            "## Overview\n",
+            "overview body\n\n",
+            "### Details\n",
+            "details body\n\n",
+            "## Overview\n",
+            "second overview\n",
+        );
+        std::fs::write(root.path().join(rel_path), content).unwrap();
+
+        let outline = get_note_outline_in_root(root.path(), rel_path).unwrap();
+
+        assert_eq!(outline.len(), 2);
+
+        let first = &outline[0];
+        assert_eq!(first.id, "overview:1");
+        assert_eq!(first.level, 2);
+        assert_eq!(first.line_start, 1);
+        assert_eq!(first.line_end, 6);
+        assert_eq!(first.children.len(), 1);
+        assert_eq!(first.children[0].id, "details:4");
+        assert_eq!(first.children[0].level, 3);
+
+        let second = &outline[1];
+        assert_eq!(second.id, "overview:7");
+        assert_eq!(second.level, 2);
+        assert_eq!(second.line_start, 7);
+        assert_eq!(second.line_end, 8);
+        assert!(second.children.is_empty());
     }
 
     #[test]

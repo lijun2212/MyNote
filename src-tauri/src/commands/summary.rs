@@ -4,12 +4,27 @@ use crate::error::AppError;
 use crate::infrastructure::fs::resolve_kb_path;
 use crate::services::summary::{build_summary_candidate, save_note_summary_in_conn};
 use crate::services::summary_agent::{
-    generate_summary_candidate_with_ai_for_root, prepare_default_summary_agent,
+    generate_summary_candidate_with_ai_for_root, generate_summary_candidate_with_ai_stream_for_root,
+    prepare_default_summary_agent,
 };
 use crate::state::AppState;
 use rusqlite::Connection;
 use std::path::Path;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
+
+const SUMMARY_STREAM_EVENT: &str = "summary:stream";
+
+#[derive(Clone, serde::Serialize)]
+struct SummaryStreamEventPayload {
+    request_id: String,
+    #[serde(rename = "type")]
+    event_type: &'static str,
+    chunk: Option<String>,
+    summary: Option<String>,
+    used_fallback: Option<bool>,
+    provider_trace: Option<crate::domain::ai::AiProviderTrace>,
+    error: Option<String>,
+}
 
 fn generate_summary_candidate_in_root(root: &Path, path: &str) -> Result<String, AppError> {
     let abs = resolve_kb_path(root, path)?;
@@ -87,6 +102,85 @@ pub async fn generate_summary_candidate_with_ai(
     };
 
     generate_summary_candidate_with_ai_for_root(&root, &path, prepared).await
+}
+
+#[tauri::command]
+pub async fn generate_summary_candidate_with_ai_stream(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+    request_id: String,
+    profile_id: Option<String>,
+) -> Result<String, AppError> {
+    let root = {
+        let root_guard = state.kb_root_guard();
+        root_guard
+            .as_ref()
+            .ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?
+            .clone()
+    };
+
+    let prepared = {
+        let db_guard = state.db_guard();
+        let conn = db_guard
+            .as_ref()
+            .ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
+        prepare_default_summary_agent(conn, &root, profile_id.as_deref())
+    };
+
+    let app_handle = app.clone();
+    let stream_request_id = request_id.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut emit_delta = |chunk: String| {
+            app_handle
+                .emit(
+                    SUMMARY_STREAM_EVENT,
+                    SummaryStreamEventPayload {
+                        request_id: stream_request_id.clone(),
+                        event_type: "delta",
+                        chunk: Some(chunk),
+                        summary: None,
+                        used_fallback: None,
+                        provider_trace: None,
+                        error: None,
+                    },
+                )
+                .map_err(|error| AppError::Io(format!("Failed to emit summary stream delta: {error}")))
+        };
+
+        match generate_summary_candidate_with_ai_stream_for_root(&root, &path, prepared, &mut emit_delta).await {
+            Ok(result) => {
+                let _ = app_handle.emit(
+                    SUMMARY_STREAM_EVENT,
+                    SummaryStreamEventPayload {
+                        request_id: stream_request_id,
+                        event_type: "completed",
+                        chunk: None,
+                        summary: Some(result.summary),
+                        used_fallback: Some(result.used_fallback),
+                        provider_trace: result.provider_trace,
+                        error: None,
+                    },
+                );
+            }
+            Err(error) => {
+                let _ = app_handle.emit(
+                    SUMMARY_STREAM_EVENT,
+                    SummaryStreamEventPayload {
+                        request_id: stream_request_id,
+                        event_type: "error",
+                        chunk: None,
+                        summary: None,
+                        used_fallback: None,
+                        provider_trace: None,
+                        error: Some(error.to_string()),
+                    },
+                );
+            }
+        }
+    });
+
+    Ok(request_id)
 }
 
 #[cfg(test)]

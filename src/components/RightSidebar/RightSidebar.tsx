@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useEditorStore } from "../../store/useEditorStore";
 import { BacklinksPanel } from "./BacklinksPanel";
+import { OutlinePanel } from "./OutlinePanel";
 
 type Tab = "outline" | "associations";
 
@@ -42,9 +43,7 @@ export function RightSidebar() {
         </button>
       </div>
       <div style={{ flex: 1, overflowY: "auto" }}>
-        {activeTab === "outline" && (
-          <div style={{ padding: 12, color: "#999" }}>大纲（待实现）</div>
-        )}
+        {activeTab === "outline" && <OutlinePanel />}
         {activeTab === "associations" && <BacklinksPanel noteId={noteId} />}
       </div>
     </div>
