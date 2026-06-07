@@ -9,8 +9,6 @@ use crate::services::index::index_note_full;
 use rusqlite::Connection;
 use std::path::Path;
 
-const MAX_SUMMARY_CHARS: usize = 180;
-
 pub fn build_summary_candidate(content: &str, fallback_title: &str) -> AppResult<String> {
     let parsed = parse_note(content, fallback_title)?;
     let body_without_summary = remove_lookback_summary_block(&parsed.body);
@@ -45,12 +43,10 @@ pub fn build_summary_candidate(content: &str, fallback_title: &str) -> AppResult
     }
 
     let normalized = candidate.split_whitespace().collect::<Vec<_>>().join(" ");
-    let truncated = normalized.chars().take(MAX_SUMMARY_CHARS).collect::<String>();
-
-    if truncated.is_empty() {
+    if normalized.is_empty() {
         Ok(parsed.title)
     } else {
-        Ok(truncated)
+        Ok(normalized)
     }
 }
 
@@ -140,6 +136,24 @@ mod tests {
         let candidate = build_summary_candidate("", "filename-stem").unwrap();
 
         assert_eq!(candidate, "filename-stem");
+    }
+
+    #[test]
+    fn builds_candidate_keeps_longer_rule_summary() {
+        let content = format!("# Demo\n\n{}", "这是一段很长的正文。".repeat(80));
+
+        let candidate = build_summary_candidate(&content, "Demo").unwrap();
+
+        assert!(candidate.chars().count() > 200);
+    }
+
+    #[test]
+    fn build_summary_candidate_does_not_hard_truncate_rule_summary() {
+        let content = format!("# Demo\n\n{}", "这是一段很长的正文。".repeat(80));
+
+        let candidate = build_summary_candidate(&content, "Demo").unwrap();
+
+        assert!(candidate.chars().count() > 200);
     }
 
     #[test]

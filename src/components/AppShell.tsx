@@ -100,7 +100,9 @@ export function AppShell() {
     importNote: () => dispatchWindowEvent(new Event(REQUEST_IMPORT_NOTE_EVENT)),
     openSearch: () => dispatchWindowEvent(new Event(OPEN_SEARCH_EVENT)),
     openAiSettings: () => openAiSettings(),
-    testAiConnection: () => testAiConnection().catch(ignoreAsyncError),
+    testAiConnection: () => {
+      void testAiConnection().catch(ignoreAsyncError);
+    },
     toggleAutoSummaryAgent: () => toggleAutoSummaryAgent().catch(ignoreAsyncError),
     toggleLeftSidebar: () => toggleLeftSidebar(),
     toggleRightSidebar: () => toggleRightSidebar(),

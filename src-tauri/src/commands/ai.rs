@@ -4,7 +4,7 @@ use crate::domain::ai::{
 };
 use crate::error::AppError;
 use crate::services::ai::{
-    build_secret_store_key, load_ai_profile, load_ai_settings, load_profile_secret,
+    build_secret_store_key, cache_profile_secret, load_ai_profile, load_ai_settings, load_profile_secret,
     normalize_profile_id,
     save_ai_settings as save_ai_settings_in_conn, upsert_ai_profile as upsert_ai_profile_in_conn,
     AiOrchestrator, AiSecretStore,
@@ -41,7 +41,10 @@ fn set_ai_profile_secret_in_conn(
     secret_store.set_profile_secret(secret_key, &normalized_api_key)?;
 
     match secret_store.get_profile_secret(secret_key) {
-        Ok(_) => Ok(()),
+        Ok(_) => {
+            cache_profile_secret(secret_key, &normalized_api_key);
+            Ok(())
+        }
         Err(AppError::NotFound(_)) => Err(AppError::Io(
             "Failed to verify saved AI profile secret in the system keychain".into(),
         )),
@@ -437,6 +440,8 @@ mod tests {
     };
     use crate::infrastructure::db::open_and_migrate;
     use crate::services::ai::{
+        load_profile_secret,
+        reset_profile_secret_cache_for_tests,
         save_ai_settings as save_ai_settings_in_conn,
         upsert_ai_profile as upsert_ai_profile_in_conn,
         AiOrchestrator,
@@ -523,6 +528,7 @@ mod tests {
     }
 
     fn insert_profile(conn: &rusqlite::Connection, profile_id: &str, provider: AiProviderKind) {
+	    reset_profile_secret_cache_for_tests();
         upsert_ai_profile_in_conn(
             conn,
             AiProfileInput {
@@ -654,17 +660,42 @@ mod tests {
     }
 
     #[test]
+    fn set_ai_profile_secret_primes_session_cache_for_later_reads() {
+        let temp = tempdir().unwrap();
+        let conn = open_and_migrate(&temp.path().join("test.sqlite")).unwrap();
+        let secret_store = MemorySecretStore::default();
+        let kb_root = Path::new("/tmp/kb-cache-prime");
+        let secret_key = build_secret_store_key(kb_root, "profile-cache-prime");
+
+        insert_profile(&conn, "profile-cache-prime", AiProviderKind::OpenAiCompatible);
+        set_ai_profile_secret_in_conn(
+            &conn,
+            &secret_store,
+            &secret_key,
+            "profile-cache-prime",
+            "sk-cached-after-save",
+        )
+        .unwrap();
+
+        let cached_secret = load_profile_secret(&FailingSecretStore, kb_root, "profile-cache-prime").unwrap();
+
+        assert_eq!(cached_secret, "sk-cached-after-save");
+    }
+
+    #[test]
     fn has_ai_profile_secret_reports_false_when_secret_is_missing() {
         let temp = tempdir().unwrap();
         let conn = open_and_migrate(&temp.path().join("test.sqlite")).unwrap();
         let secret_store = MemorySecretStore::default();
-        insert_profile(&conn, "profile-1", AiProviderKind::Anthropic);
+        let profile_id = "profile-missing-secret";
+        let kb_root = Path::new("/tmp/kb-missing-secret");
+        insert_profile(&conn, profile_id, AiProviderKind::Anthropic);
 
         let has_secret = has_ai_profile_secret_in_conn(
             &conn,
             &secret_store,
-            Path::new("/tmp/kb-a"),
-            "profile-1",
+            kb_root,
+            profile_id,
         )
         .unwrap();
 
@@ -677,15 +708,17 @@ mod tests {
         let conn = open_and_migrate(&temp.path().join("test.sqlite")).unwrap();
         let secret_store = MemorySecretStore::default();
         let orchestrator = AiOrchestrator::default();
-        insert_profile(&conn, "profile-1", AiProviderKind::OpenAiCompatible);
+        let profile_id = "profile-readable-missing-secret";
+        let kb_root = Path::new("/tmp/kb-readable-missing-secret");
+        insert_profile(&conn, profile_id, AiProviderKind::OpenAiCompatible);
         let prepared = prepare_ai_profile_test_in_conn(
             &conn,
             &secret_store,
-            Path::new("/tmp/kb-a"),
-            "profile-1",
+            kb_root,
+            profile_id,
         )
         .unwrap();
-        let result = complete_ai_profile_test(&orchestrator, "profile-1", prepared)
+        let result = complete_ai_profile_test(&orchestrator, profile_id, prepared)
             .await
             .unwrap();
 
@@ -701,15 +734,17 @@ mod tests {
         let conn = open_and_migrate(&temp.path().join("test.sqlite")).unwrap();
         let secret_store = FailingSecretStore;
         let orchestrator = AiOrchestrator::default();
-        insert_profile(&conn, "profile-1", AiProviderKind::Anthropic);
+        let profile_id = "profile-keychain-unavailable";
+        let kb_root = Path::new("/tmp/kb-keychain-unavailable");
+        insert_profile(&conn, profile_id, AiProviderKind::Anthropic);
         let prepared = prepare_ai_profile_test_in_conn(
             &conn,
             &secret_store,
-            Path::new("/tmp/kb-a"),
-            "profile-1",
+            kb_root,
+            profile_id,
         )
         .unwrap();
-        let result = complete_ai_profile_test(&orchestrator, "profile-1", prepared)
+        let result = complete_ai_profile_test(&orchestrator, profile_id, prepared)
             .await
             .unwrap();
 
@@ -758,8 +793,10 @@ mod tests {
         let temp = tempdir().unwrap();
         let conn = open_and_migrate(&temp.path().join("test.sqlite")).unwrap();
         let secret_store = MemorySecretStore::default();
-        insert_profile(&conn, "profile-1", AiProviderKind::Anthropic);
-        let secret_key = build_secret_store_key(Path::new("/tmp/kb-a"), "profile-1");
+        let profile_id = "profile-input-keychain";
+        let kb_root = Path::new("/tmp/kb-input-keychain");
+        insert_profile(&conn, profile_id, AiProviderKind::Anthropic);
+        let secret_key = build_secret_store_key(kb_root, profile_id);
         secret_store
             .set_profile_secret(&secret_key, "sk-from-keychain")
             .unwrap();
@@ -767,9 +804,9 @@ mod tests {
         let (_, prepared) = prepare_ai_profile_input_test_in_conn(
             &conn,
             &secret_store,
-            Path::new("/tmp/kb-a"),
+            kb_root,
             AiProfileInput {
-                id: Some("profile-1".into()),
+                id: Some(profile_id.into()),
                 name: "Edited Profile".into(),
                 provider: AiProviderKind::Anthropic,
                 model: "claude-3-5-haiku-latest".into(),
@@ -784,7 +821,7 @@ mod tests {
 
         match prepared {
             PreparedAiProfileTest::Ready { profile, api_key } => {
-                assert_eq!(profile.id, "profile-1");
+                assert_eq!(profile.id, profile_id);
                 assert_eq!(profile.name, "Edited Profile");
                 assert_eq!(api_key, "sk-from-keychain");
             }

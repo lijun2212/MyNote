@@ -400,12 +400,136 @@ const MIGRATIONS: &[Migration] = &[
         CREATE INDEX IF NOT EXISTS idx_tag_occurrences_tag_note
         ON tag_occurrences(tag_id, note_id);",
     },
+    Migration {
+        version: 11,
+        name: "create_graph_candidate_relations",
+        sql: "ALTER TABLE relations RENAME TO relations_old;
+        CREATE TABLE relations (
+            id             TEXT PRIMARY KEY,
+            source_note_id TEXT NOT NULL,
+            target_note_id TEXT NOT NULL,
+            relation_type  TEXT NOT NULL CHECK (relation_type IN ('related', 'prerequisite', 'extension', 'opposes', 'supports', 'similar', 'premise', 'conclusion', 'example', 'rebuts')),
+            description    TEXT,
+            created_at     TEXT NOT NULL,
+            updated_at     TEXT NOT NULL,
+            FOREIGN KEY (source_note_id) REFERENCES notes(id) ON DELETE CASCADE,
+            FOREIGN KEY (target_note_id) REFERENCES notes(id) ON DELETE CASCADE
+        );
+        INSERT INTO relations (id, source_note_id, target_note_id, relation_type, description, created_at, updated_at)
+        SELECT id, source_note_id, target_note_id, relation_type, description, created_at, updated_at
+        FROM relations_old;
+        DROP TABLE relations_old;
+        CREATE INDEX IF NOT EXISTS idx_relations_source ON relations(source_note_id);
+        CREATE INDEX IF NOT EXISTS idx_relations_target ON relations(target_note_id);
+        CREATE INDEX IF NOT EXISTS idx_relations_type ON relations(relation_type);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_relations_unique_triplet
+        ON relations(source_note_id, target_note_id, relation_type);
+        CREATE TABLE IF NOT EXISTS graph_candidate_relations (
+            id TEXT PRIMARY KEY,
+            source_note_id TEXT NOT NULL,
+            source_heading_id TEXT,
+            target_note_id TEXT NOT NULL,
+            target_heading_id TEXT,
+            relation_type TEXT NOT NULL CHECK (relation_type IN ('related', 'prerequisite', 'extension', 'opposes', 'supports', 'similar', 'premise', 'conclusion', 'example', 'rebuts')),
+            rationale TEXT NOT NULL,
+            evidence_excerpt TEXT,
+            candidate_status TEXT NOT NULL DEFAULT 'pending' CHECK (candidate_status IN ('pending', 'accepted', 'ignored')),
+            provider_name TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            accepted_relation_id TEXT,
+            FOREIGN KEY (source_note_id) REFERENCES notes(id) ON DELETE CASCADE,
+            FOREIGN KEY (target_note_id) REFERENCES notes(id) ON DELETE CASCADE,
+            FOREIGN KEY (accepted_relation_id) REFERENCES relations(id) ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_graph_candidate_relations_source_status
+        ON graph_candidate_relations(source_note_id, candidate_status);
+        CREATE INDEX IF NOT EXISTS idx_graph_candidate_relations_target_status
+        ON graph_candidate_relations(target_note_id, candidate_status);",
+    },
 ];
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    fn insert_note(conn: &Connection, note_id: &str, path: &str, title: &str) {
+        conn.execute(
+            "INSERT INTO notes (id, path, title, content_hash, word_count, front_matter_json, created_at, updated_at, indexed_at)
+             VALUES (?1, ?2, ?3, 'hash', 0, '{}', '2026-06-01T00:00:00Z', '2026-06-01T00:00:00Z', '2026-06-01T00:00:00Z')",
+            params![note_id, path, title],
+        )
+        .unwrap();
+    }
+
+    fn insert_relation(
+        conn: &Connection,
+        relation_id: &str,
+        source_note_id: &str,
+        target_note_id: &str,
+        relation_type: &str,
+    ) {
+        conn.execute(
+            "INSERT INTO relations (id, source_note_id, target_note_id, relation_type, description, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, 'desc', '2026-06-01T00:00:00Z', '2026-06-01T00:00:00Z')",
+            params![relation_id, source_note_id, target_note_id, relation_type],
+        )
+        .unwrap();
+    }
+
+    fn insert_graph_candidate_relation(
+        conn: &Connection,
+        candidate_id: &str,
+        relation_type: &str,
+        candidate_status: &str,
+        accepted_relation_id: Option<&str>,
+    ) -> rusqlite::Result<usize> {
+        conn.execute(
+            "INSERT INTO graph_candidate_relations (
+                id,
+                source_note_id,
+                source_heading_id,
+                target_note_id,
+                target_heading_id,
+                relation_type,
+                rationale,
+                evidence_excerpt,
+                candidate_status,
+                provider_name,
+                created_at,
+                updated_at,
+                accepted_relation_id
+            ) VALUES (
+                ?1,
+                'note-1',
+                NULL,
+                'note-2',
+                NULL,
+                ?2,
+                'rationale',
+                NULL,
+                ?3,
+                'provider',
+                '2026-06-01T00:00:00Z',
+                '2026-06-01T00:00:00Z',
+                ?4
+            )",
+            params![candidate_id, relation_type, candidate_status, accepted_relation_id],
+        )
+    }
+
+    fn setup_graph_candidate_relation_test_db() -> Connection {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("graph-candidate-constraints.sqlite");
+        let conn = open_and_migrate(&db_path).unwrap();
+
+        insert_note(&conn, "note-1", "notes/note-1.md", "Note 1");
+        insert_note(&conn, "note-2", "notes/note-2.md", "Note 2");
+        insert_relation(&conn, "accepted-relation-1", "note-1", "note-2", "supports");
+
+        conn
+    }
 
     fn migration_rows(conn: &Connection) -> Vec<(i64, String, String, String)> {
         let mut stmt = conn
@@ -481,10 +605,10 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(count, 10);
+        assert_eq!(count, 11);
 
         let rows = migration_rows(&conn);
-        assert_eq!(rows.len(), 10);
+        assert_eq!(rows.len(), 11);
         assert!(rows.iter().all(|(_, _, checksum, _)| checksum.len() == 64));
         assert!(rows.iter().all(|(_, _, _, status)| status == "applied"));
 
@@ -530,7 +654,7 @@ mod tests {
             )
             .unwrap();
         assert!(relation_table_sql.contains(
-            "CHECK (relation_type IN ('related', 'prerequisite', 'extension', 'opposes', 'supports', 'similar'))"
+            "CHECK (relation_type IN ('related', 'prerequisite', 'extension', 'opposes', 'supports', 'similar', 'premise', 'conclusion', 'example', 'rebuts'))"
         ));
 
         let mut index_info_stmt = conn
@@ -604,6 +728,199 @@ mod tests {
     }
 
     #[test]
+    fn init_db_creates_graph_candidate_relations_table() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("graph.sqlite");
+        let conn = open_and_migrate(&db_path).unwrap();
+
+        let table_name: String = conn
+            .query_row(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'graph_candidate_relations'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(table_name, "graph_candidate_relations");
+
+        let mut stmt = conn
+            .prepare("PRAGMA index_list('graph_candidate_relations')")
+            .unwrap();
+        let indexes = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(indexes
+            .iter()
+            .any(|name| name == "idx_graph_candidate_relations_source_status"));
+        assert!(indexes
+            .iter()
+            .any(|name| name == "idx_graph_candidate_relations_target_status"));
+
+        let table_sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'graph_candidate_relations'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(table_sql.contains(
+            "CHECK (relation_type IN ('related', 'prerequisite', 'extension', 'opposes', 'supports', 'similar', 'premise', 'conclusion', 'example', 'rebuts'))"
+        ));
+        assert!(table_sql.contains(
+            "CHECK (candidate_status IN ('pending', 'accepted', 'ignored'))"
+        ));
+    }
+
+    #[test]
+    fn graph_candidate_relations_reject_invalid_relation_type() {
+        let conn = setup_graph_candidate_relation_test_db();
+
+        let result = insert_graph_candidate_relation(
+            &conn,
+            "candidate-invalid-relation-type",
+            "invalid_type",
+            "pending",
+            None,
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn graph_candidate_relations_reject_invalid_candidate_status() {
+        let conn = setup_graph_candidate_relation_test_db();
+
+        let result = insert_graph_candidate_relation(
+            &conn,
+            "candidate-invalid-status",
+            "supports",
+            "unknown",
+            None,
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn graph_candidate_relations_delete_of_accepted_relation_sets_reference_to_null() {
+        let conn = setup_graph_candidate_relation_test_db();
+
+        let inserted = insert_graph_candidate_relation(
+            &conn,
+            "candidate-accepted-relation-link",
+            "supports",
+            "accepted",
+            Some("accepted-relation-1"),
+        );
+        assert!(inserted.is_ok());
+
+        conn.execute("DELETE FROM relations WHERE id = 'accepted-relation-1'", [])
+            .unwrap();
+
+        let accepted_relation_id: Option<String> = conn
+            .query_row(
+                "SELECT accepted_relation_id FROM graph_candidate_relations WHERE id = 'candidate-accepted-relation-link'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(accepted_relation_id, None);
+    }
+
+    #[test]
+    fn migration_11_preserves_existing_relations_and_allows_widened_relation_types() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("migration-11-upgrade.sqlite");
+        let conn = Connection::open(&db_path).unwrap();
+
+        conn.execute_batch(
+            "PRAGMA foreign_keys=ON;
+            CREATE TABLE schema_migrations (
+                version    INTEGER PRIMARY KEY,
+                name       TEXT    NOT NULL,
+                checksum   TEXT    NOT NULL DEFAULT '',
+                status     TEXT    NOT NULL DEFAULT 'applied',
+                applied_at TEXT    NOT NULL
+            );
+            CREATE TABLE notes (
+                id TEXT PRIMARY KEY,
+                path TEXT NOT NULL UNIQUE,
+                title TEXT NOT NULL,
+                summary TEXT,
+                content_hash TEXT NOT NULL,
+                word_count INTEGER NOT NULL DEFAULT 0,
+                front_matter_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                indexed_at TEXT NOT NULL,
+                deleted_at TEXT
+            );
+            CREATE TABLE relations (
+                id             TEXT PRIMARY KEY,
+                source_note_id TEXT NOT NULL,
+                target_note_id TEXT NOT NULL,
+                relation_type  TEXT NOT NULL CHECK (relation_type IN ('related', 'prerequisite', 'extension', 'opposes', 'supports', 'similar')),
+                description    TEXT,
+                created_at     TEXT NOT NULL,
+                updated_at     TEXT NOT NULL,
+                FOREIGN KEY (source_note_id) REFERENCES notes(id) ON DELETE CASCADE,
+                FOREIGN KEY (target_note_id) REFERENCES notes(id) ON DELETE CASCADE
+            );",
+        )
+        .unwrap();
+
+        for migration in MIGRATIONS.iter().take(10) {
+            conn.execute(
+                "INSERT INTO schema_migrations (version, name, checksum, status, applied_at)
+                 VALUES (?1, ?2, ?3, 'applied', datetime('now'))",
+                params![migration.version, migration.name, migration_checksum(migration)],
+            )
+            .unwrap();
+        }
+
+        insert_note(&conn, "note-1", "notes/note-1.md", "Note 1");
+        insert_note(&conn, "note-2", "notes/note-2.md", "Note 2");
+        insert_note(&conn, "note-3", "notes/note-3.md", "Note 3");
+        insert_relation(&conn, "legacy-relation", "note-1", "note-2", "supports");
+        drop(conn);
+
+        let conn = open_and_migrate(&db_path).unwrap();
+
+        let legacy_relation: (String, String, String, String) = conn
+            .query_row(
+                "SELECT id, source_note_id, target_note_id, relation_type FROM relations WHERE id = 'legacy-relation'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            legacy_relation,
+            (
+                "legacy-relation".to_string(),
+                "note-1".to_string(),
+                "note-2".to_string(),
+                "supports".to_string(),
+            )
+        );
+
+        let widened_insert = conn.execute(
+            "INSERT INTO relations (id, source_note_id, target_note_id, relation_type, description, created_at, updated_at)
+             VALUES ('new-premise-relation', 'note-1', 'note-3', 'premise', 'desc', '2026-06-01T00:00:00Z', '2026-06-01T00:00:00Z')",
+            [],
+        );
+        assert!(widened_insert.is_ok());
+
+        let invalid_insert = conn.execute(
+            "INSERT INTO relations (id, source_note_id, target_note_id, relation_type, description, created_at, updated_at)
+             VALUES ('new-invalid-relation', 'note-1', 'note-3', 'invalid_type', 'desc', '2026-06-01T00:00:00Z', '2026-06-01T00:00:00Z')",
+            [],
+        );
+        assert!(invalid_insert.is_err());
+    }
+
+    #[test]
     fn test_legacy_migrations_backfill_checksum_and_status() {
         let dir = TempDir::new().unwrap();
         let db_path = dir.path().join("legacy.sqlite");
@@ -637,7 +954,7 @@ mod tests {
         assert!(columns.contains(&"status".to_string()));
 
         let rows = migration_rows(&conn);
-    assert_eq!(rows.len(), 10);
+        assert_eq!(rows.len(), 11);
         assert!(rows.iter().all(|(_, _, checksum, _)| checksum.len() == 64));
         assert!(rows.iter().all(|(_, _, _, status)| status == "applied"));
         assert_eq!(rows[0].0, 1);

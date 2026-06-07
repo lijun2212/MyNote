@@ -63,3 +63,14 @@ pub struct SaveNoteInput {
     pub content: String,
     pub expected_hash: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NoteOutlineItem {
+    pub id: String,
+    pub text: String,
+    pub level: u8,
+    pub line_start: i64,
+    pub line_end: i64,
+    pub anchor: String,
+    pub children: Vec<NoteOutlineItem>,
+}

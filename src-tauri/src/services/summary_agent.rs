@@ -12,7 +12,6 @@ use crate::services::summary::build_summary_candidate;
 use rusqlite::Connection;
 use std::path::Path;
 
-const MAX_SUMMARY_CHARS: usize = 180;
 const MAX_CONTEXT_CHARS: usize = 2400;
 
 pub enum PreparedSummaryAgent {
@@ -144,7 +143,7 @@ pub fn build_summary_prompt(
             concat!(
                 "你是 MyNote 的中文知识库摘要助手。",
                 "请根据标题和正文生成一段自然、可回看的中文摘要。",
-                "不要使用模板化开头，不要列点，不要超过 180 个中文字符。\n\n",
+                "不要使用模板化开头，不要列点，请将摘要控制在 200 字以内。\n\n",
                 "模型：{}\n",
                 "标题：{}\n\n",
                 "正文（已裁剪）：\n{}"
@@ -153,7 +152,7 @@ pub fn build_summary_prompt(
             parsed.title,
             trimmed_context,
         ),
-        max_tokens: Some(MAX_SUMMARY_CHARS as u32),
+        max_tokens: None,
         temperature: Some(0.4),
         expected_text: None,
     })
@@ -212,7 +211,67 @@ pub fn finalize_summary(text: &str) -> String {
         .trim()
         .to_string();
 
-    trimmed.chars().take(MAX_SUMMARY_CHARS).collect()
+    trimmed
+}
+
+pub async fn generate_summary_candidate_with_ai_stream_for_root<F>(
+    root: &Path,
+    path: &str,
+    prepared: PreparedSummaryAgent,
+    on_delta: &mut F,
+) -> AppResult<SummaryGenerationResult>
+where
+    F: FnMut(String) -> AppResult<()> + Send,
+{
+    let abs = resolve_kb_path(root, path)?;
+    let content = std::fs::read_to_string(&abs)
+        .map_err(|_| AppError::NotFound(format!("File not found: {}", path)))?;
+    let fallback_title = path
+        .rsplit('/')
+        .next()
+        .unwrap_or("Untitled")
+        .trim_end_matches(".md");
+
+    match prepared {
+        PreparedSummaryAgent::Disabled => {
+            let summary = build_summary_candidate(&content, fallback_title)?;
+            if !summary.is_empty() {
+                on_delta(summary.clone())?;
+            }
+            Ok(SummaryGenerationResult {
+                summary,
+                used_fallback: true,
+                provider_trace: None,
+            })
+        }
+        PreparedSummaryAgent::Fallback { trace } => {
+            let summary = build_summary_candidate(&content, fallback_title)?;
+            if !summary.is_empty() {
+                on_delta(summary.clone())?;
+            }
+            Ok(SummaryGenerationResult {
+                summary,
+                used_fallback: true,
+                provider_trace: Some(trace),
+            })
+        }
+        PreparedSummaryAgent::Ready { profile, api_key } => {
+            let request = build_summary_prompt(&profile, &content, fallback_title)?;
+            let orchestrator = AiOrchestrator::default();
+            let ai_response = orchestrator
+                .invoke_text_stream(&profile, &api_key, &request, on_delta)
+                .await;
+            let mut result = generate_summary_candidate_with_ai_inner(&content, fallback_title, ai_response)?;
+
+            if let Some(trace) = result.provider_trace.as_mut() {
+                trace.profile_id = Some(profile.id.clone());
+                trace.provider = Some(profile.provider.clone());
+                trace.model = Some(profile.model.clone());
+            }
+
+            Ok(result)
+        }
+    }
 }
 
 pub fn generate_summary_candidate_with_ai_inner(
@@ -294,8 +353,8 @@ fn trace_for_profile(
 #[cfg(test)]
 mod tests {
     use super::{
-        finalize_summary, generate_summary_candidate_with_ai_inner, prepare_summary_agent,
-        PreparedSummaryAgent,
+        build_summary_prompt, finalize_summary, generate_summary_candidate_with_ai_inner,
+        prepare_summary_agent, PreparedSummaryAgent,
     };
     use crate::domain::ai::{AiProfileInput, AiProviderKind, AiTextResponse};
     use crate::error::AppError;
@@ -409,5 +468,56 @@ mod tests {
     #[test]
     fn finalize_summary_removes_prefix_and_extra_whitespace() {
         assert_eq!(finalize_summary("\n摘要：  测试摘要。  \n"), "测试摘要。");
+    }
+
+    #[test]
+    fn build_summary_prompt_requests_a_summary_within_500_chars() {
+        let profile = crate::domain::ai::AiProfile {
+            id: "profile-1".into(),
+            name: "Default".into(),
+            provider: AiProviderKind::Anthropic,
+            model: "claude-sonnet".into(),
+            base_url: None,
+            max_tokens: None,
+            temperature: Some(0.4),
+            enabled: true,
+        };
+
+        let request = build_summary_prompt(&profile, "# 标题\n\n正文第一段。", "标题").unwrap();
+
+        assert!(request.prompt.contains("500 字以内"));
+        assert_eq!(request.max_tokens, None);
+    }
+
+    #[test]
+    fn finalize_summary_keeps_longer_output_after_normalization() {
+        let long_summary = "摘".repeat(240);
+
+        assert_eq!(finalize_summary(&long_summary).chars().count(), 240);
+    }
+
+    #[test]
+    fn build_summary_prompt_does_not_force_request_max_tokens() {
+        let profile = crate::domain::ai::AiProfile {
+            id: "profile-1".into(),
+            name: "Default".into(),
+            provider: AiProviderKind::Anthropic,
+            model: "claude-sonnet".into(),
+            base_url: None,
+            max_tokens: Some(1024),
+            temperature: Some(0.4),
+            enabled: true,
+        };
+
+        let request = build_summary_prompt(&profile, "# 标题\n\n正文第一段。", "标题").unwrap();
+
+        assert_eq!(request.max_tokens, None);
+    }
+
+    #[test]
+    fn finalize_summary_preserves_longer_ai_output_without_hard_cap() {
+        let long_summary = "摘".repeat(240);
+
+        assert_eq!(finalize_summary(&long_summary).chars().count(), 240);
     }
 }

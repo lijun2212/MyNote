@@ -23,9 +23,15 @@ pub fn run() {
             commands::ai::has_ai_profile_secret,
             commands::ai::test_ai_profile,
             commands::ai::test_ai_profile_input,
+            commands::graph::get_note_graph_analysis,
+            commands::graph::get_note_graph_candidates,
+            commands::graph::generate_note_graph_candidates,
+            commands::graph::accept_graph_candidate,
+            commands::graph::ignore_graph_candidate,
             commands::note::create_note,
             commands::note::create_notebook,
             commands::note::get_note_by_path,
+            commands::note::get_note_outline,
             commands::note::save_note,
             commands::note::get_note_tree,
             commands::note::import_note,
@@ -46,6 +52,7 @@ pub fn run() {
             commands::search::search_notes,
             commands::summary::generate_summary_candidate,
             commands::summary::generate_summary_candidate_with_ai,
+            commands::summary::generate_summary_candidate_with_ai_stream,
             commands::summary::save_note_summary,
         ])
         .run(tauri::generate_context!())

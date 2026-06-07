@@ -24,6 +24,16 @@ export interface NoteDetail {
   content: string;
 }
 
+export interface NoteOutlineItem {
+  id: string;
+  text: string;
+  level: 1 | 2 | 3;
+  lineStart: number;
+  lineEnd: number;
+  anchor: string;
+  children: NoteOutlineItem[];
+}
+
 export type AiProviderKind = "open_ai_compatible" | "anthropic";
 
 export interface AiProfile {
@@ -97,6 +107,20 @@ export interface SummaryGenerationResult {
   provider_trace?: AiProviderTrace | null;
 }
 
+export interface SummaryGenerationStreamStart {
+  request_id: string;
+}
+
+export interface SummaryStreamEvent {
+  request_id: string;
+  type: "delta" | "completed" | "error";
+  chunk?: string | null;
+  summary?: string | null;
+  used_fallback?: boolean | null;
+  provider_trace?: AiProviderTrace | null;
+  error?: string | null;
+}
+
 export interface NoteTreeNode {
   id: string | null;
   name: string;
@@ -168,7 +192,11 @@ export type RelationType =
   | "extension"
   | "opposes"
   | "supports"
-  | "similar";
+  | "similar"
+  | "premise"
+  | "conclusion"
+  | "example"
+  | "rebuts";
 
 export interface Relation {
   id: string;
@@ -266,4 +294,84 @@ export interface SearchSession {
   results: SearchResult[];
   currentIndex: number;
   active: boolean;
+}
+
+export type GraphCandidateStatus = "pending" | "accepted" | "ignored";
+
+export type GraphRelationDirection = "incoming" | "outgoing";
+
+export interface GraphNodeRef {
+  noteId: string;
+  noteTitle: string;
+  notePath: string;
+  headingId: string | null;
+  headingText: string | null;
+  lineStart: number | null;
+  lineEnd: number | null;
+}
+
+export interface GraphRelationItem {
+  relationId: string;
+  relationType: RelationType;
+  direction: GraphRelationDirection;
+  note: GraphNodeRef;
+  rationale: string | null;
+}
+
+export interface GraphFactualRelationItem {
+  linkId: string;
+  direction: GraphRelationDirection;
+  note: GraphNodeRef;
+  linkText: string | null;
+  linkType: string;
+  targetAnchor: string | null;
+}
+
+export interface GraphCandidateRelation {
+  id: string;
+  sourceNoteId: string;
+  sourceHeadingId: string | null;
+  targetNoteId: string;
+  targetHeadingId: string | null;
+  relationType: RelationType;
+  rationale: string;
+  evidenceExcerpt: string | null;
+  candidateStatus: GraphCandidateStatus;
+  providerName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  acceptedRelationId: string | null;
+}
+
+export interface GraphOverview {
+  confirmedRelations: GraphRelationItem[];
+  factualRelations: GraphFactualRelationItem[];
+}
+
+export interface GraphLogicPathStep {
+  node: GraphNodeRef;
+  relationType: RelationType | null;
+  rationale: string | null;
+}
+
+export interface GraphLogicPath {
+  id: string;
+  label: string;
+  steps: GraphLogicPathStep[];
+}
+
+export interface GraphConflictItem {
+  relationId: string;
+  counterparty: GraphNodeRef;
+  relationType: RelationType;
+  direction: GraphRelationDirection;
+  rationale: string | null;
+}
+
+export interface NoteGraphAnalysis {
+  noteId: string;
+  overview: GraphOverview;
+  logicPaths: GraphLogicPath[];
+  conflicts: GraphConflictItem[];
+  missingPremises: string[];
 }

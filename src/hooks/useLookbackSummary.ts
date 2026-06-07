@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { api } from "../api/commands";
 import { useAiSettingsStore } from "../store/useAiSettingsStore";
 import { useEditorStore } from "../store/useEditorStore";
 import { useLookbackSummaryStore } from "../store/useLookbackSummaryStore";
+import type { SummaryStreamEvent } from "../types";
+
+const SUMMARY_STREAM_EVENT = "summary:stream";
 
 function formatSummaryFallbackReason(reason: string) {
   const trimmedReason = reason.trim();
@@ -56,6 +60,10 @@ function toErrorMessage(error: unknown): string {
 
 function getNoteKey(note: { id: string; path: string } | null): string | null {
   return note ? `${note.id}:${note.path}` : null;
+}
+
+function getGenerationPendingStatus(aiEnabled: boolean, defaultProfileId: string | null) {
+  return aiEnabled && defaultProfileId ? "AI 正在生成摘要..." : "正在生成摘要...";
 }
 
 function splitFrontMatter(content: string) {
@@ -328,6 +336,75 @@ export function useLookbackSummary() {
     markPromptShown(currentNote.path);
   }, [baseShouldSuggest, currentNote, currentNoteKey, markPromptShown, suggestedNoteKey]);
 
+  function isGenerateRequestCurrent(requestId: number, noteKeyAtRequest: string | null, summaryVersionAtRequest: number) {
+    return (
+      generateRequestIdRef.current === requestId
+      && currentNoteKeyRef.current === noteKeyAtRequest
+      && summaryVersionRef.current === summaryVersionAtRequest
+    );
+  }
+
+  async function generateSummaryFromAiStream(
+    notePath: string,
+    streamRequestId: string,
+    requestId: number,
+    noteKeyAtRequest: string | null,
+    summaryVersionAtRequest: number,
+  ) {
+    return await new Promise<{ summary: string; status: string | null }>((resolve, reject) => {
+      let settled = false;
+      let currentSummary = "";
+      let dispose = () => {};
+
+      const finish = (callback: () => void) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        dispose();
+        callback();
+      };
+
+      listen<SummaryStreamEvent>(SUMMARY_STREAM_EVENT, (event) => {
+        const payload = event.payload;
+
+        if (payload.request_id !== streamRequestId) {
+          return;
+        }
+
+        if (!isGenerateRequestCurrent(requestId, noteKeyAtRequest, summaryVersionAtRequest)) {
+          finish(() => resolve({ summary: currentSummary, status: null }));
+          return;
+        }
+
+        if (payload.type === "delta") {
+          currentSummary = `${currentSummary}${payload.chunk ?? ""}`;
+          setCandidate(currentSummary);
+          return;
+        }
+
+        if (payload.type === "completed") {
+          const finalSummary = payload.summary ?? currentSummary;
+          finish(() => resolve({
+            summary: finalSummary,
+            status: payload.used_fallback ? formatSummaryFallbackStatus(payload.provider_trace?.error) : null,
+          }));
+          return;
+        }
+
+        finish(() => reject(new Error(payload.error ?? "回看摘要操作失败")));
+      })
+        .then((unlisten) => {
+          dispose = unlisten;
+          return api.generateSummaryCandidateWithAiStream(notePath, streamRequestId, defaultProfileId ?? undefined);
+        })
+        .catch((error) => {
+          finish(() => reject(error));
+        });
+    });
+  }
+
   async function generateCandidate() {
     if (!currentNote) {
       return;
@@ -336,42 +413,51 @@ export function useLookbackSummary() {
     const requestId = generateRequestIdRef.current + 1;
     generateRequestIdRef.current = requestId;
     const notePath = currentNote.path;
+    const streamRequestId = `summary-${requestId}`;
     const noteKeyAtRequest = currentNoteKey;
     const summaryVersionAtRequest = summaryVersionRef.current;
 
     setIsGenerating(true);
     setError(null);
-    setGenerationStatus(null);
+    setCandidate("");
+    setGenerationStatus(getGenerationPendingStatus(aiEnabled, defaultProfileId));
 
     try {
-      const generationResult = await generateSummary(notePath);
+      let generationResult;
+      if (aiEnabled && defaultProfileId) {
+        try {
+          generationResult = await generateSummaryFromAiStream(
+            notePath,
+            streamRequestId,
+            requestId,
+            noteKeyAtRequest,
+            summaryVersionAtRequest,
+          );
+        } catch (streamError) {
+          const fallbackSummary = await api.generateSummaryCandidate(notePath);
+          generationResult = {
+            summary: fallbackSummary,
+            status: formatSummaryErrorStatus(streamError),
+          };
+        }
+      } else {
+        generationResult = await generateSummary(notePath);
+      }
 
-      if (
-        generateRequestIdRef.current !== requestId ||
-        currentNoteKeyRef.current !== noteKeyAtRequest ||
-        summaryVersionRef.current !== summaryVersionAtRequest
-      ) {
+      if (!isGenerateRequestCurrent(requestId, noteKeyAtRequest, summaryVersionAtRequest)) {
         return;
       }
 
       setCandidate(generationResult.summary);
       setGenerationStatus(generationResult.status);
     } catch (generationError) {
-      if (
-        generateRequestIdRef.current !== requestId ||
-        currentNoteKeyRef.current !== noteKeyAtRequest ||
-        summaryVersionRef.current !== summaryVersionAtRequest
-      ) {
+      if (!isGenerateRequestCurrent(requestId, noteKeyAtRequest, summaryVersionAtRequest)) {
         return;
       }
 
       setError(toErrorMessage(generationError));
     } finally {
-      if (
-        generateRequestIdRef.current === requestId &&
-        currentNoteKeyRef.current === noteKeyAtRequest &&
-        summaryVersionRef.current === summaryVersionAtRequest
-      ) {
+      if (isGenerateRequestCurrent(requestId, noteKeyAtRequest, summaryVersionAtRequest)) {
         setIsGenerating(false);
       }
     }

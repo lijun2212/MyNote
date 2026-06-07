@@ -54,6 +54,35 @@ impl AiOrchestrator {
         Ok(response)
     }
 
+    pub async fn invoke_text_stream(
+        &self,
+        profile: &AiProfile,
+        api_key: &str,
+        request: &AiTextRequest,
+        on_delta: &mut (dyn FnMut(String) -> AppResult<()> + Send),
+    ) -> AppResult<AiTextResponse> {
+        let adapter: &dyn AiProviderAdapter = match profile.provider {
+            AiProviderKind::OpenAiCompatible => &OpenAiCompatibleProvider,
+            AiProviderKind::Anthropic => &AnthropicProvider,
+        };
+        let started_at = Instant::now();
+        let mut response = adapter
+            .invoke_stream(&self.client, profile, api_key, request, on_delta)
+            .await?;
+        response.latency_ms = Some(started_at.elapsed().as_millis() as u64);
+
+        if let Some(expected_text) = request.expected_text.as_deref() {
+            let actual = response.text.trim();
+            if actual != expected_text {
+                return Err(AppError::Parse(format!(
+                    "AI provider healthcheck returned unexpected text: {actual}"
+                )));
+            }
+        }
+
+        Ok(response)
+    }
+
     pub async fn test_profile(
         &self,
         profile: &AiProfile,
@@ -78,6 +107,7 @@ mod tests {
     use super::AiOrchestrator;
     use crate::domain::ai::{AiProfile, AiProviderKind};
     use crate::error::AppError;
+    use crate::services::ai::orchestrator::{HEALTHCHECK_EXPECTED_TEXT, HEALTHCHECK_PROMPT};
     use mockito::{Matcher, Server};
     use reqwest::Client;
 
@@ -175,5 +205,44 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(error, AppError::Parse(_)));
+    }
+
+    #[tokio::test]
+    async fn orchestrator_streams_text_from_openai_compatible_response() {
+        let mut server = Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/v1/chat/completions")
+            .with_status(200)
+            .with_header("content-type", "text/event-stream")
+            .with_body(concat!(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"MYNOTE_\"}}]}\n\n",
+                "data: {\"choices\":[{\"delta\":{\"content\":\"HEALTHCHECK_OK\"}}]}\n\n",
+                "data: [DONE]\n\n"
+            ))
+            .create_async()
+            .await;
+
+        let orchestrator = AiOrchestrator::new(Client::new());
+        let mut chunks = Vec::new();
+        let response = orchestrator
+            .invoke_text_stream(
+                &openai_profile(format!("{}/v1", server.url())),
+                "sk-demo",
+                &crate::domain::ai::AiTextRequest {
+                    prompt: HEALTHCHECK_PROMPT.into(),
+                    max_tokens: Some(16),
+                    temperature: Some(0.0),
+                    expected_text: Some(HEALTHCHECK_EXPECTED_TEXT.into()),
+                },
+                &mut |chunk| {
+                    chunks.push(chunk);
+                    Ok(())
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(chunks, vec!["MYNOTE_", "HEALTHCHECK_OK"]);
+        assert_eq!(response.text, "MYNOTE_HEALTHCHECK_OK");
     }
 }

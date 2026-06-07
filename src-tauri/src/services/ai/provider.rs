@@ -12,6 +12,15 @@ pub trait AiProviderAdapter: Send + Sync {
         api_key: &str,
         request: &AiTextRequest,
     ) -> AppResult<AiTextResponse>;
+
+    async fn invoke_stream(
+        &self,
+        client: &Client,
+        profile: &AiProfile,
+        api_key: &str,
+        request: &AiTextRequest,
+        on_delta: &mut (dyn FnMut(String) -> AppResult<()> + Send),
+    ) -> AppResult<AiTextResponse>;
 }
 
 pub fn resolve_endpoint(
@@ -31,8 +40,8 @@ pub fn resolve_endpoint(
     }
 }
 
-pub fn resolve_request_max_tokens(profile: &AiProfile, request: &AiTextRequest) -> u32 {
-    request.max_tokens.or(profile.max_tokens).unwrap_or(16).max(1)
+pub fn resolve_request_max_tokens(profile: &AiProfile, request: &AiTextRequest) -> Option<u32> {
+    request.max_tokens.or(profile.max_tokens).map(|value| value.max(1))
 }
 
 pub fn resolve_request_temperature(profile: &AiProfile, request: &AiTextRequest) -> f32 {
@@ -53,9 +62,23 @@ pub fn summarize_http_error(status: StatusCode, body: &str) -> AppError {
 
 #[cfg(test)]
 mod tests {
-    use super::summarize_http_error;
+    use super::{resolve_request_max_tokens, summarize_http_error};
+    use crate::domain::ai::{AiProfile, AiProviderKind, AiTextRequest};
     use crate::error::AppError;
     use reqwest::StatusCode;
+
+    fn make_profile(max_tokens: Option<u32>) -> AiProfile {
+        AiProfile {
+            id: "profile-1".into(),
+            name: "Default".into(),
+            provider: AiProviderKind::OpenAiCompatible,
+            model: "gpt-5-mini".into(),
+            base_url: None,
+            max_tokens,
+            temperature: None,
+            enabled: true,
+        }
+    }
 
     #[test]
     fn summarize_http_error_marks_retryable_status_as_io() {
@@ -69,5 +92,31 @@ mod tests {
         let error = summarize_http_error(StatusCode::UNAUTHORIZED, "bad api key");
 
         assert!(matches!(error, AppError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn resolve_request_max_tokens_returns_none_when_request_and_profile_do_not_set_it() {
+        let profile = make_profile(None);
+        let request = AiTextRequest {
+            prompt: "hello".into(),
+            max_tokens: None,
+            temperature: None,
+            expected_text: None,
+        };
+
+        assert_eq!(resolve_request_max_tokens(&profile, &request), None);
+    }
+
+    #[test]
+    fn resolve_request_max_tokens_prefers_request_value_over_profile_value() {
+        let profile = make_profile(Some(256));
+        let request = AiTextRequest {
+            prompt: "hello".into(),
+            max_tokens: Some(768),
+            temperature: None,
+            expected_text: None,
+        };
+
+        assert_eq!(resolve_request_max_tokens(&profile, &request), Some(768));
     }
 }

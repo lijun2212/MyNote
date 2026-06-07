@@ -10,9 +10,18 @@ import { deferred, makeNote, makeNoteDetail, makeNoteWithSummary } from "../test
 const apiMocks = vi.hoisted(() => ({
   generateSummaryCandidate: vi.fn(),
   generateSummaryCandidateWithAi: vi.fn(),
+  generateSummaryCandidateWithAiStream: vi.fn(),
   saveNoteSummary: vi.fn(),
   getNoteByPath: vi.fn(),
   getNoteLinks: vi.fn(),
+}));
+
+const eventMocks = vi.hoisted(() => ({
+  listen: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: eventMocks.listen,
 }));
 
 vi.mock("../api/commands", () => ({
@@ -23,10 +32,13 @@ describe("useLookbackSummary", () => {
   beforeEach(() => {
     apiMocks.generateSummaryCandidate.mockReset();
     apiMocks.generateSummaryCandidateWithAi.mockReset();
+    apiMocks.generateSummaryCandidateWithAiStream.mockReset();
     apiMocks.saveNoteSummary.mockReset();
     apiMocks.getNoteByPath.mockReset();
     apiMocks.getNoteLinks.mockReset();
     apiMocks.getNoteLinks.mockResolvedValue({ outgoing: [], incoming: [] });
+    eventMocks.listen.mockReset();
+    eventMocks.listen.mockResolvedValue(() => {});
     useAiSettingsStore.getState().resetForTest();
     useLookbackSummaryStore.getState().resetForTest();
     useEditorStore.setState({
@@ -436,10 +448,29 @@ describe("useLookbackSummary", () => {
         enabled: true,
       },
     });
-    apiMocks.generateSummaryCandidateWithAi.mockResolvedValue({
-      summary: "AI 候选摘要",
-      used_fallback: false,
-      provider_trace: null,
+    const eventHandlers: Array<(event: { payload: unknown }) => void> = [];
+    eventMocks.listen.mockImplementation(async (_event: string, handler: (event: { payload: unknown }) => void) => {
+      eventHandlers.push(handler);
+      return () => {};
+    });
+    apiMocks.generateSummaryCandidateWithAiStream.mockImplementation(async (_path: string, requestId: string) => {
+      eventHandlers[0]?.({
+        payload: {
+          request_id: requestId,
+          type: "delta",
+          chunk: "AI 候选摘要",
+        },
+      });
+      eventHandlers[0]?.({
+        payload: {
+          request_id: requestId,
+          type: "completed",
+          summary: "AI 候选摘要",
+          used_fallback: false,
+          provider_trace: null,
+        },
+      });
+      return { request_id: requestId };
     });
 
     const { result } = renderHook(() => useLookbackSummary());
@@ -448,9 +479,185 @@ describe("useLookbackSummary", () => {
       await result.current.generateCandidate();
     });
 
-    expect(api.generateSummaryCandidateWithAi).toHaveBeenCalledWith("notes/demo.md", "profile-1");
+    expect(api.generateSummaryCandidateWithAiStream).toHaveBeenCalledWith("notes/demo.md", expect.any(String), "profile-1");
     expect(api.generateSummaryCandidate).not.toHaveBeenCalled();
     expect(result.current.candidate).toBe("AI 候选摘要");
+  });
+
+  it("shows immediate feedback and progressively reveals AI summary content", async () => {
+    useAiSettingsStore.setState({
+      settings: {
+        enabled: true,
+        default_profile_id: "profile-1",
+        profiles: [{
+          id: "profile-1",
+          name: "Default",
+          provider: "anthropic",
+          model: "claude-sonnet",
+          base_url: null,
+          max_tokens: 1024,
+          temperature: 0.4,
+          enabled: true,
+        }],
+      },
+      defaultProfile: {
+        id: "profile-1",
+        name: "Default",
+        provider: "anthropic",
+        model: "claude-sonnet",
+        base_url: null,
+        max_tokens: 1024,
+        temperature: 0.4,
+        enabled: true,
+      },
+    });
+    const eventHandlers: Array<(event: { payload: unknown }) => void> = [];
+    const finalSummary = "这是一个用于验证流式展示的 AI 候选摘要，用户不应该只在最后一刻看到完整结果。";
+    eventMocks.listen.mockImplementation(async (_event: string, handler: (event: { payload: unknown }) => void) => {
+      eventHandlers.push(handler);
+      return () => {};
+    });
+    apiMocks.generateSummaryCandidateWithAiStream.mockImplementation(async (_path: string, requestId: string) => ({ request_id: requestId }));
+
+    const { result } = renderHook(() => useLookbackSummary());
+
+    await act(async () => {
+      void result.current.generateCandidate();
+      await Promise.resolve();
+    });
+
+    expect(result.current.isGenerating).toBe(true);
+    expect(result.current.generationStatus).toBe("AI 正在生成摘要...");
+    expect(result.current.candidate).toBe("");
+    const streamRequestId = apiMocks.generateSummaryCandidateWithAiStream.mock.calls[0]?.[1] as string;
+
+    await act(async () => {
+      eventHandlers[0]?.({
+        payload: {
+          request_id: streamRequestId,
+          type: "delta",
+          chunk: finalSummary.slice(0, 12),
+        },
+      });
+      await Promise.resolve();
+    });
+
+    expect(result.current.candidate.length).toBeGreaterThan(0);
+    expect(result.current.candidate.length).toBeLessThan(finalSummary.length);
+    expect(result.current.isGenerating).toBe(true);
+
+    await act(async () => {
+      eventHandlers[0]?.({
+        payload: {
+          request_id: streamRequestId,
+          type: "delta",
+          chunk: finalSummary.slice(12),
+        },
+      });
+      eventHandlers[0]?.({
+        payload: {
+          request_id: streamRequestId,
+          type: "completed",
+          summary: finalSummary,
+          used_fallback: false,
+          provider_trace: null,
+        },
+      });
+      await Promise.resolve();
+    });
+
+    expect(result.current.candidate).toBe(finalSummary);
+    expect(result.current.isGenerating).toBe(false);
+    expect(result.current.generationStatus).toBeNull();
+  });
+
+  it("consumes streamed summary tokens from backend events", async () => {
+    useAiSettingsStore.setState({
+      settings: {
+        enabled: true,
+        default_profile_id: "profile-1",
+        profiles: [{
+          id: "profile-1",
+          name: "Default",
+          provider: "anthropic",
+          model: "claude-sonnet",
+          base_url: null,
+          max_tokens: 1024,
+          temperature: 0.4,
+          enabled: true,
+        }],
+      },
+      defaultProfile: {
+        id: "profile-1",
+        name: "Default",
+        provider: "anthropic",
+        model: "claude-sonnet",
+        base_url: null,
+        max_tokens: 1024,
+        temperature: 0.4,
+        enabled: true,
+      },
+    });
+
+    const eventHandlers: Array<(event: { payload: unknown }) => void> = [];
+    eventMocks.listen.mockImplementation(async (_event: string, handler: (event: { payload: unknown }) => void) => {
+      eventHandlers.push(handler);
+      return () => {};
+    });
+    apiMocks.generateSummaryCandidateWithAiStream.mockImplementation(async (_path: string, requestId: string) => ({ request_id: requestId }));
+
+    const { result } = renderHook(() => useLookbackSummary());
+
+    await act(async () => {
+      void result.current.generateCandidate();
+      await Promise.resolve();
+    });
+
+    expect(api.generateSummaryCandidateWithAiStream).toHaveBeenCalledWith("notes/demo.md", expect.any(String), "profile-1");
+    const streamRequestId = apiMocks.generateSummaryCandidateWithAiStream.mock.calls[0]?.[1] as string;
+
+    await act(async () => {
+      eventHandlers[0]?.({
+        payload: {
+          request_id: streamRequestId,
+          type: "delta",
+          chunk: "第一段",
+        },
+      });
+      await Promise.resolve();
+    });
+
+    expect(result.current.candidate).toBe("第一段");
+    expect(result.current.isGenerating).toBe(true);
+
+    await act(async () => {
+      eventHandlers[0]?.({
+        payload: {
+          request_id: streamRequestId,
+          type: "delta",
+          chunk: "第二段",
+        },
+      });
+      await Promise.resolve();
+    });
+
+    expect(result.current.candidate).toBe("第一段第二段");
+
+    await act(async () => {
+      eventHandlers[0]?.({
+        payload: {
+          request_id: streamRequestId,
+          type: "completed",
+          summary: "第一段第二段",
+          used_fallback: false,
+          provider_trace: null,
+        },
+      });
+      await Promise.resolve();
+    });
+
+    expect(result.current.candidate).toBe("第一段第二段");
+    expect(result.current.isGenerating).toBe(false);
   });
 
   it("falls back to rule-based generation after AI errors and exposes fallback status", async () => {
@@ -480,7 +687,7 @@ describe("useLookbackSummary", () => {
         enabled: true,
       },
     });
-    apiMocks.generateSummaryCandidateWithAi.mockRejectedValueOnce(new Error("provider unavailable"));
+    apiMocks.generateSummaryCandidateWithAiStream.mockRejectedValueOnce(new Error("provider unavailable"));
     apiMocks.generateSummaryCandidate.mockResolvedValue("规则摘要");
 
     const { result } = renderHook(() => useLookbackSummary());
@@ -489,7 +696,7 @@ describe("useLookbackSummary", () => {
       await result.current.generateCandidate();
     });
 
-    expect(api.generateSummaryCandidateWithAi).toHaveBeenCalledWith("notes/demo.md", "profile-1");
+    expect(api.generateSummaryCandidateWithAiStream).toHaveBeenCalledWith("notes/demo.md", expect.any(String), "profile-1");
     expect(api.generateSummaryCandidate).toHaveBeenCalledWith("notes/demo.md");
     expect(result.current.candidate).toBe("规则摘要");
     expect(result.current.generationStatus).toBe("AI 摘要失败，已回退到规则摘要：provider unavailable");
@@ -522,10 +729,29 @@ describe("useLookbackSummary", () => {
         enabled: true,
       },
     });
-    apiMocks.generateSummaryCandidateWithAi.mockResolvedValue({
-      summary: "后端回退摘要",
-      used_fallback: true,
-      provider_trace: null,
+    const eventHandlers: Array<(event: { payload: unknown }) => void> = [];
+    eventMocks.listen.mockImplementation(async (_event: string, handler: (event: { payload: unknown }) => void) => {
+      eventHandlers.push(handler);
+      return () => {};
+    });
+    apiMocks.generateSummaryCandidateWithAiStream.mockImplementation(async (_path: string, requestId: string) => {
+      eventHandlers[0]?.({
+        payload: {
+          request_id: requestId,
+          type: "delta",
+          chunk: "后端回退摘要",
+        },
+      });
+      eventHandlers[0]?.({
+        payload: {
+          request_id: requestId,
+          type: "completed",
+          summary: "后端回退摘要",
+          used_fallback: true,
+          provider_trace: null,
+        },
+      });
+      return { request_id: requestId };
     });
 
     const { result } = renderHook(() => useLookbackSummary());
@@ -565,12 +791,31 @@ describe("useLookbackSummary", () => {
         enabled: true,
       },
     });
-    apiMocks.generateSummaryCandidateWithAi.mockResolvedValue({
-      summary: "后端回退摘要",
-      used_fallback: true,
-      provider_trace: {
-        error: "AI profile secret not found: kb-hash:profile-1",
-      },
+    const eventHandlers: Array<(event: { payload: unknown }) => void> = [];
+    eventMocks.listen.mockImplementation(async (_event: string, handler: (event: { payload: unknown }) => void) => {
+      eventHandlers.push(handler);
+      return () => {};
+    });
+    apiMocks.generateSummaryCandidateWithAiStream.mockImplementation(async (_path: string, requestId: string) => {
+      eventHandlers[0]?.({
+        payload: {
+          request_id: requestId,
+          type: "delta",
+          chunk: "后端回退摘要",
+        },
+      });
+      eventHandlers[0]?.({
+        payload: {
+          request_id: requestId,
+          type: "completed",
+          summary: "后端回退摘要",
+          used_fallback: true,
+          provider_trace: {
+            error: "AI profile secret not found: kb-hash:profile-1",
+          },
+        },
+      });
+      return { request_id: requestId };
     });
 
     const { result } = renderHook(() => useLookbackSummary());

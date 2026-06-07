@@ -9,6 +9,10 @@ pub enum RelationType {
     Opposes,
     Supports,
     Similar,
+    Premise,
+    Conclusion,
+    Example,
+    Rebuts,
 }
 
 impl RelationType {
@@ -20,6 +24,10 @@ impl RelationType {
             "opposes" => Some(Self::Opposes),
             "supports" => Some(Self::Supports),
             "similar" => Some(Self::Similar),
+            "premise" => Some(Self::Premise),
+            "conclusion" => Some(Self::Conclusion),
+            "example" => Some(Self::Example),
+            "rebuts" => Some(Self::Rebuts),
             _ => None,
         }
     }
@@ -32,6 +40,37 @@ impl RelationType {
             Self::Opposes => "opposes",
             Self::Supports => "supports",
             Self::Similar => "similar",
+            Self::Premise => "premise",
+            Self::Conclusion => "conclusion",
+            Self::Example => "example",
+            Self::Rebuts => "rebuts",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GraphCandidateStatus {
+    Pending,
+    Accepted,
+    Ignored,
+}
+
+impl GraphCandidateStatus {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "pending" => Some(Self::Pending),
+            "accepted" => Some(Self::Accepted),
+            "ignored" => Some(Self::Ignored),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Accepted => "accepted",
+            Self::Ignored => "ignored",
         }
     }
 }
@@ -95,5 +134,13 @@ mod tests {
 
         assert_is_relation_type(relation.relation_type);
         assert_is_relation_type(relation_item.relation_type);
+    }
+
+    #[test]
+    fn relation_type_parse_supports_graph_semantics() {
+        assert_eq!(RelationType::parse("premise"), Some(RelationType::Premise));
+        assert_eq!(RelationType::parse("conclusion"), Some(RelationType::Conclusion));
+        assert_eq!(RelationType::parse("example"), Some(RelationType::Example));
+        assert_eq!(RelationType::parse("rebuts"), Some(RelationType::Rebuts));
     }
 }
