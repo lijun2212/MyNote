@@ -10,6 +10,7 @@ import type {
   GraphNodeRef,
   GraphRelationItem,
   NoteGraphAnalysis,
+  RelationOrigin,
   RelationType,
 } from "../../types";
 
@@ -74,6 +75,11 @@ const metaRowStyle: React.CSSProperties = {
 const metaTextStyle: React.CSSProperties = {
   fontSize: 11,
   color: "#667085",
+};
+
+const subtleMetaTextStyle: React.CSSProperties = {
+  ...metaTextStyle,
+  marginTop: 4,
 };
 
 const rationaleStyle: React.CSSProperties = {
@@ -169,6 +175,19 @@ function relationTypeLabel(type: RelationType) {
 
 function relationDirectionLabel(direction: "incoming" | "outgoing") {
   return direction === "incoming" ? "指向当前" : "当前指向";
+}
+
+function relationOriginLabel(origin: RelationOrigin) {
+  switch (origin) {
+    case "manual":
+      return "手工维护";
+    case "candidate_accepted":
+      return "AI 原样采纳";
+    case "candidate_edited":
+      return "AI 编辑后采纳";
+    default:
+      return origin;
+  }
 }
 
 function isNodeNavigable(node: GraphNodeRef) {
@@ -441,8 +460,11 @@ function RelationList({ items, onNavigate }: { items: GraphRelationItem[]; onNav
       {items.map((item) => (
         <li key={item.relationId} style={itemCardStyle}>
           <div style={metaRowStyle}>
-            <span style={metaTextStyle}>{relationTypeLabel(item.relationType)} | {relationDirectionLabel(item.direction)}</span>
+            <span style={metaTextStyle}>
+              {relationTypeLabel(item.relationType)} | {relationDirectionLabel(item.direction)} | {relationOriginLabel(item.relationOrigin)}
+            </span>
           </div>
+          {item.acceptedCandidateId ? <div style={subtleMetaTextStyle}>来源候选: {item.acceptedCandidateId}</div> : null}
           <NodeLabel node={item.note} onNavigate={onNavigate} />
           {item.rationale ? <div style={rationaleStyle}>{item.rationale}</div> : null}
         </li>

@@ -1,4 +1,4 @@
-use crate::domain::relation::{NoteRelations, Relation, RelationItem, RelationType};
+use crate::domain::relation::{NoteRelations, Relation, RelationItem, RelationOrigin, RelationType};
 use crate::error::{AppError, AppResult};
 use rusqlite::{params, Connection};
 use ulid::Ulid;
@@ -35,15 +35,88 @@ fn map_relation_item(row: &rusqlite::Row<'_>) -> Result<RelationItem, rusqlite::
         )
     })?;
 
+    let relation_origin_raw: String = row.get(2)?;
+    let relation_origin = RelationOrigin::parse(&relation_origin_raw).ok_or_else(|| {
+        rusqlite::Error::FromSqlConversionFailure(
+            2,
+            rusqlite::types::Type::Text,
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("invalid relation origin in database: {relation_origin_raw}"),
+            )),
+        )
+    })?;
+
     Ok(RelationItem {
         id: row.get(0)?,
         relation_type,
-        description: row.get(2)?,
-        note_id: row.get(3)?,
-        note_title: row.get(4)?,
-        note_path: row.get(5)?,
-        created_at: row.get(6)?,
-        updated_at: row.get(7)?,
+        relation_origin,
+        description: row.get(3)?,
+        accepted_candidate_id: row.get(4)?,
+        note_id: row.get(5)?,
+        note_title: row.get(6)?,
+        note_path: row.get(7)?,
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
+    })
+}
+
+fn ensure_relation_absent(
+    conn: &Connection,
+    source_note_id: &str,
+    target_note_id: &str,
+    relation_type: RelationType,
+) -> AppResult<()> {
+    let duplicate_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM relations WHERE source_note_id = ?1 AND target_note_id = ?2 AND relation_type = ?3",
+        params![source_note_id, target_note_id, relation_type.as_str()],
+        |row| row.get(0),
+    )?;
+
+    if duplicate_count > 0 {
+        return Err(AppError::AlreadyExists("relation already exists".into()));
+    }
+
+    Ok(())
+}
+
+fn insert_relation_record_in_conn(
+    conn: &Connection,
+    source_note_id: &str,
+    target_note_id: &str,
+    relation_type: RelationType,
+    relation_origin: RelationOrigin,
+    description: Option<String>,
+    accepted_candidate_id: Option<String>,
+) -> AppResult<Relation> {
+    let id = Ulid::new().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO relations (id, source_note_id, target_note_id, relation_type, relation_origin, description, accepted_candidate_id, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            &id,
+            source_note_id,
+            target_note_id,
+            relation_type.as_str(),
+            relation_origin.as_str(),
+            description.as_deref(),
+            accepted_candidate_id.as_deref(),
+            &now,
+            &now
+        ],
+    )?;
+
+    Ok(Relation {
+        id,
+        source_note_id: source_note_id.to_string(),
+        target_note_id: target_note_id.to_string(),
+        relation_type,
+        relation_origin,
+        description,
+        accepted_candidate_id,
+        created_at: now.clone(),
+        updated_at: now,
     })
 }
 
@@ -62,41 +135,46 @@ pub fn create_relation_in_conn(
     }
 
     let relation_type = parse_relation_type(relation_type)?;
-    let duplicate_count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM relations WHERE source_note_id = ?1 AND target_note_id = ?2 AND relation_type = ?3",
-        params![source_note_id, target_note_id, relation_type.as_str()],
-        |row| row.get(0),
-    )?;
+    ensure_relation_absent(conn, source_note_id, target_note_id, relation_type)?;
 
-    if duplicate_count > 0 {
-        return Err(AppError::AlreadyExists("relation already exists".into()));
+    insert_relation_record_in_conn(
+        conn,
+        source_note_id,
+        target_note_id,
+        relation_type,
+        RelationOrigin::Manual,
+        description,
+        None,
+    )
+}
+
+pub fn create_relation_with_origin_in_conn(
+    conn: &Connection,
+    source_note_id: &str,
+    target_note_id: &str,
+    relation_type: RelationType,
+    relation_origin: RelationOrigin,
+    description: Option<String>,
+    accepted_candidate_id: Option<String>,
+) -> AppResult<Relation> {
+    ensure_note_exists(conn, source_note_id, "source")?;
+    ensure_note_exists(conn, target_note_id, "target")?;
+
+    if source_note_id == target_note_id {
+        return Err(AppError::InvalidInput("self relation is not allowed".into()));
     }
 
-    let id = Ulid::new().to_string();
-    let now = chrono::Utc::now().to_rfc3339();
-    conn.execute(
-        "INSERT INTO relations (id, source_note_id, target_note_id, relation_type, description, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![
-            &id,
-            source_note_id,
-            target_note_id,
-            relation_type.as_str(),
-            description.as_deref(),
-            &now,
-            &now
-        ],
-    )?;
+    ensure_relation_absent(conn, source_note_id, target_note_id, relation_type)?;
 
-    Ok(Relation {
-        id,
-        source_note_id: source_note_id.to_string(),
-        target_note_id: target_note_id.to_string(),
+    insert_relation_record_in_conn(
+        conn,
+        source_note_id,
+        target_note_id,
         relation_type,
+        relation_origin,
         description,
-        created_at: now.clone(),
-        updated_at: now,
-    })
+        accepted_candidate_id,
+    )
 }
 
 pub fn delete_relation_in_conn(conn: &Connection, relation_id: &str) -> AppResult<()> {
@@ -112,7 +190,7 @@ pub fn list_relations_in_conn(conn: &Connection, note_id: &str) -> AppResult<Not
     ensure_note_exists(conn, note_id, "source")?;
 
     let mut outgoing_stmt = conn.prepare(
-        "SELECT r.id, r.relation_type, r.description, n.id, n.title, n.path, r.created_at, r.updated_at
+        "SELECT r.id, r.relation_type, r.relation_origin, r.description, r.accepted_candidate_id, n.id, n.title, n.path, r.created_at, r.updated_at
          FROM relations r
          JOIN notes n ON n.id = r.target_note_id AND n.deleted_at IS NULL
          WHERE r.source_note_id = ?1
@@ -123,7 +201,7 @@ pub fn list_relations_in_conn(conn: &Connection, note_id: &str) -> AppResult<Not
         .collect::<Result<Vec<_>, _>>()?;
 
     let mut incoming_stmt = conn.prepare(
-        "SELECT r.id, r.relation_type, r.description, n.id, n.title, n.path, r.created_at, r.updated_at
+        "SELECT r.id, r.relation_type, r.relation_origin, r.description, r.accepted_candidate_id, n.id, n.title, n.path, r.created_at, r.updated_at
          FROM relations r
          JOIN notes n ON n.id = r.source_note_id AND n.deleted_at IS NULL
          WHERE r.target_note_id = ?1
@@ -211,6 +289,32 @@ mod tests {
         assert_eq!(relations.incoming.len(), 1);
         assert_eq!(relations.outgoing[0].note_id, "n2");
         assert_eq!(relations.incoming[0].note_id, "n3");
+        assert_eq!(relations.outgoing[0].relation_origin, RelationOrigin::Manual);
+    }
+
+    #[test]
+    fn create_relation_with_origin_persists_candidate_tracking() {
+        let (_temp_dir, conn) = setup_db();
+        conn.execute(
+            "INSERT INTO graph_candidate_relations (id, source_note_id, source_heading_id, target_note_id, target_heading_id, relation_type, rationale, evidence_excerpt, candidate_status, provider_name, created_at, updated_at, accepted_relation_id)
+             VALUES ('candidate-1', 'n1', NULL, 'n2', NULL, 'supports', 'candidate rationale', NULL, 'pending', 'provider', datetime('now'), datetime('now'), NULL)",
+            [],
+        )
+        .unwrap();
+
+        let relation = create_relation_with_origin_in_conn(
+            &conn,
+            "n1",
+            "n2",
+            RelationType::Supports,
+            RelationOrigin::CandidateEdited,
+            Some("edited rationale".into()),
+            Some("candidate-1".into()),
+        )
+        .unwrap();
+
+        assert_eq!(relation.relation_origin, RelationOrigin::CandidateEdited);
+        assert_eq!(relation.accepted_candidate_id.as_deref(), Some("candidate-1"));
     }
 
     #[test]

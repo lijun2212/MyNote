@@ -79,9 +79,11 @@ function makeAnalysis(overrides: Partial<NoteGraphAnalysis> = {}): NoteGraphAnal
         {
           relationId: "rel-1",
           relationType: "supports",
+          relationOrigin: "candidate_accepted",
           direction: "outgoing",
           note: makeNode(),
           rationale: "支持主论点",
+          acceptedCandidateId: "candidate-accepted-1",
         },
       ],
       factualRelations: [
@@ -194,6 +196,8 @@ describe("GraphAnalysisPanel", () => {
     expect(screen.getByText("论证链路")).toBeInTheDocument();
     expect(screen.getByText("冲突笔记")).toBeInTheDocument();
     expect(screen.getByText("可作为示例关系")).toBeInTheDocument();
+    expect(screen.getByText(/AI 原样采纳/)).toBeInTheDocument();
+    expect(screen.getByText(/来源候选:\s*candidate-accepted-1/)).toBeInTheDocument();
   });
 
   it("accepts a candidate and refreshes both analysis and candidates", async () => {
@@ -206,9 +210,11 @@ describe("GraphAnalysisPanel", () => {
             {
               relationId: "rel-accepted",
               relationType: "example",
+              relationOrigin: "candidate_accepted",
               direction: "outgoing",
               note: makeNode({ noteId: "note-6", noteTitle: "候选目标", notePath: "notes/candidate-target.md" }),
               rationale: "已采纳候选",
+              acceptedCandidateId: "candidate-1",
             },
           ],
           factualRelations: [],
@@ -300,9 +306,11 @@ describe("GraphAnalysisPanel", () => {
             {
               relationId: "rel-note-2",
               relationType: "supports",
+              relationOrigin: "manual",
               direction: "outgoing",
               note: makeNode({ noteId: "note-7", noteTitle: "第二篇关联", notePath: "notes/second-related.md" }),
               rationale: "第二篇笔记的关系",
+              acceptedCandidateId: null,
             },
           ],
           factualRelations: [],

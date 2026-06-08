@@ -74,7 +74,9 @@ function makeRelation(overrides: Partial<RelationItem> = {}): RelationItem {
   return {
     id: "rel-1",
     relation_type: "related",
+    relation_origin: "manual",
     description: null,
+    accepted_candidate_id: null,
     note_id: "note-2",
     note_title: "手动关系笔记",
     note_path: "notes/manual.md",
@@ -157,6 +159,8 @@ describe("BacklinksPanel", () => {
         makeRelation({
           id: "rel-out-1",
           relation_type: "supports",
+          relation_origin: "candidate_accepted",
+          accepted_candidate_id: "candidate-7",
           note_id: "note-4",
           note_title: "手动传出关系",
           note_path: "notes/manual-outgoing.md",
@@ -192,6 +196,8 @@ describe("BacklinksPanel", () => {
     expect(screen.getByText("手动传入关系")).toBeInTheDocument();
     expect(screen.getByText("传出关系说明")).toBeInTheDocument();
     expect(screen.getByText("传入关系说明")).toBeInTheDocument();
+    expect(screen.getByText(/来源:\s*AI 原样采纳/)).toBeInTheDocument();
+    expect(screen.getByText(/来源候选:\s*candidate-7/)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /谁提及我/ }));
     expect(await screen.findByText("反链笔记")).toBeInTheDocument();

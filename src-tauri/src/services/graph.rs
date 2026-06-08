@@ -4,13 +4,13 @@ use crate::domain::graph::{
     NoteGraphAnalysis,
 };
 use crate::domain::ai::{AiProfile, AiTextRequest};
-use crate::domain::relation::{GraphCandidateStatus, Relation, RelationType};
+use crate::domain::relation::{GraphCandidateStatus, Relation, RelationOrigin, RelationType};
 use crate::error::{AppError, AppResult};
 use crate::infrastructure::fs::resolve_kb_path;
 use crate::services::ai::{
     load_ai_profile_with_secret, resolve_ai_profile_selection, AiOrchestrator, SystemSecretStore,
 };
-use crate::services::relation::{create_relation_in_conn, list_relations_in_conn};
+use crate::services::relation::{create_relation_with_origin_in_conn, list_relations_in_conn};
 use crate::state::AppState;
 use rusqlite::{params, Connection};
 use serde::Deserialize;
@@ -18,6 +18,7 @@ use std::collections::BTreeSet;
 use ulid::Ulid;
 
 const GRAPH_CANDIDATE_CONTEXT_CHARS: usize = 2400;
+const GRAPH_CANDIDATE_NOTE_POOL_LIMIT: usize = 40;
 const GRAPH_CANDIDATE_RELATION_TYPES: [RelationType; 10] = [
     RelationType::Related,
     RelationType::Prerequisite,
@@ -48,6 +49,15 @@ struct GraphCandidatePromptContext {
     focus_note: GraphNodeRef,
     content: String,
     overview: GraphOverview,
+    candidate_notes: Vec<GraphCandidatePromptNote>,
+}
+
+#[derive(Debug, Clone)]
+struct GraphCandidatePromptNote {
+    note_id: String,
+    note_title: String,
+    note_path: String,
+    summary: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -171,7 +181,7 @@ fn find_existing_relation_in_conn(
     relation_type: RelationType,
 ) -> AppResult<Option<Relation>> {
     conn.query_row(
-        "SELECT id, source_note_id, target_note_id, relation_type, description, created_at, updated_at
+        "SELECT id, source_note_id, target_note_id, relation_type, relation_origin, description, accepted_candidate_id, created_at, updated_at
          FROM relations
          WHERE source_note_id = ?1 AND target_note_id = ?2 AND relation_type = ?3",
         params![source_note_id, target_note_id, relation_type.as_str()],
@@ -188,14 +198,28 @@ fn find_existing_relation_in_conn(
                 )
             })?;
 
+            let relation_origin_raw: String = row.get(4)?;
+            let relation_origin = RelationOrigin::parse(&relation_origin_raw).ok_or_else(|| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    4,
+                    rusqlite::types::Type::Text,
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("invalid relation origin in database: {relation_origin_raw}"),
+                    )),
+                )
+            })?;
+
             Ok(Relation {
                 id: row.get(0)?,
                 source_note_id: row.get(1)?,
                 target_note_id: row.get(2)?,
                 relation_type,
-                description: row.get(4)?,
-                created_at: row.get(5)?,
-                updated_at: row.get(6)?,
+                relation_origin,
+                description: row.get(5)?,
+                accepted_candidate_id: row.get(6)?,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
             })
         },
     )
@@ -307,13 +331,22 @@ pub fn accept_graph_candidate_in_conn(
         None => candidate.relation_type,
     };
     let relation_description = description.or_else(|| Some(candidate.rationale.clone()));
+    let relation_origin = if relation_type == candidate.relation_type
+        && relation_description.as_deref() == Some(candidate.rationale.as_str())
+    {
+        RelationOrigin::CandidateAccepted
+    } else {
+        RelationOrigin::CandidateEdited
+    };
 
-    let formal_relation = match create_relation_in_conn(
+    let formal_relation = match create_relation_with_origin_in_conn(
         conn,
         &candidate.source_note_id,
         &candidate.target_note_id,
-        relation_type.as_str(),
+        relation_type,
+        relation_origin,
         relation_description,
+        Some(candidate.id.clone()),
     ) {
         Ok(relation) => relation,
         Err(AppError::AlreadyExists(_)) => find_existing_relation_in_conn(
@@ -414,6 +447,7 @@ fn load_confirmed_graph_relations(conn: &Connection, note_id: &str) -> AppResult
         .map(|item| GraphRelationItem {
             relation_id: item.id,
             relation_type: item.relation_type,
+            relation_origin: item.relation_origin,
             direction: GraphRelationDirection::Outgoing,
             note: GraphNodeRef {
                 note_id: item.note_id,
@@ -425,12 +459,14 @@ fn load_confirmed_graph_relations(conn: &Connection, note_id: &str) -> AppResult
                 line_end: None,
             },
             rationale: item.description,
+            accepted_candidate_id: item.accepted_candidate_id,
         })
         .collect::<Vec<_>>();
 
     items.extend(relations.incoming.into_iter().map(|item| GraphRelationItem {
         relation_id: item.id,
         relation_type: item.relation_type,
+        relation_origin: item.relation_origin,
         direction: GraphRelationDirection::Incoming,
         note: GraphNodeRef {
             note_id: item.note_id,
@@ -442,6 +478,7 @@ fn load_confirmed_graph_relations(conn: &Connection, note_id: &str) -> AppResult
             line_end: None,
         },
         rationale: item.description,
+        accepted_candidate_id: item.accepted_candidate_id,
     }));
 
     items.sort_by(|left, right| {
@@ -558,12 +595,41 @@ fn load_graph_candidate_prompt_context(
         confirmed_relations: load_confirmed_graph_relations(conn, note_id)?,
         factual_relations: load_factual_graph_relations(conn, note_id)?,
     };
+    let candidate_notes = load_graph_candidate_prompt_notes(conn, note_id)?;
 
     Ok(GraphCandidatePromptContext {
         focus_note,
         content,
         overview,
+        candidate_notes,
     })
+}
+
+fn load_graph_candidate_prompt_notes(
+    conn: &Connection,
+    note_id: &str,
+) -> AppResult<Vec<GraphCandidatePromptNote>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, title, path, summary
+         FROM notes
+         WHERE deleted_at IS NULL
+           AND id != ?1
+         ORDER BY updated_at DESC, title ASC
+         LIMIT ?2",
+    )?;
+
+    let rows = stmt
+        .query_map(params![note_id, GRAPH_CANDIDATE_NOTE_POOL_LIMIT as i64], |row| {
+            Ok(GraphCandidatePromptNote {
+                note_id: row.get(0)?,
+                note_title: row.get(1)?,
+                note_path: row.get(2)?,
+                summary: row.get(3)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(rows)
 }
 
 fn trim_graph_candidate_context(content: &str, max_chars: usize) -> String {
@@ -615,8 +681,21 @@ fn collect_graph_candidate_available_note_ids(
     for item in &context.overview.factual_relations {
         available_note_ids.insert(item.note.note_id.clone());
     }
+    for item in &context.candidate_notes {
+        available_note_ids.insert(item.note_id.clone());
+    }
 
     available_note_ids
+}
+
+fn format_graph_candidate_prompt_note(item: &GraphCandidatePromptNote) -> String {
+    format!(
+        "- note_id={} title={} path={} summary={}",
+        item.note_id,
+        item.note_title,
+        item.note_path,
+        item.summary.as_deref().unwrap_or("")
+    )
 }
 
 fn build_graph_candidate_prompt(
@@ -645,6 +724,17 @@ fn build_graph_candidate_prompt(
             .factual_relations
             .iter()
             .map(format_factual_relation_line)
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    let candidate_notes = if context.candidate_notes.is_empty() {
+        "- none".to_string()
+    } else {
+        context
+            .candidate_notes
+            .iter()
+            .map(format_graph_candidate_prompt_note)
             .collect::<Vec<_>>()
             .join("\n")
     };
@@ -679,7 +769,8 @@ fn build_graph_candidate_prompt(
                 "6. 仅输出 JSON：{{\"candidates\":[{{\"source_note_id\":\"...\",\"target_note_id\":\"...\",\"relation_type\":\"supports\",\"rationale\":\"...\",\"evidence_excerpt\":\"...\"}}]}}\n\n",
                 "当前笔记内容：\n{}\n\n",
                 "已确认关系：\n{}\n\n",
-                "事实关系：\n{}"
+                "事实关系：\n{}\n\n",
+                "候选笔记池：\n{}"
             ),
             profile.model,
             context.focus_note.note_id,
@@ -689,6 +780,7 @@ fn build_graph_candidate_prompt(
             content_excerpt,
             confirmed_relations,
             factual_relations,
+            candidate_notes,
         ),
         max_tokens: profile.max_tokens,
         temperature: Some(profile.temperature.unwrap_or(0.2)),
@@ -995,7 +1087,9 @@ pub fn analyze_note_graph_in_conn(conn: &Connection, note_id: &str) -> AppResult
 
 #[cfg(test)]
 mod tests {
+    use crate::domain::ai::{AiProfile, AiProviderKind};
     use crate::domain::graph::GraphRelationDirection;
+    use crate::domain::relation::{RelationOrigin, RelationType};
     use crate::infrastructure::db::open_and_migrate;
     use crate::services::relation::create_relation_in_conn;
     use rusqlite::{params, Connection};
@@ -1016,6 +1110,27 @@ mod tests {
             params![note_id, path, title],
         )
         .unwrap();
+    }
+
+    fn write_graph_note_file(root: &std::path::Path, relative_path: &str, content: &str) {
+        let absolute_path = root.join(relative_path);
+        if let Some(parent) = absolute_path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(absolute_path, content).unwrap();
+    }
+
+    fn make_graph_ai_profile() -> AiProfile {
+        AiProfile {
+            id: "profile-1".into(),
+            name: "Graph Test Profile".into(),
+            provider: AiProviderKind::Anthropic,
+            model: "test-model".into(),
+            base_url: None,
+            max_tokens: Some(1024),
+            temperature: Some(0.2),
+            enabled: true,
+        }
     }
 
     fn seed_resolved_link(
@@ -1207,6 +1322,8 @@ mod tests {
 
         assert_eq!(relation.source_note_id, "n1");
         assert_eq!(relation.target_note_id, "n2");
+        assert_eq!(relation.relation_origin, RelationOrigin::CandidateAccepted);
+        assert_eq!(relation.accepted_candidate_id.as_deref(), Some("candidate-1"));
 
         let candidate_status: String = conn
             .query_row(
@@ -1242,6 +1359,33 @@ mod tests {
             .unwrap();
         assert_eq!(candidate_status, "accepted");
         assert_eq!(accepted_relation_id.as_deref(), Some(existing_relation.id.as_str()));
+    }
+
+    #[test]
+    fn accept_graph_candidate_with_overrides_marks_relation_as_candidate_edited() {
+        let conn = setup_graph_test_conn();
+        seed_graph_note(&conn, "n1", "Alpha", "notes/alpha.md");
+        seed_graph_note(&conn, "n2", "Beta", "notes/beta.md");
+        seed_graph_candidate_relation(
+            &conn,
+            "candidate-edited",
+            "n1",
+            "n2",
+            "supports",
+            "alpha supports beta",
+        );
+
+        let relation = super::accept_graph_candidate_in_conn(
+            &conn,
+            "candidate-edited",
+            Some("example".into()),
+            Some("edited rationale".into()),
+        )
+        .unwrap();
+
+        assert_eq!(relation.relation_type, RelationType::Example);
+        assert_eq!(relation.relation_origin, RelationOrigin::CandidateEdited);
+        assert_eq!(relation.accepted_candidate_id.as_deref(), Some("candidate-edited"));
     }
 
     #[test]
@@ -1390,6 +1534,21 @@ mod tests {
             }
             other => panic!("unexpected error: {other}"),
         }
+    }
+
+    #[test]
+    fn build_graph_candidate_prompt_includes_other_notes_without_existing_edges() {
+        let root = TempDir::new().unwrap();
+        let conn = setup_graph_test_conn();
+        seed_graph_note(&conn, "n1", "Current", "notes/current.md");
+        seed_graph_note(&conn, "n2", "Sibling", "notes/sibling.md");
+        write_graph_note_file(root.path(), "notes/current.md", "# Current\n\nCurrent note content");
+
+        let context = super::load_graph_candidate_prompt_context(&conn, root.path(), "n1").unwrap();
+        let request = super::build_graph_candidate_prompt(&make_graph_ai_profile(), &context).unwrap();
+
+        assert!(request.prompt.contains("可用 note_id：n1, n2"));
+        assert!(request.prompt.contains("Sibling"));
     }
 
     #[test]

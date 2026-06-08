@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../../api/commands";
 import { useOpenNote } from "../../hooks/useOpenNote";
 import { useAppStore } from "../../store/useAppStore";
-import type { NoteRelations, RelationItem, RelationType, SearchResult } from "../../types";
+import type { NoteRelations, RelationItem, RelationOrigin, RelationType, SearchResult } from "../../types";
 import { useContextMenu } from "../ContextMenu/useContextMenu";
 
 interface Props {
@@ -59,6 +59,19 @@ function isDuplicateRelationError(error: unknown) {
 
 function relationTypeLabel(type: RelationType) {
   return relationTypeOptions.find((option) => option.value === type)?.label ?? type;
+}
+
+function relationOriginLabel(origin: RelationOrigin) {
+  switch (origin) {
+    case "manual":
+      return "手工维护";
+    case "candidate_accepted":
+      return "AI 原样采纳";
+    case "candidate_edited":
+      return "AI 编辑后采纳";
+    default:
+      return origin;
+  }
 }
 
 function getEventElement(target: EventTarget | null): Element | null {
@@ -607,6 +620,14 @@ function RelationCard({
         <div style={{ fontSize: 11, color: "#7b8190", flexShrink: 0 }}>{relationTypeLabel(item.relation_type)}</div>
       </div>
       <div style={{ marginTop: 4, fontSize: 12, color: "#8a8f98" }}>{item.note_path}</div>
+      <div style={{ marginTop: 4, fontSize: 11, color: "#7b8190" }}>
+        来源: {relationOriginLabel(item.relation_origin)}
+      </div>
+      {item.accepted_candidate_id ? (
+        <div style={{ marginTop: 4, fontSize: 11, color: "#7b8190" }}>
+          来源候选: {item.accepted_candidate_id}
+        </div>
+      ) : null}
       {item.description && (
         <div style={{ marginTop: 6, fontSize: 12, color: "#555" }}>{item.description}</div>
       )}

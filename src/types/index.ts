@@ -198,12 +198,16 @@ export type RelationType =
   | "example"
   | "rebuts";
 
+export type RelationOrigin = "manual" | "candidate_accepted" | "candidate_edited";
+
 export interface Relation {
   id: string;
   source_note_id: string;
   target_note_id: string;
   relation_type: RelationType;
+  relation_origin: RelationOrigin;
   description: string | null;
+  accepted_candidate_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -211,7 +215,9 @@ export interface Relation {
 export interface RelationItem {
   id: string;
   relation_type: RelationType;
+  relation_origin: RelationOrigin;
   description: string | null;
+  accepted_candidate_id: string | null;
   note_id: string;
   note_title: string;
   note_path: string;
@@ -313,9 +319,11 @@ export interface GraphNodeRef {
 export interface GraphRelationItem {
   relationId: string;
   relationType: RelationType;
+  relationOrigin: RelationOrigin;
   direction: GraphRelationDirection;
   note: GraphNodeRef;
   rationale: string | null;
+  acceptedCandidateId: string | null;
 }
 
 export interface GraphFactualRelationItem {

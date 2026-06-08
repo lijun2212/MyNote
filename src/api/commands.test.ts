@@ -11,8 +11,10 @@ describe("api graph commands", () => {
           {
             relation_id: "rel-1",
             relation_type: "premise",
+            relation_origin: "candidate_edited",
             direction: "incoming",
             rationale: "Supports the main claim",
+            accepted_candidate_id: "candidate-9",
             note: {
               note_id: "note-2",
               note_title: "Evidence",
@@ -107,8 +109,10 @@ describe("api graph commands", () => {
           {
             relationId: "rel-1",
             relationType: "premise",
+            relationOrigin: "candidate_edited",
             direction: "incoming",
             rationale: "Supports the main claim",
+            acceptedCandidateId: "candidate-9",
             note: {
               noteId: "note-2",
               noteTitle: "Evidence",

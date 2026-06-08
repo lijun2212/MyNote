@@ -1,4 +1,4 @@
-use crate::domain::relation::{GraphCandidateStatus, RelationType};
+use crate::domain::relation::{GraphCandidateStatus, RelationOrigin, RelationType};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -23,9 +23,11 @@ pub enum GraphRelationDirection {
 pub struct GraphRelationItem {
     pub relation_id: String,
     pub relation_type: RelationType,
+    pub relation_origin: RelationOrigin,
     pub direction: GraphRelationDirection,
     pub note: GraphNodeRef,
     pub rationale: Option<String>,
+    pub accepted_candidate_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

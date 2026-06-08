@@ -26,6 +26,7 @@ import type {
   NoteTreeNode,
   RenameNotebookResult,
   Relation,
+  RelationOrigin,
   RelationType,
   SaveNoteResult,
   SearchResult,
@@ -49,6 +50,7 @@ const RELATION_TYPES = [
 ] as const satisfies RelationType[];
 
 const GRAPH_RELATION_DIRECTIONS = ["incoming", "outgoing"] as const satisfies GraphRelationDirection[];
+const RELATION_ORIGINS = ["manual", "candidate_accepted", "candidate_edited"] as const satisfies RelationOrigin[];
 
 const GRAPH_CANDIDATE_STATUSES = ["pending", "accepted", "ignored"] as const satisfies GraphCandidateStatus[];
 interface RawNoteOutlineItem {
@@ -74,9 +76,11 @@ interface RawGraphNodeRef {
 interface RawGraphRelationItem {
   relation_id: string;
   relation_type: string;
+  relation_origin: string;
   direction: string;
   note: RawGraphNodeRef;
   rationale: string | null;
+  accepted_candidate_id: string | null;
 }
 
 interface RawGraphFactualRelationItem {
@@ -172,6 +176,10 @@ function mapGraphRelationDirection(value: string): GraphRelationDirection {
   return assertAllowedValue(value, GRAPH_RELATION_DIRECTIONS, "graph relation direction");
 }
 
+function mapRelationOrigin(value: string): RelationOrigin {
+  return assertAllowedValue(value, RELATION_ORIGINS, "relation origin");
+}
+
 function mapGraphCandidateStatus(value: string): GraphCandidateStatus {
   return assertAllowedValue(value, GRAPH_CANDIDATE_STATUSES, "graph candidate status");
 }
@@ -192,9 +200,11 @@ function mapGraphRelationItem(item: RawGraphRelationItem): GraphRelationItem {
   return {
     relationId: item.relation_id,
     relationType: mapRelationType(item.relation_type),
+    relationOrigin: mapRelationOrigin(item.relation_origin),
     direction: mapGraphRelationDirection(item.direction),
     note: mapGraphNodeRef(item.note),
     rationale: item.rationale,
+    acceptedCandidateId: item.accepted_candidate_id,
   };
 }
 

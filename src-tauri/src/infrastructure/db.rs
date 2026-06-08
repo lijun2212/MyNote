@@ -447,6 +447,87 @@ const MIGRATIONS: &[Migration] = &[
         CREATE INDEX IF NOT EXISTS idx_graph_candidate_relations_target_status
         ON graph_candidate_relations(target_note_id, candidate_status);",
     },
+    Migration {
+        version: 12,
+        name: "add_relation_origin_tracking",
+        sql: "ALTER TABLE relations RENAME TO relations_old;
+        CREATE TABLE relations (
+            id             TEXT PRIMARY KEY,
+            source_note_id TEXT NOT NULL,
+            target_note_id TEXT NOT NULL,
+            relation_type  TEXT NOT NULL CHECK (relation_type IN ('related', 'prerequisite', 'extension', 'opposes', 'supports', 'similar', 'premise', 'conclusion', 'example', 'rebuts')),
+            relation_origin TEXT NOT NULL DEFAULT 'manual' CHECK (relation_origin IN ('manual', 'candidate_accepted', 'candidate_edited')),
+            description    TEXT,
+            accepted_candidate_id TEXT,
+            created_at     TEXT NOT NULL,
+            updated_at     TEXT NOT NULL,
+            FOREIGN KEY (source_note_id) REFERENCES notes(id) ON DELETE CASCADE,
+            FOREIGN KEY (target_note_id) REFERENCES notes(id) ON DELETE CASCADE
+        );
+        INSERT INTO relations (id, source_note_id, target_note_id, relation_type, relation_origin, description, accepted_candidate_id, created_at, updated_at)
+        SELECT id, source_note_id, target_note_id, relation_type, 'manual', description, NULL, created_at, updated_at
+        FROM relations_old;
+        DROP TABLE relations_old;
+        ALTER TABLE graph_candidate_relations RENAME TO graph_candidate_relations_old;
+        CREATE TABLE graph_candidate_relations (
+            id TEXT PRIMARY KEY,
+            source_note_id TEXT NOT NULL,
+            source_heading_id TEXT,
+            target_note_id TEXT NOT NULL,
+            target_heading_id TEXT,
+            relation_type TEXT NOT NULL CHECK (relation_type IN ('related', 'prerequisite', 'extension', 'opposes', 'supports', 'similar', 'premise', 'conclusion', 'example', 'rebuts')),
+            rationale TEXT NOT NULL,
+            evidence_excerpt TEXT,
+            candidate_status TEXT NOT NULL DEFAULT 'pending' CHECK (candidate_status IN ('pending', 'accepted', 'ignored')),
+            provider_name TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            accepted_relation_id TEXT,
+            FOREIGN KEY (source_note_id) REFERENCES notes(id) ON DELETE CASCADE,
+            FOREIGN KEY (target_note_id) REFERENCES notes(id) ON DELETE CASCADE,
+            FOREIGN KEY (accepted_relation_id) REFERENCES relations(id) ON DELETE SET NULL
+        );
+        INSERT INTO graph_candidate_relations (
+            id,
+            source_note_id,
+            source_heading_id,
+            target_note_id,
+            target_heading_id,
+            relation_type,
+            rationale,
+            evidence_excerpt,
+            candidate_status,
+            provider_name,
+            created_at,
+            updated_at,
+            accepted_relation_id
+        )
+        SELECT
+            id,
+            source_note_id,
+            source_heading_id,
+            target_note_id,
+            target_heading_id,
+            relation_type,
+            rationale,
+            evidence_excerpt,
+            candidate_status,
+            provider_name,
+            created_at,
+            updated_at,
+            accepted_relation_id
+        FROM graph_candidate_relations_old;
+        DROP TABLE graph_candidate_relations_old;
+        CREATE INDEX IF NOT EXISTS idx_relations_source ON relations(source_note_id);
+        CREATE INDEX IF NOT EXISTS idx_relations_target ON relations(target_note_id);
+        CREATE INDEX IF NOT EXISTS idx_relations_type ON relations(relation_type);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_relations_unique_triplet
+        ON relations(source_note_id, target_note_id, relation_type);
+        CREATE INDEX IF NOT EXISTS idx_graph_candidate_relations_source_status
+        ON graph_candidate_relations(source_note_id, candidate_status);
+        CREATE INDEX IF NOT EXISTS idx_graph_candidate_relations_target_status
+        ON graph_candidate_relations(target_note_id, candidate_status);",
+    },
 ];
 
 #[cfg(test)]
@@ -605,10 +686,10 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(count, 11);
+        assert_eq!(count, 12);
 
         let rows = migration_rows(&conn);
-        assert_eq!(rows.len(), 11);
+        assert_eq!(rows.len(), 12);
         assert!(rows.iter().all(|(_, _, checksum, _)| checksum.len() == 64));
         assert!(rows.iter().all(|(_, _, _, status)| status == "applied"));
 
@@ -655,6 +736,9 @@ mod tests {
             .unwrap();
         assert!(relation_table_sql.contains(
             "CHECK (relation_type IN ('related', 'prerequisite', 'extension', 'opposes', 'supports', 'similar', 'premise', 'conclusion', 'example', 'rebuts'))"
+        ));
+        assert!(relation_table_sql.contains(
+            "CHECK (relation_origin IN ('manual', 'candidate_accepted', 'candidate_edited'))"
         ));
 
         let mut index_info_stmt = conn
@@ -830,9 +914,9 @@ mod tests {
     }
 
     #[test]
-    fn migration_11_preserves_existing_relations_and_allows_widened_relation_types() {
+    fn migration_12_preserves_existing_relations_and_adds_origin_tracking() {
         let dir = TempDir::new().unwrap();
-        let db_path = dir.path().join("migration-11-upgrade.sqlite");
+        let db_path = dir.path().join("migration-12-upgrade.sqlite");
         let conn = Connection::open(&db_path).unwrap();
 
         conn.execute_batch(
@@ -906,18 +990,27 @@ mod tests {
         );
 
         let widened_insert = conn.execute(
-            "INSERT INTO relations (id, source_note_id, target_note_id, relation_type, description, created_at, updated_at)
-             VALUES ('new-premise-relation', 'note-1', 'note-3', 'premise', 'desc', '2026-06-01T00:00:00Z', '2026-06-01T00:00:00Z')",
+            "INSERT INTO relations (id, source_note_id, target_note_id, relation_type, relation_origin, description, accepted_candidate_id, created_at, updated_at)
+             VALUES ('new-premise-relation', 'note-1', 'note-3', 'premise', 'manual', 'desc', NULL, '2026-06-01T00:00:00Z', '2026-06-01T00:00:00Z')",
             [],
         );
         assert!(widened_insert.is_ok());
 
         let invalid_insert = conn.execute(
-            "INSERT INTO relations (id, source_note_id, target_note_id, relation_type, description, created_at, updated_at)
-             VALUES ('new-invalid-relation', 'note-1', 'note-3', 'invalid_type', 'desc', '2026-06-01T00:00:00Z', '2026-06-01T00:00:00Z')",
+            "INSERT INTO relations (id, source_note_id, target_note_id, relation_type, relation_origin, description, accepted_candidate_id, created_at, updated_at)
+             VALUES ('new-invalid-relation', 'note-1', 'note-3', 'invalid_type', 'manual', 'desc', NULL, '2026-06-01T00:00:00Z', '2026-06-01T00:00:00Z')",
             [],
         );
         assert!(invalid_insert.is_err());
+
+        let migrated_relation_origin: String = conn
+            .query_row(
+                "SELECT relation_origin FROM relations WHERE id = 'legacy-relation'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migrated_relation_origin, "manual");
     }
 
     #[test]
@@ -954,7 +1047,7 @@ mod tests {
         assert!(columns.contains(&"status".to_string()));
 
         let rows = migration_rows(&conn);
-        assert_eq!(rows.len(), 11);
+        assert_eq!(rows.len(), 12);
         assert!(rows.iter().all(|(_, _, checksum, _)| checksum.len() == 64));
         assert!(rows.iter().all(|(_, _, _, status)| status == "applied"));
         assert_eq!(rows[0].0, 1);

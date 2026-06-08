@@ -43,7 +43,9 @@ function makeRelationItem(overrides: Partial<RelationItem> = {}): RelationItem {
   return {
     id: "rel-1",
     relation_type: "related",
+    relation_origin: "manual",
     description: null,
+    accepted_candidate_id: null,
     note_id: "note-2",
     note_title: "目标笔记",
     note_path: "notes/target.md",
@@ -120,6 +122,7 @@ describe("ManualRelationsPanel", () => {
           makeRelationItem({
             id: "rel-2",
             relation_type: "supports",
+            relation_origin: "manual",
             description: "补充说明",
             note_id: "note-2",
             note_title: "第二篇笔记",
@@ -152,6 +155,28 @@ describe("ManualRelationsPanel", () => {
     await waitFor(() => expect(apiMocks.listRelations).toHaveBeenCalledTimes(2));
     expect(await screen.findByText("第二篇笔记")).toBeInTheDocument();
     expect(screen.getByText("补充说明")).toBeInTheDocument();
+    expect(screen.getByText(/来源:\s*手工维护/)).toBeInTheDocument();
+  });
+
+  it("renders candidate-derived relation source labels", async () => {
+    apiMocks.listRelations.mockResolvedValue(makeRelations({
+      outgoing: [
+        makeRelationItem({
+          id: "rel-ai-1",
+          relation_type: "supports",
+          relation_origin: "candidate_edited",
+          accepted_candidate_id: "candidate-42",
+          note_title: "AI 采纳关系",
+          description: "编辑后确认",
+        }),
+      ],
+    }));
+
+    renderPanel();
+
+    expect(await screen.findByText("AI 采纳关系")).toBeInTheDocument();
+    expect(screen.getByText(/来源:\s*AI 编辑后采纳/)).toBeInTheDocument();
+    expect(screen.getByText(/来源候选:\s*candidate-42/)).toBeInTheDocument();
   });
 
   it("shows a duplicate-relation error when create fails with duplicate", async () => {

@@ -75,13 +75,42 @@ impl GraphCandidateStatus {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RelationOrigin {
+    Manual,
+    CandidateAccepted,
+    CandidateEdited,
+}
+
+impl RelationOrigin {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "manual" => Some(Self::Manual),
+            "candidate_accepted" => Some(Self::CandidateAccepted),
+            "candidate_edited" => Some(Self::CandidateEdited),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::CandidateAccepted => "candidate_accepted",
+            Self::CandidateEdited => "candidate_edited",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Relation {
     pub id: String,
     pub source_note_id: String,
     pub target_note_id: String,
     pub relation_type: RelationType,
+    pub relation_origin: RelationOrigin,
     pub description: Option<String>,
+    pub accepted_candidate_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -90,7 +119,9 @@ pub struct Relation {
 pub struct RelationItem {
     pub id: String,
     pub relation_type: RelationType,
+    pub relation_origin: RelationOrigin,
     pub description: Option<String>,
+    pub accepted_candidate_id: Option<String>,
     pub note_id: String,
     pub note_title: String,
     pub note_path: String,
@@ -117,14 +148,18 @@ mod tests {
             source_note_id: "n1".to_string(),
             target_note_id: "n2".to_string(),
             relation_type: RelationType::Supports,
+            relation_origin: RelationOrigin::Manual,
             description: Some("supports context".to_string()),
+            accepted_candidate_id: None,
             created_at: "2026-05-31T00:00:00Z".to_string(),
             updated_at: "2026-05-31T00:00:00Z".to_string(),
         };
         let relation_item = RelationItem {
             id: "r2".to_string(),
             relation_type: RelationType::Opposes,
+            relation_origin: RelationOrigin::Manual,
             description: None,
+            accepted_candidate_id: None,
             note_id: "n3".to_string(),
             note_title: "Note".to_string(),
             note_path: "notes/n3.md".to_string(),
@@ -142,5 +177,18 @@ mod tests {
         assert_eq!(RelationType::parse("conclusion"), Some(RelationType::Conclusion));
         assert_eq!(RelationType::parse("example"), Some(RelationType::Example));
         assert_eq!(RelationType::parse("rebuts"), Some(RelationType::Rebuts));
+    }
+
+    #[test]
+    fn relation_origin_parse_supports_manual_and_candidate_sources() {
+        assert_eq!(RelationOrigin::parse("manual"), Some(RelationOrigin::Manual));
+        assert_eq!(
+            RelationOrigin::parse("candidate_accepted"),
+            Some(RelationOrigin::CandidateAccepted)
+        );
+        assert_eq!(
+            RelationOrigin::parse("candidate_edited"),
+            Some(RelationOrigin::CandidateEdited)
+        );
     }
 }
