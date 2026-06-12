@@ -41,6 +41,7 @@ function countNotes(node: NoteTreeNode): number {
 interface Props {
   node: NoteTreeNode;
   depth?: number;
+  getDefaultExpanded?: (node: NoteTreeNode, depth: number) => boolean;
   inheritedDirectoryColor?: string;
   onSelectFile: (node: NoteTreeNode) => void;
   selectedPath: string | null;
@@ -72,11 +73,19 @@ interface Props {
   onDeleteNotebook?: () => void;
   disableMoveUp?: boolean;
   disableMoveDown?: boolean;
+  renamingNotePath?: string | null;
+  noteRenameDrafts?: Record<string, string>;
+  noteErrors?: Record<string, string | null>;
+  onBeginNoteRename?: (node: NoteTreeNode) => void;
+  onNoteRenameChange?: (path: string, value: string) => void;
+  onNoteRenameSubmit?: (node: NoteTreeNode) => void;
+  onNoteRenameCancel?: (path: string) => void;
 }
 
 export function FileTreeNode({
   node,
   depth = 0,
+  getDefaultExpanded,
   inheritedDirectoryColor = "gray",
   onSelectFile,
   selectedPath,
@@ -108,8 +117,15 @@ export function FileTreeNode({
   onDeleteNotebook,
   disableMoveUp = false,
   disableMoveDown = false,
+  renamingNotePath = null,
+  noteRenameDrafts,
+  noteErrors,
+  onBeginNoteRename,
+  onNoteRenameChange,
+  onNoteRenameSubmit,
+  onNoteRenameCancel,
 }: Props) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(() => getDefaultExpanded?.(node, depth) ?? true);
   const [shouldRenderChildren, setShouldRenderChildren] = useState(true);
   const [contentHeight, setContentHeight] = useState(0);
   const [isNotebookRowHovered, setIsNotebookRowHovered] = useState(false);
@@ -121,6 +137,7 @@ export function FileTreeNode({
   const dropDirectoryPath = node.is_dir ? getDropDirectoryPath(node) : null;
   const contentRef = useRef<HTMLDivElement | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const noteRenameInputRef = useRef<HTMLInputElement | null>(null);
   const skipRenameSubmitRef = useRef(false);
   const directoryColor = getDirectoryColor(node, inheritedDirectoryColor);
   const directoryPalette = NOTEBOOK_COLOR_STYLES[directoryColor] ?? NOTEBOOK_COLOR_STYLES.gray;
@@ -165,6 +182,9 @@ export function FileTreeNode({
   const isMoveUpFocusVisible = focusVisibleAction === "move-up";
   const isMoveDownFocusVisible = focusVisibleAction === "move-down";
   const isDeleteFocusVisible = focusVisibleAction === "delete";
+  const isRenamingNote = renamingNotePath === node.path;
+  const noteRenameValue = noteRenameDrafts?.[node.path] ?? node.name.replace(/\.md$/i, "");
+  const noteError = noteErrors?.[node.path] ?? null;
 
   const handleActionFocus = (
     action: "color" | "move-up" | "move-down" | "delete",
@@ -225,6 +245,15 @@ export function FileTreeNode({
     renameInputRef.current.focus();
     renameInputRef.current.select();
   }, [isRenamingNotebook]);
+
+  useEffect(() => {
+    if (!isRenamingNote || !noteRenameInputRef.current) {
+      return;
+    }
+
+    noteRenameInputRef.current.focus();
+    noteRenameInputRef.current.select();
+  }, [isRenamingNote]);
 
   if (node.is_dir) {
     return (
@@ -368,6 +397,7 @@ export function FileTreeNode({
                 {isNotebook ? (
                   <button
                     type="button"
+                onPointerDown={(event) => event.stopPropagation()}
                     aria-label={`切换笔记本 ${node.name}`}
                     aria-expanded={expanded}
                     onClick={toggleExpanded}
@@ -460,6 +490,7 @@ export function FileTreeNode({
                   <button
                     type="button"
                     aria-label={node.name}
+                    aria-expanded={expanded}
                     onClick={toggleExpanded}
                     onFocus={(event) => setIsTitleFocusVisible(event.currentTarget.matches(":focus-visible"))}
                     onBlur={() => setIsTitleFocusVisible(false)}
@@ -678,6 +709,7 @@ export function FileTreeNode({
                   key={child.path}
                   node={child}
                   depth={depth + 1}
+                  getDefaultExpanded={getDefaultExpanded}
                   inheritedDirectoryColor={directoryColor}
                   onSelectFile={onSelectFile}
                   selectedPath={selectedPath}
@@ -691,6 +723,13 @@ export function FileTreeNode({
                   onPointerLeaveDirectory={onPointerLeaveDirectory}
                   onPointerUpOnDirectory={onPointerUpOnDirectory}
                   onContextMenu={onContextMenu}
+                  renamingNotePath={renamingNotePath}
+                  noteRenameDrafts={noteRenameDrafts}
+                  noteErrors={noteErrors}
+                  onBeginNoteRename={onBeginNoteRename}
+                  onNoteRenameChange={onNoteRenameChange}
+                  onNoteRenameSubmit={onNoteRenameSubmit}
+                  onNoteRenameCancel={onNoteRenameCancel}
                 />
               ))}
             </div>
@@ -701,51 +740,109 @@ export function FileTreeNode({
   }
 
   return (
-    <div
-      draggable={false}
-      data-note-drag-source={node.path}
-      data-note-drag-label={node.name}
-      onClick={() => onSelectFile(node)}
-      onContextMenu={(event) => onContextMenu?.(node, event)}
-      onDragStart={(event) => onStartDragFile(node, event)}
-      onPointerDown={(event) => onStartPointerDragFile(node, event)}
-      style={{
-        paddingLeft: indent,
-        paddingRight: 8,
-        paddingTop: 3,
-        paddingBottom: 3,
-        cursor: "default",
-        fontSize: 13,
-        background: isSelected ? "#dbeafe" : "transparent",
-        color: isSelected ? "#1d4ed8" : "#333",
-        borderRadius: 4,
-        userSelect: "none",
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
-      }}
-    >
-      {node.has_summary && (
-        <span
-          data-testid={`summary-badge:${node.path}`}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flex: "0 0 auto",
-            padding: "1px 6px",
-            borderRadius: 999,
-            background: "#fff1f2",
-            color: "#be123c",
-            fontSize: 11,
-            fontWeight: 600,
-            lineHeight: 1.4,
-          }}
-        >
-          摘要
-        </span>
-      )}
-      {node.name}
+    <div>
+      <div
+        draggable={false}
+        data-note-drag-source={node.path}
+        data-note-drag-label={node.name}
+        onClick={() => {
+          if (!isRenamingNote) {
+            onSelectFile(node);
+          }
+        }}
+        onDoubleClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (!isRenamingNote) {
+            onBeginNoteRename?.(node);
+          }
+        }}
+        onContextMenu={(event) => onContextMenu?.(node, event)}
+        onDragStart={(event) => onStartDragFile(node, event)}
+        onPointerDown={(event) => onStartPointerDragFile(node, event)}
+        style={{
+          paddingLeft: indent,
+          paddingRight: 8,
+          paddingTop: 3,
+          paddingBottom: 3,
+          cursor: "default",
+          fontSize: 13,
+          background: isSelected ? "#dbeafe" : "transparent",
+          color: isSelected ? "#1d4ed8" : "#333",
+          borderRadius: 4,
+          userSelect: "none",
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+        }}
+      >
+        {node.has_summary && (
+          <span
+            data-testid={`summary-badge:${node.path}`}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flex: "0 0 auto",
+              padding: "1px 6px",
+              borderRadius: 999,
+              background: "#fff1f2",
+              color: "#be123c",
+              fontSize: 11,
+              fontWeight: 600,
+              lineHeight: 1.4,
+            }}
+          >
+            摘要
+          </span>
+        )}
+        {isRenamingNote ? (
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              onNoteRenameSubmit?.();
+            }}
+            onClick={(event) => event.stopPropagation()}
+            style={{ flex: 1, minWidth: 0 }}
+          >
+            <input
+              ref={noteRenameInputRef}
+              aria-label={`重命名笔记 ${node.name}`}
+              value={noteRenameValue}
+              onChange={(event) => onNoteRenameChange?.(node.path, event.target.value)}
+              onBlur={() => onNoteRenameSubmit?.(node)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  onNoteRenameSubmit?.(node);
+                  return;
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  onNoteRenameCancel?.(node.path);
+                }
+              }}
+              style={{
+                width: "100%",
+                minWidth: 0,
+                height: 28,
+                borderRadius: 8,
+                border: "1px solid #bfdbfe",
+                padding: "0 10px",
+                fontSize: 13,
+                color: "#1f2937",
+                background: "rgba(255,255,255,0.94)",
+                boxSizing: "border-box",
+              }}
+            />
+          </form>
+        ) : (
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{node.name}</span>
+        )}
+      </div>
+      {noteError ? (
+        <div style={{ paddingLeft: indent + 6, paddingRight: 8, paddingTop: 4 }}>{noteError}</div>
+      ) : null}
     </div>
   );
 }

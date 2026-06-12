@@ -10,6 +10,8 @@ function deriveEditorMode(showPreview: boolean): EditorMode {
 interface EditorState {
   currentNote: Note | null;
   content: string;
+  isOpeningNote: boolean;
+  openingNotePath: string | null;
   isComposing: boolean;
   isDirty: boolean;
   isSaving: boolean;
@@ -31,11 +33,14 @@ interface EditorState {
   setEditorMode: (mode: EditorMode) => void;
   setSearchNavigationTarget: (target: SearchNavigationTarget | null) => void;
   setTagNavigationTarget: (target: TagNavigationTarget | null) => void;
+  setNoteOpening: (opening: boolean, notePath?: string | null) => void;
 }
 
 export const useEditorStore = create<EditorState>((set, get) => ({
   currentNote: null,
   content: "",
+  isOpeningNote: false,
+  openingNotePath: null,
   isComposing: false,
   isDirty: false,
   isSaving: false,
@@ -64,4 +69,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setEditorMode: (mode) => set({ showPreview: mode === "split" }),
   setSearchNavigationTarget: (target) => set({ searchNavigationTarget: target }),
   setTagNavigationTarget: (target) => set({ tagNavigationTarget: target }),
+  setNoteOpening: (opening, notePath = null) => set({
+    isOpeningNote: opening,
+    openingNotePath: opening ? notePath ?? null : null,
+  }),
 }));

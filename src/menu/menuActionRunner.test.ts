@@ -7,6 +7,7 @@ function createHandlers() {
     createNote: vi.fn().mockResolvedValue(undefined),
     createNotebook: vi.fn().mockResolvedValue(undefined),
     importNote: vi.fn().mockResolvedValue(undefined),
+    refreshFileTree: vi.fn().mockResolvedValue(undefined),
     openSearch: vi.fn().mockResolvedValue(undefined),
     openAiSettings: vi.fn().mockResolvedValue(undefined),
     testAiConnection: vi.fn().mockResolvedValue(undefined),
@@ -17,6 +18,7 @@ function createHandlers() {
     openCurrentNote: vi.fn().mockResolvedValue(undefined),
     moveCurrentNote: vi.fn().mockResolvedValue(undefined),
     renameCurrentNote: vi.fn().mockResolvedValue(undefined),
+    deleteCurrentNote: vi.fn().mockResolvedValue(undefined),
     copyCurrentNoteLink: vi.fn().mockResolvedValue(undefined),
     copyCurrentNoteWikiLink: vi.fn().mockResolvedValue(undefined),
     createNoteInNotebook: vi.fn().mockResolvedValue(undefined),
@@ -24,10 +26,14 @@ function createHandlers() {
     reorderNotebook: vi.fn().mockResolvedValue(undefined),
     deleteNotebook: vi.fn().mockResolvedValue(undefined),
     deleteTag: vi.fn().mockResolvedValue(undefined),
+    pasteFromSelection: vi.fn().mockResolvedValue(undefined),
     insertLinkFromSelection: vi.fn().mockResolvedValue(undefined),
+    insertImageFromSelection: vi.fn().mockResolvedValue(undefined),
     insertTagFromSelection: vi.fn().mockResolvedValue(undefined),
     createWikiLinkFromSelection: vi.fn().mockResolvedValue(undefined),
+    pasteFromBlank: vi.fn().mockResolvedValue(undefined),
     insertLinkFromBlank: vi.fn().mockResolvedValue(undefined),
+    insertImageFromBlank: vi.fn().mockResolvedValue(undefined),
     createWikiLinkFromBlank: vi.fn().mockResolvedValue(undefined),
     refreshIndex: vi.fn().mockResolvedValue(undefined),
     showLeftSidebar: vi.fn().mockResolvedValue(undefined),
@@ -87,6 +93,16 @@ describe("menuActionRunner", () => {
     });
   });
 
+  it("routes note.delete to the provided handler", async () => {
+    const handlers = createHandlers();
+    const runner = createMenuActionRunner(handlers);
+
+    await expect(
+      runner.run("note.delete", { type: "note", noteId: "n1", path: "notes/a.md" }),
+    ).resolves.toBe(true);
+    expect(handlers.deleteCurrentNote).toHaveBeenCalledOnce();
+  });
+
   it("runs every declared action id", async () => {
     const runner = createMenuActionRunner(createHandlers());
     const notePayload = { type: "note" as const, noteId: "n1", path: "notes/a.md" };
@@ -128,11 +144,12 @@ describe("menuActionRunner", () => {
       notePath: "notes/a.md",
       handlers: {},
     };
-    const noteActions = new Set(["edit.rename", "edit.move", "edit.copyLink", "note.rename", "note.move", "note.copyLink", "note.copyWikiLink", "note.open"]);
+    const noteActions = new Set(["edit.rename", "edit.move", "edit.copyLink", "note.rename", "note.move", "note.copyLink", "note.copyWikiLink", "note.delete", "note.open"]);
     const notebookActions = new Set(["notebook.createNote", "notebook.rename", "notebook.reorder", "notebook.delete"]);
     const tagActions = new Set(["tag.delete"]);
-    const selectionActions = new Set(["selection.insertLink", "selection.insertTag", "selection.createWikiLink"]);
-    const blankActions = new Set(["blank.insertLink", "blank.createWikiLink", "blank.refreshIndex", "blank.showSidebar"]);
+    const selectionActions = new Set(["selection.paste", "selection.insertLink", "selection.insertImage", "selection.insertTag", "selection.createWikiLink"]);
+    const fileActions = new Set(["file.newNote", "file.newNotebook", "file.importNote", "file.refreshTree"]);
+    const blankActions = new Set(["blank.paste", "blank.insertLink", "blank.insertImage", "blank.createWikiLink", "blank.refreshIndex", "blank.showSidebar"]);
     const tagBlankActions = new Set(["tagBlank.refresh", "tagBlank.clearFilter"]);
     const tagContextItemActions = new Set(["tagContextItem.openNote", "tagContextItem.locate"]);
     const previewBlankActions = new Set(["previewBlank.returnToEditor", "previewBlank.showSidebar"]);
@@ -149,6 +166,8 @@ describe("menuActionRunner", () => {
           ? notebookPayload
           : tagActions.has(actionId)
             ? tagPayload
+            : fileActions.has(actionId)
+              ? undefined
             : selectionActions.has(actionId)
               ? selectionPayload
               : blankActions.has(actionId)
@@ -189,6 +208,14 @@ describe("menuActionRunner", () => {
 
     await expect(runner.run("view.editorOnly")).resolves.toBe(true);
     expect(handlers.setEditorMode).toHaveBeenCalledWith("editor");
+  });
+
+  it("routes file.refreshTree to the provided handler", async () => {
+    const handlers = createHandlers();
+    const runner = createMenuActionRunner(handlers);
+
+    await expect(runner.run("file.refreshTree")).resolves.toBe(true);
+    expect(handlers.refreshFileTree).toHaveBeenCalledOnce();
   });
 
   it("routes AI app-menu actions to the provided handlers", async () => {
@@ -236,6 +263,46 @@ describe("menuActionRunner", () => {
       runner.run("selection.insertTag", { type: "editorSelection", selectedText: "项目", handlers: {} }),
     ).resolves.toBe(true);
     expect(handlers.insertTagFromSelection).toHaveBeenCalledOnce();
+  });
+
+  it("routes selection.insertImage to the provided handler", async () => {
+    const handlers = createHandlers();
+    const runner = createMenuActionRunner(handlers);
+
+    await expect(
+      runner.run("selection.insertImage", { type: "editorSelection", selectedText: "项目", handlers: {} }),
+    ).resolves.toBe(true);
+    expect(handlers.insertImageFromSelection).toHaveBeenCalledOnce();
+  });
+
+  it("routes selection.paste to the provided handler", async () => {
+    const handlers = createHandlers();
+    const runner = createMenuActionRunner(handlers);
+
+    await expect(
+      runner.run("selection.paste", { type: "editorSelection", selectedText: "项目", handlers: {} }),
+    ).resolves.toBe(true);
+    expect(handlers.pasteFromSelection).toHaveBeenCalledOnce();
+  });
+
+  it("routes blank.insertImage to the provided handler", async () => {
+    const handlers = createHandlers();
+    const runner = createMenuActionRunner(handlers);
+
+    await expect(
+      runner.run("blank.insertImage", { type: "editorBlank", handlers: {} }),
+    ).resolves.toBe(true);
+    expect(handlers.insertImageFromBlank).toHaveBeenCalledOnce();
+  });
+
+  it("routes blank.paste to the provided handler", async () => {
+    const handlers = createHandlers();
+    const runner = createMenuActionRunner(handlers);
+
+    await expect(
+      runner.run("blank.paste", { type: "editorBlank", handlers: {} }),
+    ).resolves.toBe(true);
+    expect(handlers.pasteFromBlank).toHaveBeenCalledOnce();
   });
 
   it("routes previewLink actions to the provided handlers", async () => {

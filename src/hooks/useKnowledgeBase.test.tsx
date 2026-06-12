@@ -10,9 +10,11 @@ const apiMocks = vi.hoisted(() => ({
   createNote: vi.fn(),
   createNotebook: vi.fn(),
   moveNote: vi.fn(),
+  renameNote: vi.fn(),
   renameNotebook: vi.fn(),
   updateNotebookVisual: vi.fn(),
   deleteNotebook: vi.fn(),
+  deleteNote: vi.fn(),
   reorderNotebooks: vi.fn(),
 }));
 
@@ -31,9 +33,11 @@ describe("useKnowledgeBase", () => {
     apiMocks.createNote.mockReset();
     apiMocks.createNotebook.mockReset();
     apiMocks.moveNote.mockReset();
+    apiMocks.renameNote.mockReset();
     apiMocks.renameNotebook.mockReset();
     apiMocks.updateNotebookVisual.mockReset();
     apiMocks.deleteNotebook.mockReset();
+    apiMocks.deleteNote.mockReset();
     apiMocks.reorderNotebooks.mockReset();
     openNoteMock.mockReset();
     useAppStore.setState({ tree: [], error: null, selectedNodePath: null });
@@ -127,6 +131,27 @@ describe("useKnowledgeBase", () => {
     expect(refreshTree).toHaveBeenCalledTimes(1);
   });
 
+  it("renames a note and updates selected/current note path", async () => {
+    const refreshTree = vi.fn().mockResolvedValue(undefined);
+    const currentNote = makeNote({ path: "notes/source/合同审查.md" });
+    const renamedNote = makeNote({ path: "notes/source/合同审查-新版.md" });
+
+    useAppStore.setState({ refreshTree, selectedNodePath: currentNote.path });
+    useEditorStore.setState({ currentNote, content: "content" });
+    apiMocks.renameNote.mockResolvedValue(renamedNote);
+
+    const { result } = renderHook(() => useKnowledgeBase());
+
+    await act(async () => {
+      await result.current.renameNote(currentNote.path, "合同审查-新版");
+    });
+
+    expect(apiMocks.renameNote).toHaveBeenCalledWith("notes/source/合同审查.md", "合同审查-新版");
+    expect(useEditorStore.getState().currentNote?.path).toBe("notes/source/合同审查-新版.md");
+    expect(useAppStore.getState().selectedNodePath).toBe("notes/source/合同审查-新版.md");
+    expect(refreshTree).toHaveBeenCalledTimes(1);
+  });
+
   it("renames a notebook and updates the selected notebook path when the notebook itself is selected", async () => {
     const refreshTree = vi.fn().mockResolvedValue(undefined);
     const renameResult: RenameNotebookResult = {
@@ -210,6 +235,26 @@ describe("useKnowledgeBase", () => {
     });
 
     expect(apiMocks.reorderNotebooks).toHaveBeenCalledWith(["notes/beta", "notes/alpha"]);
+    expect(refreshTree).toHaveBeenCalledTimes(1);
+  });
+
+  it("deletes a note through the api and clears current selection/editor when deleting current note", async () => {
+    const refreshTree = vi.fn().mockResolvedValue(undefined);
+    const current = makeNote({ path: "notes/work/demo.md" });
+    useAppStore.setState({ refreshTree, selectedNodePath: current.path });
+    useEditorStore.setState({ currentNote: current, content: "# demo" });
+    apiMocks.deleteNote.mockResolvedValue(undefined);
+
+    const { result } = renderHook(() => useKnowledgeBase());
+
+    await act(async () => {
+      await result.current.deleteNote(current.path);
+    });
+
+    expect(apiMocks.deleteNote).toHaveBeenCalledWith("notes/work/demo.md");
+    expect(useAppStore.getState().selectedNodePath).toBeNull();
+    expect(useEditorStore.getState().currentNote).toBeNull();
+    expect(useEditorStore.getState().content).toBe("");
     expect(refreshTree).toHaveBeenCalledTimes(1);
   });
 });

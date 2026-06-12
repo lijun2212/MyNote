@@ -93,6 +93,8 @@ describe("EditorWorkspace", () => {
     useEditorStore.setState({
       currentNote: makeNote({ path: "notes/demo.md", title: "Demo" }),
       content: "# Demo\n\nBody",
+      isOpeningNote: false,
+      openingNotePath: null,
       isComposing: false,
       isDirty: false,
       isSaving: false,
@@ -111,6 +113,19 @@ describe("EditorWorkspace", () => {
     const editor = screen.getByTestId("mock-editor");
 
     expect(title.compareDocumentPosition(editor) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("shows opening hint when no note is loaded yet", () => {
+    useEditorStore.setState({
+      currentNote: null,
+      content: "",
+      isOpeningNote: true,
+      openingNotePath: "notes/slow.md",
+    });
+
+    render(<EditorWorkspace />);
+
+    expect(screen.getByText("正在加载笔记...")).toBeInTheDocument();
   });
 
   it("triggers summary candidate actions without auto-saving", async () => {

@@ -1,11 +1,15 @@
 use crate::domain::note::{
-    CreateNoteInput, CreateNotebookInput, Note, NoteDetail, NoteOutlineItem, NoteTreeNode,
-    RenameNotebookResult, SaveNoteInput, SaveNoteResult,
+    CreateNoteInput, CreateNotebookInput, MarkdownImportItem, MarkdownImportMessage,
+    MarkdownImportRequest, MarkdownImportResult, MarkdownImportSource, Note, NoteDetail,
+    NoteOutlineItem, NoteTreeNode, RenameNotebookResult, SaveNoteInput, SaveNoteResult,
+    InsertImageResult,
 };
 use crate::error::{AppError, AppResult};
 use crate::infrastructure::fs::{atomic_write, normalize_kb_relative_path, resolve_kb_path, safe_filename};
-use crate::infrastructure::markdown::{extract_note_outline_blocks_from_content, render_note, FrontMatter};
-use crate::services::index::index_note_full;
+use crate::infrastructure::markdown::{
+    extract_links, extract_note_outline_blocks_from_content, render_note, FrontMatter,
+};
+use crate::services::index::{index_note_full, mark_note_deleted_by_path};
 use crate::services::notebook_visual::{
     delete_notebook_visual, load_notebook_visuals, rename_notebook_visual,
     save_notebook_visual, visual_for_path, NotebookVisualMap,
@@ -14,9 +18,11 @@ use crate::state::AppState;
 use rusqlite::params;
 use rusqlite::OptionalExtension;
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tauri::State;
 use ulid::Ulid;
+
+const SUPPORTED_IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp"];
 
 pub fn create_notebook_in_root(root: &Path, name: &str, _icon: &str, _color: &str) -> AppResult<String> {
     let trimmed_name = name.trim();
@@ -472,6 +478,83 @@ fn rename_directory_with_case_handling(source: &Path, target: &Path) -> AppResul
     Ok(())
 }
 
+fn normalize_managed_note_path(path: &str) -> AppResult<String> {
+    let path = normalize_kb_relative_path(path)?;
+    if !path.starts_with("notes/") || !path.ends_with(".md") {
+        return Err(AppError::InvalidInput(format!("Invalid note path: {}", path)));
+    }
+    Ok(path)
+}
+
+fn normalize_new_note_name(new_name: &str) -> AppResult<String> {
+    let trimmed = new_name.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::InvalidInput("Note name cannot be empty".into()));
+    }
+    if trimmed == "." || trimmed == ".." {
+        return Err(AppError::InvalidInput("Note name cannot be a reserved path segment".into()));
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') {
+        return Err(AppError::InvalidInput("Note name cannot contain path separators".into()));
+    }
+
+    let normalized = safe_filename(trimmed);
+    if normalized.is_empty() || normalized == "." || normalized == ".." {
+        return Err(AppError::InvalidInput("Note name cannot be a reserved path segment".into()));
+    }
+
+    Ok(normalized)
+}
+
+pub fn rename_note_in_root(
+    conn: &rusqlite::Connection,
+    root: &Path,
+    note_path: &str,
+    new_name: &str,
+) -> AppResult<Note> {
+    let source_rel = normalize_managed_note_path(note_path)?;
+    let source_abs = resolve_kb_path(root, &source_rel)?;
+    if !source_abs.exists() {
+      return Err(AppError::NotFound(format!("Note not found: {}", source_rel)));
+    }
+
+    let source_note = get_note_by_path_service_inner(conn, root, &source_rel)?;
+    let parent_dir = Path::new(&source_rel)
+        .parent()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| AppError::InvalidInput(format!("Invalid note path: {}", source_rel)))?;
+    let new_name = normalize_new_note_name(new_name)?;
+    let target_filename = format!("{}.md", new_name);
+    let target_rel = next_available_note_path(conn, root, parent_dir, &target_filename)?;
+
+    if target_rel == source_rel {
+        return Ok(source_note);
+    }
+
+    let target_abs = resolve_kb_path(root, &target_rel)?;
+    let content = std::fs::read_to_string(&source_abs)?;
+    rename_directory_with_case_handling(&source_abs, &target_abs)?;
+
+    let rename_result = (|| -> AppResult<Note> {
+        conn.execute(
+            "UPDATE notes SET path = ?1 WHERE id = ?2",
+            params![&target_rel, &source_note.id],
+        )?;
+        index_note_full(conn, root, &target_rel, &content)
+    })();
+
+    if let Err(err) = rename_result {
+        let _ = rename_directory_with_case_handling(&target_abs, &source_abs);
+        let _ = conn.execute(
+            "UPDATE notes SET path = ?1 WHERE id = ?2",
+            params![&source_rel, &source_note.id],
+        );
+        return Err(err);
+    }
+
+    rename_result
+}
+
 pub fn rename_notebook_in_root(
     conn: &rusqlite::Connection,
     root: &Path,
@@ -606,6 +689,65 @@ pub fn delete_notebook_in_root(
     }
 
     Ok(())
+}
+
+pub fn delete_note_in_root(
+    conn: &rusqlite::Connection,
+    root: &Path,
+    note_path: &str,
+) -> AppResult<()> {
+    let note_rel_path = normalize_kb_relative_path(note_path)?;
+    let note_abs_path = resolve_kb_path(root, &note_rel_path)?;
+
+    if !note_abs_path.is_file() {
+        return Err(AppError::NotFound(format!("Note not found: {}", note_rel_path)));
+    }
+
+    let content = std::fs::read_to_string(&note_abs_path)
+        .map_err(|_| AppError::NotFound(format!("Note not found: {}", note_rel_path)))?;
+    let asset_paths = collect_note_asset_paths(root, &note_rel_path, &content)?;
+
+    std::fs::remove_file(&note_abs_path)?;
+    for asset_path in asset_paths {
+        if asset_path.is_file() {
+            std::fs::remove_file(asset_path)?;
+        }
+    }
+
+    mark_note_deleted_by_path(conn, &note_rel_path)
+}
+
+fn collect_note_asset_paths(root: &Path, note_rel_path: &str, content: &str) -> AppResult<Vec<PathBuf>> {
+    let root_abs = std::fs::canonicalize(root)?;
+    let note_parent_rel = Path::new(note_rel_path)
+        .parent()
+        .ok_or_else(|| AppError::InvalidInput(format!("Invalid note path: {}", note_rel_path)))?
+        .to_string_lossy()
+        .replace('\\', "/");
+    let note_parent_abs = resolve_kb_path(root, &note_parent_rel)?;
+    let mut asset_paths = HashSet::new();
+
+    for link in extract_links(content)
+        .into_iter()
+        .filter(|link| link.link_type == "asset")
+    {
+        if link.target_raw.trim().is_empty() {
+            continue;
+        }
+
+        let candidate = note_parent_abs.join(&link.target_raw);
+        let Ok(asset_abs) = std::fs::canonicalize(&candidate) else {
+            continue;
+        };
+
+        if !asset_abs.starts_with(&root_abs) || !asset_abs.is_file() {
+            continue;
+        }
+
+        asset_paths.insert(asset_abs);
+    }
+
+    Ok(asset_paths.into_iter().collect())
 }
 
 pub fn reorder_notebooks_in_root(
@@ -744,6 +886,29 @@ fn path_uses_symlink_segment(root: &Path, relative: &str) -> AppResult<bool> {
     Ok(false)
 }
 
+fn validate_existing_note_target_directory(root: &Path, target_directory: &str) -> AppResult<String> {
+    let target_dir = normalize_kb_relative_path(target_directory)?;
+    let is_valid_notes_path = target_dir == "notes" || target_dir.starts_with("notes/");
+
+    if !is_valid_notes_path
+        || target_dir == "notes/__unarchived__"
+        || target_dir.starts_with("notes/__unarchived__/")
+        || path_uses_symlink_segment(root, &target_dir)?
+    {
+        return Err(AppError::InvalidInput(format!("Invalid target directory: {}", target_dir)));
+    }
+
+    let target_abs = resolve_kb_path(root, &target_dir)?;
+    if !target_abs.exists() {
+        std::fs::create_dir_all(&target_abs)?;
+    }
+    if !target_abs.is_dir() {
+        return Err(AppError::InvalidInput(format!("Invalid target directory: {}", target_dir)));
+    }
+
+    Ok(target_dir)
+}
+
 pub fn move_note_in_root(
     conn: &rusqlite::Connection,
     root: &Path,
@@ -751,20 +916,11 @@ pub fn move_note_in_root(
     target_directory: &str,
 ) -> AppResult<Note> {
     let source_rel = normalize_kb_relative_path(source_path)?;
-    let target_dir = normalize_kb_relative_path(target_directory)?;
+    let target_dir = validate_existing_note_target_directory(root, target_directory)?;
     let source_abs = resolve_kb_path(root, &source_rel)?;
-    let target_abs = resolve_kb_path(root, &target_dir)?;
 
     if !source_abs.exists() {
         return Err(AppError::NotFound(format!("Source note not found: {}", source_rel)));
-    }
-    if !target_abs.is_dir()
-        || !target_dir.starts_with("notes/")
-        || target_dir == "notes/__unarchived__"
-        || target_dir.starts_with("notes/__unarchived__/")
-        || path_uses_symlink_segment(root, &target_dir)?
-    {
-        return Err(AppError::InvalidInput(format!("Invalid target directory: {}", target_dir)));
     }
 
     let source_note = get_note_by_path_service_inner(conn, root, &source_rel)?;
@@ -960,6 +1116,38 @@ pub fn delete_notebook_service(state: &State<AppState>, notebook_path: &str) -> 
     delete_notebook_in_root(conn, &root, notebook_path)
 }
 
+pub fn delete_note_service(state: &State<AppState>, note_path: &str) -> AppResult<()> {
+    let root_guard = state.kb_root_guard();
+    let root = root_guard
+        .as_ref()
+        .ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?
+        .clone();
+    let db_guard = state.db_guard();
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
+
+    delete_note_in_root(conn, &root, note_path)
+}
+
+pub fn rename_note_service(
+    state: &State<AppState>,
+    note_path: &str,
+    new_name: &str,
+) -> AppResult<Note> {
+    let root_guard = state.kb_root_guard();
+    let root = root_guard
+        .as_ref()
+        .ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?
+        .clone();
+    let db_guard = state.db_guard();
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
+
+    rename_note_in_root(conn, &root, note_path, new_name)
+}
+
 pub fn reorder_notebooks_service(
     state: &State<AppState>,
     ordered_paths: &[String],
@@ -1003,6 +1191,475 @@ pub fn index_note_from_file(state: &State<AppState>, rel_path: &str) -> AppResul
     Ok(note)
 }
 
+fn import_markdown_content_in_root(
+    conn: &rusqlite::Connection,
+    root: &Path,
+    src: &Path,
+    content: &str,
+    dest_directory: &str,
+) -> AppResult<Note> {
+    let filename = src
+        .file_name()
+        .ok_or_else(|| AppError::InvalidInput(format!("Invalid path: {}", src.display())))?
+        .to_string_lossy()
+        .to_string();
+
+    if !filename.to_lowercase().ends_with(".md") {
+        return Err(AppError::InvalidInput("Only .md files can be imported".into()));
+    }
+
+    let dir = normalize_kb_relative_path(if dest_directory.is_empty() { "notes" } else { dest_directory })?;
+    let final_rel = next_available_note_path(conn, root, &dir, &filename)?;
+
+    let abs_dest = resolve_kb_path(root, &final_rel)?;
+    atomic_write(&abs_dest, content)?;
+
+    let note = index_note_full(conn, root, &final_rel, content)?;
+    Ok(note)
+}
+
+fn import_single_markdown_file_in_root(
+    conn: &rusqlite::Connection,
+    root: &Path,
+    src_path: &str,
+    dest_directory: &str,
+) -> AppResult<Note> {
+    let src = Path::new(src_path);
+    let content = std::fs::read_to_string(src_path)?;
+    let validated_dest_directory = validate_existing_note_target_directory(root, dest_directory)?;
+    import_markdown_content_in_root(conn, root, src, &content, &validated_dest_directory)
+}
+
+fn join_kb_relative(base: &str, extra: &Path) -> String {
+    let extra = extra
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(value) => Some(value.to_string_lossy().to_string()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/");
+
+    if extra.is_empty() {
+        base.to_string()
+    } else {
+        format!("{}/{}", base, extra)
+    }
+}
+
+fn next_available_asset_path(root: &Path, target_rel: &str) -> AppResult<String> {
+    if !resolve_kb_path(root, target_rel)?.exists() {
+        return Ok(target_rel.to_string());
+    }
+
+    let target_path = Path::new(target_rel);
+    let parent = target_path
+        .parent()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| AppError::InvalidInput(format!("Invalid asset path: {}", target_rel)))?;
+    let stem = target_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| AppError::InvalidInput(format!("Invalid asset path: {}", target_rel)))?;
+    let ext = target_path.extension().and_then(|value| value.to_str());
+
+    let mut index = 1;
+    loop {
+        let candidate_filename = match ext {
+            Some(ext) if !ext.is_empty() => format!("{}-{}.{}", stem, index, ext),
+            _ => format!("{}-{}", stem, index),
+        };
+        let candidate = format!("{}/{}", parent, candidate_filename);
+        if !resolve_kb_path(root, &candidate)?.exists() {
+            return Ok(candidate);
+        }
+        index += 1;
+    }
+}
+
+fn paths_have_same_bytes(left: &Path, right: &Path) -> AppResult<bool> {
+    if !right.exists() {
+        return Ok(false);
+    }
+
+    Ok(std::fs::read(left)? == std::fs::read(right)?)
+}
+
+fn relative_path_between(base_dir: &Path, target: &Path) -> PathBuf {
+    let base_components = base_dir
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(value) => Some(value.to_os_string()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let target_components = target
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(value) => Some(value.to_os_string()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    let mut shared = 0usize;
+    while shared < base_components.len()
+        && shared < target_components.len()
+        && base_components[shared] == target_components[shared]
+    {
+        shared += 1;
+    }
+
+    let mut relative = PathBuf::new();
+    for _ in shared..base_components.len() {
+        relative.push("..");
+    }
+    for component in target_components.iter().skip(shared) {
+        relative.push(component);
+    }
+
+    relative
+}
+
+pub fn supported_image_extension(path: &Path) -> AppResult<String> {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .ok_or_else(|| AppError::InvalidInput(format!("Unsupported image type: {}", path.display())))?;
+
+    if SUPPORTED_IMAGE_EXTENSIONS.contains(&extension.as_str()) {
+        Ok(extension)
+    } else {
+        Err(AppError::InvalidInput(format!(
+            "Unsupported image type: {}",
+            path.display()
+        )))
+    }
+}
+
+pub fn supported_image_extension_from_mime_type(mime_type: &str) -> AppResult<String> {
+    let normalized = mime_type
+        .split(';')
+        .next()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+
+    let extension = match normalized.as_str() {
+        "image/png" => "png",
+        "image/jpeg" => "jpeg",
+        "image/jpg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        _ => {
+            return Err(AppError::InvalidInput(format!(
+                "Unsupported image mime type: {}",
+                mime_type
+            )))
+        }
+    };
+
+    Ok(extension.to_string())
+}
+
+pub fn build_imported_image_filename(timestamp: &str, random_suffix: &str, extension: &str) -> String {
+    format!("{}-{}.{}", timestamp, random_suffix, extension)
+}
+
+pub fn build_markdown_asset_path_for_note(note_path: &str, asset_rel_path: &str) -> AppResult<String> {
+    let note_rel_path = normalize_kb_relative_path(note_path)?;
+    let asset_rel_path = normalize_kb_relative_path(asset_rel_path)?;
+    let note_dir = Path::new(&note_rel_path)
+        .parent()
+        .ok_or_else(|| AppError::InvalidInput(format!("Invalid note path: {}", note_path)))?;
+
+    Ok(relative_path_between(note_dir, Path::new(&asset_rel_path))
+        .to_string_lossy()
+        .replace('\\', "/"))
+}
+
+pub fn insert_image_for_note_from_selected_path(
+    root: &Path,
+    note_path: &str,
+    selected_path: Option<&Path>,
+    timestamp: &str,
+    random_suffix: &str,
+) -> AppResult<Option<InsertImageResult>> {
+    let Some(selected_path) = selected_path else {
+        return Ok(None);
+    };
+
+    let note_rel_path = normalize_kb_relative_path(note_path)?;
+    let extension = supported_image_extension(selected_path)?;
+    if !selected_path.is_file() {
+        return Err(AppError::InvalidInput(format!(
+            "Selected image not found: {}",
+            selected_path.display()
+        )));
+    }
+
+    let filename = build_imported_image_filename(timestamp, random_suffix, &extension);
+    let asset_rel_path = format!("assets/{}", filename);
+    let asset_abs_path = resolve_kb_path(root, &asset_rel_path)?;
+    if let Some(parent) = asset_abs_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::copy(selected_path, &asset_abs_path)?;
+
+    let markdown_path = build_markdown_asset_path_for_note(&note_rel_path, &asset_rel_path)?;
+    Ok(Some(InsertImageResult { markdown_path }))
+}
+
+pub fn insert_pasted_image_for_note_from_bytes(
+    root: &Path,
+    note_path: &str,
+    mime_type: &str,
+    image_bytes: &[u8],
+    timestamp: &str,
+    random_suffix: &str,
+) -> AppResult<InsertImageResult> {
+    if image_bytes.is_empty() {
+        return Err(AppError::InvalidInput("Clipboard image data is empty".into()));
+    }
+
+    let note_rel_path = normalize_kb_relative_path(note_path)?;
+    let extension = supported_image_extension_from_mime_type(mime_type)?;
+    let filename = build_imported_image_filename(timestamp, random_suffix, &extension);
+    let asset_rel_path = format!("assets/{}", filename);
+    let asset_abs_path = resolve_kb_path(root, &asset_rel_path)?;
+    if let Some(parent) = asset_abs_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&asset_abs_path, image_bytes)?;
+
+    let markdown_path = build_markdown_asset_path_for_note(&note_rel_path, &asset_rel_path)?;
+    Ok(InsertImageResult { markdown_path })
+}
+
+fn collect_markdown_files(dir: &Path) -> AppResult<Vec<PathBuf>> {
+    fn visit(dir: &Path, files: &mut Vec<PathBuf>) -> AppResult<()> {
+        let mut entries = std::fs::read_dir(dir)?.collect::<Result<Vec<_>, _>>()?;
+        entries.sort_by_key(|entry| entry.path());
+
+        for entry in entries {
+            let path = entry.path();
+            if entry.file_type()?.is_dir() {
+                visit(&path, files)?;
+                continue;
+            }
+
+            let is_markdown = path
+                .extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|value| value.eq_ignore_ascii_case("md"));
+            if is_markdown {
+                files.push(path);
+            }
+        }
+
+        Ok(())
+    }
+
+    let mut files = Vec::new();
+    visit(dir, &mut files)?;
+    Ok(files)
+}
+
+fn rewrite_directory_assets_for_markdown(
+    root: &Path,
+    selected_dir: &Path,
+    target_base: &str,
+    source_note: &Path,
+    target_dir: &str,
+    content: &str,
+    source_path: &str,
+    result: &mut MarkdownImportResult,
+) -> AppResult<String> {
+    let source_parent = source_note
+        .parent()
+        .ok_or_else(|| AppError::InvalidInput(format!("Invalid path: {}", source_note.display())))?;
+    let note_dest_dir = Path::new(target_dir);
+    let mut replacements = Vec::new();
+
+    for link in extract_links(content)
+        .into_iter()
+        .filter(|link| link.link_type == "asset")
+    {
+        if link.target_raw.is_empty() {
+            continue;
+        }
+
+        let candidate = source_parent.join(&link.target_raw);
+        let Ok(asset_abs) = std::fs::canonicalize(&candidate) else {
+            result.warnings.push(MarkdownImportMessage {
+                source_path: source_path.to_string(),
+                message: format!("Skipped external asset {}", link.target_raw),
+            });
+            continue;
+        };
+
+        if !asset_abs.starts_with(selected_dir) {
+            result.warnings.push(MarkdownImportMessage {
+                source_path: source_path.to_string(),
+                message: format!("Skipped external asset {}", link.target_raw),
+            });
+            continue;
+        }
+
+        let asset_rel = asset_abs
+            .strip_prefix(selected_dir)
+            .map_err(|_| AppError::InvalidInput(format!("Invalid asset path: {}", asset_abs.display())))?;
+        let desired_asset_dest_rel = join_kb_relative(target_base, asset_rel);
+        let desired_asset_dest_abs = resolve_kb_path(root, &desired_asset_dest_rel)?;
+        let final_asset_dest_rel = if paths_have_same_bytes(&asset_abs, &desired_asset_dest_abs)? {
+            desired_asset_dest_rel
+        } else if desired_asset_dest_abs.exists() {
+            next_available_asset_path(root, &desired_asset_dest_rel)?
+        } else {
+            desired_asset_dest_rel
+        };
+        let asset_dest_abs = resolve_kb_path(root, &final_asset_dest_rel)?;
+        if let Some(parent) = asset_dest_abs.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        if !asset_dest_abs.exists() {
+            std::fs::copy(&asset_abs, &asset_dest_abs)?;
+        }
+
+        let rewritten_target = relative_path_between(note_dest_dir, Path::new(&final_asset_dest_rel))
+            .to_string_lossy()
+            .replace('\\', "/");
+        if rewritten_target != link.target_raw {
+            let original_segment = &content[link.start_offset..link.end_offset];
+            let replacement_segment = original_segment.replacen(&link.target_raw, &rewritten_target, 1);
+            replacements.push((link.start_offset, link.end_offset, replacement_segment));
+        }
+    }
+
+    let mut rewritten = content.to_string();
+    for (start, end, replacement) in replacements.into_iter().rev() {
+        rewritten.replace_range(start..end, &replacement);
+    }
+
+    Ok(rewritten)
+}
+
+fn import_markdown_directory_into_result(
+    conn: &rusqlite::Connection,
+    root: &Path,
+    source_path: &str,
+    dest_directory: &str,
+    result: &mut MarkdownImportResult,
+) -> AppResult<()> {
+    let source_dir = Path::new(source_path);
+    if !source_dir.is_dir() {
+        return Err(AppError::InvalidInput(format!("Directory not found: {}", source_path)));
+    }
+
+    let selected_dir = std::fs::canonicalize(source_dir)?;
+    let selected_name = source_dir
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| AppError::InvalidInput(format!("Invalid directory path: {}", source_path)))?;
+    let target_base = format!("{}/{}", dest_directory, selected_name);
+
+    for markdown_file in collect_markdown_files(&selected_dir)? {
+        let relative = markdown_file
+            .strip_prefix(&selected_dir)
+            .map_err(|_| AppError::InvalidInput(format!("Invalid markdown path: {}", markdown_file.display())))?;
+        let target_dir = relative
+            .parent()
+            .map(|parent| join_kb_relative(&target_base, parent))
+            .unwrap_or_else(|| target_base.clone());
+        let source_file_path = markdown_file.to_string_lossy().to_string();
+
+        match std::fs::read_to_string(&markdown_file).and_then(|content| {
+            rewrite_directory_assets_for_markdown(
+                root,
+                &selected_dir,
+                &target_base,
+                &markdown_file,
+                &target_dir,
+                &content,
+                &source_file_path,
+                result,
+            )
+            .map_err(|error| std::io::Error::other(error.to_string()))
+        }) {
+            Ok(content) => match import_markdown_content_in_root(conn, root, &markdown_file, &content, &target_dir) {
+                Ok(note) => result.imported.push(MarkdownImportItem {
+                    source_path: source_file_path,
+                    note,
+                }),
+                Err(err) => result.failures.push(MarkdownImportMessage {
+                    source_path: source_file_path,
+                    message: err.to_string(),
+                }),
+            },
+            Err(err) => result.failures.push(MarkdownImportMessage {
+                source_path: source_file_path,
+                message: err.to_string(),
+            }),
+        }
+    }
+
+    Ok(())
+}
+
+pub fn import_markdown_sources_service(
+    state: &State<AppState>,
+    request: MarkdownImportRequest,
+) -> AppResult<MarkdownImportResult> {
+    let root_guard = state.kb_root_guard();
+    let root = root_guard
+        .as_ref()
+        .ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?
+        .clone();
+    let mut db_guard = state.db_guard();
+    let conn = db_guard
+        .as_mut()
+        .ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
+
+    import_markdown_sources_in_root(conn, &root, request)
+}
+
+pub fn import_markdown_sources_in_root(
+    conn: &mut rusqlite::Connection,
+    root: &Path,
+    request: MarkdownImportRequest,
+) -> AppResult<MarkdownImportResult> {
+    let dest_directory = validate_existing_note_target_directory(
+        root,
+        if request.dest_directory.is_empty() {
+            "notes"
+        } else {
+            &request.dest_directory
+        },
+    )?;
+
+    let mut result = MarkdownImportResult {
+        imported: Vec::new(),
+        warnings: Vec::new(),
+        failures: Vec::new(),
+    };
+
+    for source in request.sources {
+        match source {
+            MarkdownImportSource::File { path } => match import_single_markdown_file_in_root(conn, root, &path, &dest_directory) {
+                Ok(note) => result.imported.push(MarkdownImportItem { source_path: path, note }),
+                Err(err) => result.failures.push(MarkdownImportMessage {
+                    source_path: path,
+                    message: err.to_string(),
+                }),
+            },
+            MarkdownImportSource::Directory { path } => {
+                import_markdown_directory_into_result(conn, root, &path, &dest_directory, &mut result)?;
+            }
+        }
+    }
+
+    Ok(result)
+}
+
 pub fn import_note_service(
     state: &State<AppState>,
     src_path: &str,
@@ -1018,60 +1675,28 @@ pub fn import_note_service(
         .as_mut()
         .ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
 
-    let src = Path::new(src_path);
-    let filename = src
-        .file_name()
-        .ok_or_else(|| AppError::InvalidInput(format!("Invalid path: {}", src_path)))?
-        .to_string_lossy()
-        .to_string();
-
-    if !filename.to_lowercase().ends_with(".md") {
-        return Err(AppError::InvalidInput("Only .md files can be imported".into()));
-    }
-
-    let content = std::fs::read_to_string(src_path)?;
-    let dir = normalize_kb_relative_path(if dest_directory.is_empty() { "notes" } else { dest_directory })?;
-
-    // Ensure destination directory exists
-    let abs_dir = resolve_kb_path(&root, &dir)?;
-    std::fs::create_dir_all(&abs_dir)?;
-
-    // Handle filename conflicts
-    let base_rel = format!("{}/{}", dir, filename);
-    let final_rel = if resolve_kb_path(&root, &base_rel)?.exists() {
-        let stem = src.file_stem().unwrap_or_default().to_string_lossy();
-        let mut i = 1;
-        loop {
-            let candidate = format!("{}/{}-{}.md", dir, stem, i);
-            if !resolve_kb_path(&root, &candidate)?.exists() {
-                break candidate;
-            }
-            i += 1;
-        }
-    } else {
-        base_rel
-    };
-
-    let abs_dest = resolve_kb_path(&root, &final_rel)?;
-    atomic_write(&abs_dest, &content)?;
-
-    let note = index_note_full(conn, &root, &final_rel, &content)?;
-    Ok(note)
+    import_single_markdown_file_in_root(conn, &root, src_path, dest_directory)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        build_tree, build_tree_with_directories, build_tree_with_visuals, create_notebook_in_root,
-        delete_notebook_in_root, get_note_outline_in_root, move_note_in_root,
-        rename_notebook_in_root, reorder_notebooks_in_root, update_notebook_visual_in_root,
+        build_imported_image_filename, build_markdown_asset_path_for_note, build_tree,
+        build_tree_with_directories, build_tree_with_visuals, create_notebook_in_root,
+        delete_note_in_root, delete_notebook_in_root, get_note_outline_in_root,
+        import_markdown_sources_in_root,
+        insert_image_for_note_from_selected_path, insert_pasted_image_for_note_from_bytes,
+        move_note_in_root, rename_note_in_root, rename_notebook_in_root, reorder_notebooks_in_root,
+        supported_image_extension, supported_image_extension_from_mime_type,
+        update_notebook_visual_in_root,
     };
-    use crate::domain::note::Note;
+    use crate::domain::note::{InsertImageResult, MarkdownImportRequest, MarkdownImportSource, Note};
     use crate::error::AppError;
     use crate::infrastructure::db::open_and_migrate;
     use rusqlite::params;
     use crate::services::index::index_note_full;
     use crate::services::notebook_visual::{load_notebook_visuals, save_notebook_visual};
+    use std::path::Path;
     use tempfile::TempDir;
 
     fn make_note(path: &str) -> Note {
@@ -1087,6 +1712,176 @@ mod tests {
             indexed_at: "now".into(),
             deleted_at: None,
         }
+    }
+
+    #[test]
+    fn image_insert_accepts_supported_extensions_case_insensitively() {
+        assert_eq!(supported_image_extension(Path::new("/tmp/demo.png")).unwrap(), "png");
+        assert_eq!(supported_image_extension(Path::new("/tmp/demo.JPG")).unwrap(), "jpg");
+        assert_eq!(supported_image_extension(Path::new("/tmp/demo.jpeg")).unwrap(), "jpeg");
+        assert_eq!(supported_image_extension(Path::new("/tmp/demo.GIF")).unwrap(), "gif");
+        assert_eq!(supported_image_extension(Path::new("/tmp/demo.WebP")).unwrap(), "webp");
+    }
+
+    #[test]
+    fn image_insert_rejects_unsupported_extensions() {
+        let err = supported_image_extension(Path::new("/tmp/demo.svg")).unwrap_err();
+
+        assert!(matches!(err, AppError::InvalidInput(_)));
+        assert!(err.to_string().contains("Unsupported image type"));
+    }
+
+    #[test]
+    fn image_insert_accepts_supported_mime_types() {
+        assert_eq!(supported_image_extension_from_mime_type("image/png").unwrap(), "png");
+        assert_eq!(supported_image_extension_from_mime_type("image/jpeg").unwrap(), "jpeg");
+        assert_eq!(supported_image_extension_from_mime_type("image/jpg").unwrap(), "jpg");
+        assert_eq!(supported_image_extension_from_mime_type("image/gif").unwrap(), "gif");
+        assert_eq!(supported_image_extension_from_mime_type("image/webp").unwrap(), "webp");
+        assert_eq!(supported_image_extension_from_mime_type("image/png; charset=binary").unwrap(), "png");
+    }
+
+    #[test]
+    fn image_insert_rejects_unsupported_mime_types() {
+        let err = supported_image_extension_from_mime_type("image/svg+xml").unwrap_err();
+
+        assert!(matches!(err, AppError::InvalidInput(_)));
+        assert!(err.to_string().contains("Unsupported image mime type"));
+    }
+
+    #[test]
+    fn image_insert_builds_timestamped_filename() {
+        assert_eq!(
+            build_imported_image_filename("20260609-101010", "a1b2c3", "png"),
+            "20260609-101010-a1b2c3.png"
+        );
+    }
+
+    #[test]
+    fn image_insert_builds_markdown_asset_path_relative_to_note_directory() {
+        assert_eq!(
+            build_markdown_asset_path_for_note("notes/current.md", "assets/demo.png").unwrap(),
+            "../assets/demo.png"
+        );
+        assert_eq!(
+            build_markdown_asset_path_for_note("notes/project/demo.md", "assets/demo.png").unwrap(),
+            "../../assets/demo.png"
+        );
+    }
+
+    #[test]
+    fn image_insert_from_selection_returns_none_when_cancelled() {
+        let root = TempDir::new().unwrap();
+
+        let result = insert_image_for_note_from_selected_path(
+            root.path(),
+            "notes/current.md",
+            None,
+            "20260609-101010",
+            "a1b2c3",
+        )
+        .unwrap();
+
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn image_insert_from_selection_copies_file_into_root_assets_and_returns_note_relative_markdown_path() {
+        let root = TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join("notes/project")).unwrap();
+        std::fs::create_dir_all(root.path().join("assets")).unwrap();
+
+        let source_dir = TempDir::new().unwrap();
+        let source_path = source_dir.path().join("cover.PNG");
+        std::fs::write(&source_path, b"fake-png").unwrap();
+
+        let result = insert_image_for_note_from_selected_path(
+            root.path(),
+            "notes/project/demo.md",
+            Some(source_path.as_path()),
+            "20260609-101010",
+            "a1b2c3",
+        )
+        .unwrap();
+
+        assert_eq!(
+            result,
+            Some(InsertImageResult {
+                markdown_path: "../../assets/20260609-101010-a1b2c3.png".into(),
+            })
+        );
+        assert_eq!(
+            std::fs::read(root.path().join("assets/20260609-101010-a1b2c3.png")).unwrap(),
+            b"fake-png"
+        );
+    }
+
+    #[test]
+    fn image_insert_from_clipboard_bytes_writes_file_and_returns_note_relative_markdown_path() {
+        let root = TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join("notes/project")).unwrap();
+        std::fs::create_dir_all(root.path().join("assets")).unwrap();
+
+        let result = insert_pasted_image_for_note_from_bytes(
+            root.path(),
+            "notes/project/demo.md",
+            "image/png",
+            b"fake-png-bytes",
+            "20260610-101010",
+            "f0e1d2",
+        )
+        .unwrap();
+
+        assert_eq!(
+            result,
+            InsertImageResult {
+                markdown_path: "../../assets/20260610-101010-f0e1d2.png".into(),
+            }
+        );
+        assert_eq!(
+            std::fs::read(root.path().join("assets/20260610-101010-f0e1d2.png")).unwrap(),
+            b"fake-png-bytes"
+        );
+    }
+
+    #[test]
+    fn delete_note_in_root_removes_note_and_linked_assets_and_marks_note_deleted() {
+        let root = TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join("notes/work")).unwrap();
+        std::fs::create_dir_all(root.path().join("assets")).unwrap();
+        std::fs::write(root.path().join("assets/demo.png"), b"image-bytes").unwrap();
+
+        let db_path = root.path().join("index.sqlite");
+        let conn = open_and_migrate(&db_path).unwrap();
+        let content = "# Demo\n\n![img](../../assets/demo.png)\n";
+        std::fs::write(root.path().join("notes/work/demo.md"), content).unwrap();
+        index_note_full(&conn, root.path(), "notes/work/demo.md", content).unwrap();
+
+        delete_note_in_root(&conn, root.path(), "notes/work/demo.md").unwrap();
+
+        assert!(!root.path().join("notes/work/demo.md").exists());
+        assert!(!root.path().join("assets/demo.png").exists());
+
+        let deleted_at: Option<String> = conn
+            .query_row(
+                "SELECT deleted_at FROM notes WHERE path = ?1",
+                params!["notes/work/demo.md"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(deleted_at.is_some());
+    }
+
+    #[test]
+    fn delete_note_in_root_returns_not_found_when_note_file_missing() {
+        let root = TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join("notes/work")).unwrap();
+
+        let db_path = root.path().join("index.sqlite");
+        let conn = open_and_migrate(&db_path).unwrap();
+
+        let err = delete_note_in_root(&conn, root.path(), "notes/work/missing.md").unwrap_err();
+        assert!(matches!(err, AppError::NotFound(_)));
     }
 
     #[test]
@@ -1378,6 +2173,50 @@ mod tests {
     }
 
     #[test]
+    fn rename_note_in_root_renames_note_and_preserves_note_id() {
+        let root = TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join("notes/work")).unwrap();
+
+        let source_rel = "notes/work/demo.md";
+        let source_abs = root.path().join(source_rel);
+        let content = "---\nid: note-demo\ntitle: Demo\n---\n\n# Demo\n";
+        std::fs::write(&source_abs, content).unwrap();
+
+        let db_path = root.path().join("index.sqlite");
+        let conn = open_and_migrate(&db_path).unwrap();
+        let original = index_note_full(&conn, root.path(), source_rel, content).unwrap();
+
+        let renamed = rename_note_in_root(&conn, root.path(), source_rel, "demo-renamed").unwrap();
+
+        assert_eq!(renamed.id, original.id);
+        assert_eq!(renamed.path, "notes/work/demo-renamed.md");
+        assert!(root.path().join("notes/work/demo-renamed.md").exists());
+        assert!(!root.path().join(source_rel).exists());
+    }
+
+    #[test]
+    fn rename_note_in_root_uses_suffix_when_target_name_exists() {
+        let root = TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join("notes/work")).unwrap();
+
+        std::fs::write(root.path().join("notes/work/demo-renamed.md"), "# existing\n").unwrap();
+
+        let source_rel = "notes/work/demo.md";
+        let source_abs = root.path().join(source_rel);
+        let content = "---\nid: note-demo\ntitle: Demo\n---\n\n# Demo\n";
+        std::fs::write(&source_abs, content).unwrap();
+
+        let db_path = root.path().join("index.sqlite");
+        let conn = open_and_migrate(&db_path).unwrap();
+        let _original = index_note_full(&conn, root.path(), source_rel, content).unwrap();
+
+        let renamed = rename_note_in_root(&conn, root.path(), source_rel, "demo-renamed").unwrap();
+
+        assert_eq!(renamed.path, "notes/work/demo-renamed-1.md");
+        assert!(root.path().join("notes/work/demo-renamed-1.md").exists());
+    }
+
+    #[test]
     fn move_note_in_root_skips_soft_deleted_target_path_and_uses_next_suffix() {
         let root = TempDir::new().unwrap();
         std::fs::create_dir_all(root.path().join("notes/source")).unwrap();
@@ -1549,6 +2388,319 @@ mod tests {
 
         assert!(matches!(err, AppError::NotFound(_)));
         assert!(root.path().join(src_rel).exists());
+    }
+
+    #[test]
+    fn import_markdown_sources_preserves_selected_directory_name_and_nested_paths() {
+        let root = TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join("notes/work")).unwrap();
+        let db_path = root.path().join("index.sqlite");
+        let mut conn = open_and_migrate(&db_path).unwrap();
+
+        let source_root = TempDir::new().unwrap();
+        let project_dir = source_root.path().join("project");
+        std::fs::create_dir_all(project_dir.join("docs")).unwrap();
+        std::fs::write(project_dir.join("docs/a.md"), "# A\n").unwrap();
+
+        let result = import_markdown_sources_in_root(
+            &mut conn,
+            root.path(),
+            MarkdownImportRequest {
+                sources: vec![MarkdownImportSource::Directory {
+                    path: project_dir.to_string_lossy().to_string(),
+                }],
+                dest_directory: "notes/work".into(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.imported.len(), 1);
+        assert_eq!(result.imported[0].note.path, "notes/work/project/docs/a.md");
+    }
+
+    #[test]
+    fn import_markdown_sources_copies_relative_images_inside_selected_directory() {
+        let root = TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join("notes/work")).unwrap();
+        let db_path = root.path().join("index.sqlite");
+        let mut conn = open_and_migrate(&db_path).unwrap();
+
+        let source_root = TempDir::new().unwrap();
+        let project_dir = source_root.path().join("project");
+        std::fs::create_dir_all(project_dir.join("docs/images")).unwrap();
+        std::fs::write(project_dir.join("docs/images/p1.png"), b"png").unwrap();
+        std::fs::write(
+            project_dir.join("docs/a.md"),
+            "# A\n\n![cover](./images/p1.png)\n",
+        )
+        .unwrap();
+
+        let result = import_markdown_sources_in_root(
+            &mut conn,
+            root.path(),
+            MarkdownImportRequest {
+                sources: vec![MarkdownImportSource::Directory {
+                    path: project_dir.to_string_lossy().to_string(),
+                }],
+                dest_directory: "notes/work".into(),
+            },
+        )
+        .unwrap();
+
+        assert!(root.path().join("notes/work/project/docs/images/p1.png").exists());
+        assert!(result.warnings.is_empty());
+    }
+
+    #[test]
+    fn import_markdown_sources_warns_when_relative_image_points_outside_selected_directory() {
+        let root = TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join("notes/work")).unwrap();
+        let db_path = root.path().join("index.sqlite");
+        let mut conn = open_and_migrate(&db_path).unwrap();
+
+        let source_root = TempDir::new().unwrap();
+        let project_dir = source_root.path().join("project");
+        let shared_dir = source_root.path().join("shared");
+        std::fs::create_dir_all(project_dir.join("docs")).unwrap();
+        std::fs::create_dir_all(&shared_dir).unwrap();
+        std::fs::write(shared_dir.join("cover.png"), b"png").unwrap();
+        std::fs::write(
+            project_dir.join("docs/a.md"),
+            "# A\n\n![cover](../shared/cover.png)\n",
+        )
+        .unwrap();
+
+        let result = import_markdown_sources_in_root(
+            &mut conn,
+            root.path(),
+            MarkdownImportRequest {
+                sources: vec![MarkdownImportSource::Directory {
+                    path: project_dir.to_string_lossy().to_string(),
+                }],
+                dest_directory: "notes/work".into(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.imported.len(), 1);
+        assert_eq!(result.warnings.len(), 1);
+    }
+
+    #[test]
+    fn import_markdown_sources_rejects_invalid_target_directory() {
+        let root = TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join("notes/work")).unwrap();
+        std::fs::create_dir_all(root.path().join("notes/__unarchived__")).unwrap();
+        let db_path = root.path().join("index.sqlite");
+        let mut conn = open_and_migrate(&db_path).unwrap();
+
+        let source_root = TempDir::new().unwrap();
+        let markdown_path = source_root.path().join("a.md");
+        std::fs::write(&markdown_path, "# A\n").unwrap();
+
+        let err = import_markdown_sources_in_root(
+            &mut conn,
+            root.path(),
+            MarkdownImportRequest {
+                sources: vec![MarkdownImportSource::File {
+                    path: markdown_path.to_string_lossy().to_string(),
+                }],
+                dest_directory: "notes/__unarchived__".into(),
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, AppError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn import_markdown_sources_creates_missing_target_directory_under_notes() {
+        let root = TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join("notes")).unwrap();
+        let db_path = root.path().join("index.sqlite");
+        let mut conn = open_and_migrate(&db_path).unwrap();
+
+        let source_root = TempDir::new().unwrap();
+        let markdown_path = source_root.path().join("a.md");
+        std::fs::write(&markdown_path, "# A\n").unwrap();
+
+        let result = import_markdown_sources_in_root(
+            &mut conn,
+            root.path(),
+            MarkdownImportRequest {
+                sources: vec![MarkdownImportSource::File {
+                    path: markdown_path.to_string_lossy().to_string(),
+                }],
+                dest_directory: "notes/new-folder".into(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.imported.len(), 1);
+        assert!(root.path().join("notes/new-folder").is_dir());
+        assert_eq!(result.imported[0].note.path, "notes/new-folder/a.md");
+    }
+
+    #[test]
+    fn import_markdown_sources_allows_notes_root_as_target_directory() {
+        let root = TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join("notes")).unwrap();
+        let db_path = root.path().join("index.sqlite");
+        let mut conn = open_and_migrate(&db_path).unwrap();
+
+        let source_root = TempDir::new().unwrap();
+        let markdown_path = source_root.path().join("root-note.md");
+        std::fs::write(&markdown_path, "# Root\n").unwrap();
+
+        let result = import_markdown_sources_in_root(
+            &mut conn,
+            root.path(),
+            MarkdownImportRequest {
+                sources: vec![MarkdownImportSource::File {
+                    path: markdown_path.to_string_lossy().to_string(),
+                }],
+                dest_directory: "notes".into(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.imported.len(), 1);
+        assert_eq!(result.imported[0].note.path, "notes/root-note.md");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn import_markdown_sources_rejects_symlink_target_directory() {
+        use std::os::unix::fs::symlink;
+
+        let root = TempDir::new().unwrap();
+        let external = TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join("notes")).unwrap();
+        symlink(external.path(), root.path().join("notes/外链")).unwrap();
+        let db_path = root.path().join("index.sqlite");
+        let mut conn = open_and_migrate(&db_path).unwrap();
+
+        let source_root = TempDir::new().unwrap();
+        let markdown_path = source_root.path().join("a.md");
+        std::fs::write(&markdown_path, "# A\n").unwrap();
+
+        let err = import_markdown_sources_in_root(
+            &mut conn,
+            root.path(),
+            MarkdownImportRequest {
+                sources: vec![MarkdownImportSource::File {
+                    path: markdown_path.to_string_lossy().to_string(),
+                }],
+                dest_directory: "notes/外链".into(),
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, AppError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn import_markdown_sources_uses_next_available_path_when_database_already_reserves_target() {
+        let root = TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join("notes/work")).unwrap();
+        let db_path = root.path().join("index.sqlite");
+        let mut conn = open_and_migrate(&db_path).unwrap();
+
+        conn.execute(
+            "INSERT INTO notes (id, path, title, summary, content_hash, word_count, created_at, updated_at, indexed_at, deleted_at) \
+             VALUES (?1, ?2, ?3, NULL, ?4, 0, datetime('now'), datetime('now'), datetime('now'), datetime('now'))",
+            params!["reserved-note", "notes/work/a.md", "Reserved", "hash"],
+        )
+        .unwrap();
+
+        let source_root = TempDir::new().unwrap();
+        let markdown_path = source_root.path().join("a.md");
+        std::fs::write(&markdown_path, "# Imported\n").unwrap();
+
+        let result = import_markdown_sources_in_root(
+            &mut conn,
+            root.path(),
+            MarkdownImportRequest {
+                sources: vec![MarkdownImportSource::File {
+                    path: markdown_path.to_string_lossy().to_string(),
+                }],
+                dest_directory: "notes/work".into(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.imported.len(), 1);
+        assert_eq!(result.imported[0].note.path, "notes/work/a-1.md");
+        assert!(root.path().join("notes/work/a-1.md").exists());
+
+        let reserved_deleted_at: Option<String> = conn
+            .query_row(
+                "SELECT deleted_at FROM notes WHERE id = ?1",
+                params!["reserved-note"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(reserved_deleted_at.is_some());
+    }
+
+    #[test]
+    fn import_markdown_sources_renames_conflicting_assets_and_rewrites_imported_note_links() {
+        let root = TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join("notes/work")).unwrap();
+        let db_path = root.path().join("index.sqlite");
+        let mut conn = open_and_migrate(&db_path).unwrap();
+
+        let first_source_root = TempDir::new().unwrap();
+        let first_project_dir = first_source_root.path().join("project");
+        std::fs::create_dir_all(first_project_dir.join("docs/images")).unwrap();
+        std::fs::write(first_project_dir.join("docs/images/p1.png"), b"first-image").unwrap();
+        std::fs::write(
+            first_project_dir.join("docs/a.md"),
+            "# A\n\n![cover](./images/p1.png)\n",
+        )
+        .unwrap();
+
+        let second_source_root = TempDir::new().unwrap();
+        let second_project_dir = second_source_root.path().join("project");
+        std::fs::create_dir_all(second_project_dir.join("docs/images")).unwrap();
+        std::fs::write(second_project_dir.join("docs/images/p1.png"), b"second-image").unwrap();
+        std::fs::write(
+            second_project_dir.join("docs/a.md"),
+            "# A\n\n![cover](./images/p1.png)\n",
+        )
+        .unwrap();
+
+        import_markdown_sources_in_root(
+            &mut conn,
+            root.path(),
+            MarkdownImportRequest {
+                sources: vec![MarkdownImportSource::Directory {
+                    path: first_project_dir.to_string_lossy().to_string(),
+                }],
+                dest_directory: "notes/work".into(),
+            },
+        )
+        .unwrap();
+
+        let second_result = import_markdown_sources_in_root(
+            &mut conn,
+            root.path(),
+            MarkdownImportRequest {
+                sources: vec![MarkdownImportSource::Directory {
+                    path: second_project_dir.to_string_lossy().to_string(),
+                }],
+                dest_directory: "notes/work".into(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(std::fs::read(root.path().join("notes/work/project/docs/images/p1.png")).unwrap(), b"first-image");
+        assert_eq!(std::fs::read(root.path().join("notes/work/project/docs/images/p1-1.png")).unwrap(), b"second-image");
+        assert_eq!(second_result.imported.len(), 1);
+        assert_eq!(second_result.imported[0].note.path, "notes/work/project/docs/a-1.md");
+
+        let imported_content = std::fs::read_to_string(root.path().join("notes/work/project/docs/a-1.md")).unwrap();
+        assert!(imported_content.contains("![cover](images/p1-1.png)"));
     }
 
     #[test]

@@ -19,10 +19,14 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return Boolean(target.closest("input, textarea, [contenteditable='true'], .cm-content"));
 }
 
+const LARGE_NOTE_PREVIEW_DEFER_THRESHOLD = 180_000;
+
 export function EditorWorkspace() {
   const {
     currentNote,
     content,
+    isOpeningNote,
+    openingNotePath,
     setContent,
     markDirty,
     showPreview,
@@ -46,6 +50,7 @@ export function EditorWorkspace() {
   useAutoSave();
   const [isSeparatorHovered, setIsSeparatorHovered] = useState(false);
   const [sourceLineSyncSignal, setSourceLineSyncSignal] = useState<SourceLineSyncSignal | null>(null);
+  const [deferPreviewForLargeNote, setDeferPreviewForLargeNote] = useState(false);
   const pendingSourceLineSyncRef = useRef<{ source: SourceLineSyncSource; line: number } | null>(null);
   const sourceLineSyncFrameRef = useRef<number | null>(null);
   const navigationRevisionRef = useRef(0);
@@ -210,7 +215,35 @@ export function EditorWorkspace() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!showPreview || !currentNote) {
+      setDeferPreviewForLargeNote(false);
+      return;
+    }
+
+    if (content.length < LARGE_NOTE_PREVIEW_DEFER_THRESHOLD) {
+      setDeferPreviewForLargeNote(false);
+      return;
+    }
+
+    setDeferPreviewForLargeNote(true);
+    const timer = window.setTimeout(() => {
+      setDeferPreviewForLargeNote(false);
+    }, 220);
+    return () => window.clearTimeout(timer);
+  }, [content, currentNote?.path, showPreview]);
+
+  const showOpeningMask = isOpeningNote && Boolean(openingNotePath) && openingNotePath !== currentNote?.path;
+
   if (!currentNote) {
+    if (isOpeningNote) {
+      return (
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#667085", fontSize: 14 }}>
+          正在加载笔记...
+        </div>
+      );
+    }
+
     return (
       <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#999", fontSize: 14 }}>
         请从左侧文件树选择或新建笔记
@@ -232,6 +265,7 @@ export function EditorWorkspace() {
         flexShrink: 0,
       }}>
         <span style={{ fontWeight: 500 }}>{currentNote.title}</span>
+        {showOpeningMask && <span style={{ color: "#0969da", fontSize: 11 }}>正在加载笔记...</span>}
         {error && <span style={{ color: "#b42318", fontSize: 11 }}>{error}</span>}
         {!error && generationStatus && <span style={{ color: "#475467", fontSize: 11 }}>{generationStatus}</span>}
         <div style={{ flex: 1 }} />
@@ -294,44 +328,59 @@ export function EditorWorkspace() {
           />
         </div>
         {showPreview && (
-          <div
-            role="separator"
-            aria-orientation="vertical"
-            aria-valuemin={minRatio}
-            aria-valuemax={maxRatio}
-            aria-valuenow={Math.round(editorRatio)}
-            tabIndex={0}
-            onPointerEnter={() => setIsSeparatorHovered(true)}
-            onPointerLeave={() => setIsSeparatorHovered(false)}
-            onPointerDown={startResize}
-            onPointerMove={resize}
-            onPointerUp={stopResize}
-            onPointerCancel={stopResize}
-            style={{
-              width: 6,
-              flexShrink: 0,
-              cursor: "col-resize",
-              background: isResizing || isSeparatorHovered ? "#d9ddff" : "#eef0f5",
-              borderLeft: "1px solid #e0e2e7",
-              borderRight: "1px solid #e0e2e7",
-            }}
-          />
-        )}
-        {showPreview && (
-          <div style={{
-            flex: 1,
-            minWidth: 0,
-            height: "100%",
-            overflow: "hidden",
-          }}>
-            <MarkdownPreview
-              content={content}
-              searchNavigationTarget={activeSearchNavigationTarget}
-              tagNavigationTarget={activeTagNavigationTarget}
-              sourceLineSyncSignal={sourceLineSyncSignal}
-              onTopVisibleLineChange={(line) => handleSourceLineSync("preview", line)}
+          <>
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-valuemin={minRatio}
+              aria-valuemax={maxRatio}
+              aria-valuenow={Math.round(editorRatio)}
+              tabIndex={0}
+              onPointerEnter={() => setIsSeparatorHovered(true)}
+              onPointerLeave={() => setIsSeparatorHovered(false)}
+              onPointerDown={startResize}
+              onPointerMove={resize}
+              onPointerUp={stopResize}
+              onPointerCancel={stopResize}
+              style={{
+                width: 6,
+                flexShrink: 0,
+                cursor: "col-resize",
+                background: isResizing || isSeparatorHovered ? "#d9ddff" : "#eef0f5",
+                borderLeft: "1px solid #e0e2e7",
+                borderRight: "1px solid #e0e2e7",
+              }}
             />
-          </div>
+            <div style={{
+              width: `${100 - editorRatio}%`,
+              minWidth: 0,
+              height: "100%",
+              overflow: "hidden",
+              borderLeft: "1px solid #e0e2e7",
+            }}>
+              {deferPreviewForLargeNote ? (
+                <div style={{
+                  height: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#667085",
+                  fontSize: 13,
+                  background: "#fcfcfd",
+                }}>
+                  正在加载预览...
+                </div>
+              ) : (
+                <MarkdownPreview
+                  content={content}
+                  searchNavigationTarget={activeSearchNavigationTarget}
+                  tagNavigationTarget={activeTagNavigationTarget}
+                  sourceLineSyncSignal={sourceLineSyncSignal}
+                  onTopVisibleLineChange={(line) => handleSourceLineSync("preview", line)}
+                />
+              )}
+            </div>
+          </>
         )}
       </div>
       {session?.active && (

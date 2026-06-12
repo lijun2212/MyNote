@@ -20,6 +20,7 @@ const notePayload = {
   noteTitle: "需求",
   handlers: {
     open: () => undefined,
+    delete: () => undefined,
     copyLink: () => undefined,
     copyWikiLink: () => undefined,
   },
@@ -41,13 +42,16 @@ const fileTreeBlankPayload = {
     createNote: () => undefined,
     createNotebook: () => undefined,
     importNote: () => undefined,
+    refreshTree: () => undefined,
   },
 };
 
 const editorBlankPayload = {
   type: "editorBlank" as const,
   handlers: {
+    paste: () => undefined,
     insertLink: () => undefined,
+    insertImage: () => undefined,
     createWikiLink: () => undefined,
     refreshIndex: () => undefined,
     showSidebar: () => undefined,
@@ -58,7 +62,9 @@ const editorSelectionPayload = {
   type: "editorSelection" as const,
   selectedText: "项目周报",
   handlers: {
+    paste: () => undefined,
     insertLink: () => undefined,
+    insertImage: () => undefined,
     insertTag: () => undefined,
     createWikiLink: () => undefined,
   },
@@ -311,6 +317,22 @@ describe("menuSchema", () => {
     expect(disabledAiMenu?.children?.find((item) => item.id === "ai.toggleAutoSummaryAgent")?.checked).toBe(false);
   });
 
+  it("exposes refresh in the file app menu when a knowledge base is open", () => {
+    const schema = buildAppMenuSchema({
+      hasKnowledgeBase: true,
+      hasCurrentNote: false,
+      leftSidebarVisible: true,
+      rightSidebarVisible: false,
+      editorMode: "split",
+      hasDefaultAiProfile: false,
+      autoSummaryAgentEnabled: false,
+    });
+
+    const fileMenu = schema.find((item) => item.id === "file");
+    expect(fileMenu?.children?.map((item) => item.id)).toContain("file.refreshTree");
+    expect(fileMenu?.children?.find((item) => item.id === "file.refreshTree")?.enabled).toBe(true);
+  });
+
   it("builds notebook and note context menus as different object menus", () => {
     const notebookMenu = buildContextMenuSchema(notebookPayload);
     const noteMenu = buildContextMenuSchema(notePayload);
@@ -328,13 +350,20 @@ describe("menuSchema", () => {
 
     expect(notebookMenu.map((item) => item.id)).toContain("notebook.createNote");
     expect(noteMenu.map((item) => item.id)).toContain("note.copyWikiLink");
+    expect(noteMenu.map((item) => item.id)).toContain("note.delete");
     expect(noteMenu.map((item) => item.id)).not.toContain("notebook.reorder");
     expect(tagMenu.map((item) => item.id)).toContain("tag.delete");
     expect(fileTreeBlankMenu.map((item) => item.id)).toContain("file.newNotebook");
+    expect(fileTreeBlankMenu.map((item) => item.id)).toContain("file.refreshTree");
     expect(selectionMenu.map((item) => item.id)).toContain("selection.insertLink");
-    expect(selectionMenu[0]?.label).toBe("转为双链");
-    expect(selectionMenu[1]?.label).toBe("转为 Markdown 链接");
+    expect(selectionMenu.map((item) => item.id)).toContain("selection.paste");
+    expect(selectionMenu.map((item) => item.id)).toContain("selection.insertImage");
+    expect(selectionMenu[0]?.label).toBe("粘贴");
+    expect(selectionMenu[1]?.label).toBe("转为双链");
+    expect(selectionMenu[2]?.label).toBe("转为 Markdown 链接");
     expect(editorBlankMenu.map((item) => item.id)).toContain("blank.insertLink");
+    expect(editorBlankMenu.map((item) => item.id)).toContain("blank.paste");
+    expect(editorBlankMenu.map((item) => item.id)).toContain("blank.insertImage");
     expect(editorBlankMenu.map((item) => item.id)).toContain("blank.createWikiLink");
     expect(editorBlankMenu.map((item) => item.id)).toContain("blank.refreshIndex");
     expect(tagBlankMenu.map((item) => item.id)).toContain("tagBlank.clearFilter");
@@ -491,6 +520,7 @@ describe("menuSchema", () => {
     expect(notebookMenu.find((item) => item.id === "notebook.createNote")?.enabled).toBe(true);
     expect(notebookMenu.find((item) => item.id === "notebook.reorder")?.enabled).toBe(false);
     expect(noteMenu.find((item) => item.id === "note.open")?.enabled).toBe(true);
+    expect(noteMenu.find((item) => item.id === "note.delete")?.enabled).toBe(true);
     expect(noteMenu.find((item) => item.id === "note.rename")?.enabled).toBe(false);
     expect(tagMenu.find((item) => item.id === "tag.delete")?.enabled).toBe(true);
     expect(tagMenu.find((item) => item.id === "tag.rename")?.enabled).toBe(false);

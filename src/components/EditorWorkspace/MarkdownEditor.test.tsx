@@ -10,12 +10,13 @@ import { useEditorStore } from "../../store/useEditorStore";
 import { ContextMenuHost } from "../ContextMenu/ContextMenuHost";
 import { ContextMenuProvider } from "../ContextMenu/useContextMenu";
 import { useAppStore } from "../../store/useAppStore";
-import { makeKnowledgeBase, makeSearchResult } from "../../test/testData";
+import { makeKnowledgeBase, makeNote, makeSearchResult } from "../../test/testData";
 
 describe("MarkdownEditor", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     clearActiveDraggedTagName();
+    useEditorStore.setState({ currentNote: null, isComposing: false });
     if (typeof Range !== "undefined") {
       Object.defineProperty(Range.prototype, "getClientRects", {
         configurable: true,
@@ -530,6 +531,120 @@ describe("MarkdownEditor", () => {
     });
   });
 
+  it("inserts an image markdown at the selected range from the selection context menu", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    vi.spyOn(api, "insertImageForNote").mockResolvedValue({ markdownPath: "../assets/diagram.png" });
+    useEditorStore.getState().setCurrentNote(makeNote({ path: "notes/current.md" }));
+
+    const { container } = render(
+      <ContextMenuProvider>
+        <MarkdownEditor initialContent="项目周报 第二段" onChange={onChange} />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const editorRoot = container.querySelector(".cm-editor") as HTMLElement;
+    const view = EditorView.findFromDOM(editorRoot);
+    view?.dispatch({ selection: { anchor: 0, head: 4 } });
+
+    fireEvent.contextMenu(editorRoot, { clientX: 24, clientY: 32 });
+    await user.click(await screen.findByRole("menuitem", { name: "插入图片" }));
+
+    expect(api.insertImageForNote).toHaveBeenCalledWith("notes/current.md");
+    await waitFor(() => {
+      expect(onChange.mock.lastCall?.[0]).toBe("![图片](../assets/diagram.png) 第二段");
+    });
+  });
+
+  it("inserts an image markdown at the current cursor from the blank context menu", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    vi.spyOn(api, "insertImageForNote").mockResolvedValue({ markdownPath: "../assets/diagram.png" });
+    useEditorStore.getState().setCurrentNote(makeNote({ path: "notes/current.md" }));
+
+    const { container } = render(
+      <ContextMenuProvider>
+        <MarkdownEditor initialContent="正文" onChange={onChange} />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const editorRoot = container.querySelector(".cm-editor") as HTMLElement;
+    const view = EditorView.findFromDOM(editorRoot);
+    view?.dispatch({ selection: { anchor: 2, head: 2 } });
+
+    fireEvent.contextMenu(editorRoot, { clientX: 24, clientY: 32 });
+    await user.click(await screen.findByRole("menuitem", { name: "插入图片" }));
+
+    expect(api.insertImageForNote).toHaveBeenCalledWith("notes/current.md");
+    await waitFor(() => {
+      expect(onChange.mock.lastCall?.[0]).toBe("正文![图片](../assets/diagram.png)");
+    });
+  });
+
+  it("does not modify the editor when image insertion is cancelled", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    vi.spyOn(api, "insertImageForNote").mockResolvedValue(null);
+    useEditorStore.getState().setCurrentNote(makeNote({ path: "notes/current.md" }));
+
+    const { container } = render(
+      <ContextMenuProvider>
+        <MarkdownEditor initialContent="正文" onChange={onChange} />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const editorRoot = container.querySelector(".cm-editor") as HTMLElement;
+    fireEvent.contextMenu(editorRoot, { clientX: 24, clientY: 32 });
+    await user.click(await screen.findByRole("menuitem", { name: "插入图片" }));
+
+    expect(api.insertImageForNote).toHaveBeenCalledWith("notes/current.md");
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("does not modify the editor when image insertion fails", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    vi.spyOn(api, "insertImageForNote").mockRejectedValue(new Error("insert failed"));
+    useEditorStore.getState().setCurrentNote(makeNote({ path: "notes/current.md" }));
+
+    const { container } = render(
+      <ContextMenuProvider>
+        <MarkdownEditor initialContent="正文" onChange={onChange} />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const editorRoot = container.querySelector(".cm-editor") as HTMLElement;
+    fireEvent.contextMenu(editorRoot, { clientX: 24, clientY: 32 });
+    await user.click(await screen.findByRole("menuitem", { name: "插入图片" }));
+
+    expect(api.insertImageForNote).toHaveBeenCalledWith("notes/current.md");
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("disables insert image when there is no current note", async () => {
+    const { container } = render(
+      <ContextMenuProvider>
+        <MarkdownEditor initialContent="项目周报" onChange={vi.fn()} />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const editorRoot = container.querySelector(".cm-editor") as HTMLElement;
+    const view = EditorView.findFromDOM(editorRoot);
+
+    fireEvent.contextMenu(editorRoot, { clientX: 24, clientY: 32 });
+    expect(await screen.findByRole("menuitem", { name: "插入图片" })).toHaveAttribute("aria-disabled", "true");
+
+    view?.dispatch({ selection: { anchor: 0, head: 4 } });
+    fireEvent.contextMenu(editorRoot, { clientX: 24, clientY: 32 });
+    const menuItems = await screen.findAllByRole("menuitem", { name: "插入图片" });
+    expect(menuItems[menuItems.length - 1]).toHaveAttribute("aria-disabled", "true");
+  });
+
   it("shows editor blank actions and routes implemented ones through the shared context menu host", async () => {
     const user = userEvent.setup();
     const refreshTree = vi.fn().mockResolvedValue(undefined);
@@ -556,7 +671,7 @@ describe("MarkdownEditor", () => {
     expect(screen.getByRole("menuitem", { name: "刷新索引" })).toHaveAttribute("aria-disabled", "false");
     expect(screen.getByRole("menuitem", { name: "显示侧栏" })).toHaveAttribute("aria-disabled", "false");
     expect(screen.getByRole("menuitem", { name: "新建笔记" })).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByRole("menuitem", { name: "粘贴" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("menuitem", { name: "粘贴" })).toHaveAttribute("aria-disabled", "false");
 
     await user.click(screen.getByRole("menuitem", { name: "刷新索引" }));
     expect(refreshTree).toHaveBeenCalledOnce();
@@ -570,6 +685,92 @@ describe("MarkdownEditor", () => {
       refreshTree: previousState.refreshTree,
       setLeftSidebarVisible: previousState.setLeftSidebarVisible,
     });
+  });
+
+  it("pastes clipboard text from the blank editor context menu", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        readText: vi.fn().mockResolvedValue("粘贴文本"),
+      },
+    });
+
+    const { container } = render(
+      <ContextMenuProvider>
+        <MarkdownEditor initialContent="原文" onChange={onChange} />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const editorRoot = container.querySelector(".cm-editor") as HTMLElement;
+    fireEvent.contextMenu(editorRoot, { clientX: 24, clientY: 32 });
+    await user.click(await screen.findByRole("menuitem", { name: "粘贴" }));
+
+    await waitFor(() => {
+      expect(onChange.mock.lastCall?.[0]).toContain("粘贴文本");
+    });
+
+    if (originalClipboardDescriptor) {
+      Object.defineProperty(navigator, "clipboard", originalClipboardDescriptor);
+    } else {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: undefined,
+      });
+    }
+  });
+
+  it("pastes clipboard image from the blank editor context menu as markdown image syntax", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const insertPastedImageForNote = vi.spyOn(api, "insertPastedImageForNote").mockResolvedValue({
+      markdownPath: "../assets/pasted.png",
+    });
+    useEditorStore.getState().setCurrentNote(makeNote({ path: "notes/current.md" }));
+    const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    const imageBlob = new Blob(["png-binary"], { type: "image/png" });
+
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        read: vi.fn().mockResolvedValue([
+          {
+            types: ["image/png"],
+            getType: vi.fn().mockResolvedValue(imageBlob),
+          },
+        ]),
+        readText: vi.fn().mockResolvedValue(""),
+      },
+    });
+
+    const { container } = render(
+      <ContextMenuProvider>
+        <MarkdownEditor initialContent="" onChange={onChange} />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const editorRoot = container.querySelector(".cm-editor") as HTMLElement;
+    fireEvent.contextMenu(editorRoot, { clientX: 24, clientY: 32 });
+    await user.click(await screen.findByRole("menuitem", { name: "粘贴" }));
+
+    expect(insertPastedImageForNote).toHaveBeenCalledWith("notes/current.md", "image/png", expect.any(Uint8Array));
+    await waitFor(() => {
+      expect(onChange.mock.lastCall?.[0]).toContain("![图片](../assets/pasted.png)");
+    });
+
+    if (originalClipboardDescriptor) {
+      Object.defineProperty(navigator, "clipboard", originalClipboardDescriptor);
+    } else {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: undefined,
+      });
+    }
   });
 
   it("inserts a wiki link from the blank editor context menu using the note picker", async () => {

@@ -15,6 +15,8 @@ import { useEditorStore } from "../store/useEditorStore";
 import { ContextMenuHost } from "./ContextMenu/ContextMenuHost";
 import { ContextMenuProvider } from "./ContextMenu/useContextMenu";
 import { AiSettingsDialog } from "./Settings/AiSettingsDialog";
+import { useRefreshNoteTree } from "../hooks/useRefreshNoteTree";
+import { api } from "../api/commands";
 import "../styles/layout.css";
 
 const OPEN_SEARCH_EVENT = "mynote:open-search";
@@ -50,10 +52,10 @@ export function AppShell() {
   const setRightSidebarVisible = useAppStore((s) => s.setRightSidebarVisible);
   const toggleLeftSidebar = useAppStore((s) => s.toggleLeftSidebar);
   const toggleRightSidebar = useAppStore((s) => s.toggleRightSidebar);
-  const refreshTree = useAppStore((s) => s.refreshTree);
   const currentNote = useEditorStore((s) => s.currentNote);
   const editorMode = useEditorStore((s) => s.getEditorMode());
   const setEditorMode = useEditorStore((s) => s.setEditorMode);
+  const refreshNoteTree = useRefreshNoteTree();
   const aiSettings = useAiSettingsStore((s) => s.settings);
   const defaultAiProfile = useAiSettingsStore((s) => s.defaultProfile);
   const loadAiSettings = useAiSettingsStore((s) => s.loadSettings);
@@ -98,6 +100,7 @@ export function AppShell() {
     createNote: () => dispatchWindowEvent(new Event(REQUEST_CREATE_NOTE_EVENT)),
     createNotebook: () => dispatchWindowEvent(new Event(REQUEST_CREATE_NOTEBOOK_EVENT)),
     importNote: () => dispatchWindowEvent(new Event(REQUEST_IMPORT_NOTE_EVENT)),
+    refreshFileTree: () => refreshNoteTree(),
     openSearch: () => dispatchWindowEvent(new Event(OPEN_SEARCH_EVENT)),
     openAiSettings: () => openAiSettings(),
     testAiConnection: () => {
@@ -110,6 +113,17 @@ export function AppShell() {
     openCurrentNote: () => undefined,
     moveCurrentNote: (payload) => dispatchWindowEvent(new CustomEvent(REQUEST_MOVE_NOTE_EVENT, { detail: payload })),
     renameCurrentNote: (payload) => dispatchWindowEvent(new CustomEvent(REQUEST_RENAME_NOTE_EVENT, { detail: payload })),
+    deleteCurrentNote: async () => {
+      if (!currentNote) {
+        return;
+      }
+      const confirmed = window.confirm(`确认删除笔记“${currentNote.title}”并同时删除其附件与图片吗？`);
+      if (!confirmed) {
+        return;
+      }
+      await api.deleteNote(currentNote.path);
+      await refreshNoteTree();
+    },
     copyCurrentNoteLink: async () => {
       if (!currentNote) {
         return;
@@ -130,14 +144,14 @@ export function AppShell() {
     insertLinkFromSelection: () => undefined,
     insertTagFromSelection: () => undefined,
     createWikiLinkFromSelection: () => undefined,
-    refreshIndex: () => refreshTree(),
+    refreshIndex: () => refreshNoteTree(),
     showLeftSidebar: () => setLeftSidebarVisible(true),
     openShortcuts: () => dispatchWindowEvent(new Event(REQUEST_SHORTCUTS_EVENT)),
     openAbout: () => dispatchWindowEvent(new Event(REQUEST_ABOUT_EVENT)),
   }), [
     currentNote,
     openAiSettings,
-    refreshTree,
+    refreshNoteTree,
     setEditorMode,
     setLeftSidebarVisible,
     testAiConnection,

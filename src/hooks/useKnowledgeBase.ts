@@ -11,6 +11,7 @@ export function useKnowledgeBase() {
   const setSelectedNodePath = useAppStore((s) => s.setSelectedNodePath);
   const currentNote = useEditorStore((s) => s.currentNote);
   const setCurrentNote = useEditorStore((s) => s.setCurrentNote);
+  const setContent = useEditorStore((s) => s.setContent);
   const { openNote } = useOpenNote();
 
   const resolveRenamedPath = useCallback((
@@ -64,6 +65,23 @@ export function useKnowledgeBase() {
     }
   }, [currentNote?.path, refreshTree, setCurrentNote, setSelectedNodePath]);
 
+  const renameNote = useCallback(async (notePath: string, newName: string) => {
+    try {
+      const renamedNote = await api.renameNote(notePath, newName);
+      if (selectedNodePath === notePath) {
+        setSelectedNodePath(renamedNote.path);
+      }
+      if (currentNote?.path === notePath) {
+        setCurrentNote(renamedNote);
+      }
+      await refreshTree();
+      return renamedNote;
+    } catch (e) {
+      console.error("Failed to rename note:", e);
+      throw e;
+    }
+  }, [currentNote?.path, refreshTree, selectedNodePath, setCurrentNote, setSelectedNodePath]);
+
   const renameNotebook = useCallback(async (oldPath: string, newName: string) => {
     try {
       const result = await api.renameNotebook(oldPath, newName);
@@ -108,6 +126,23 @@ export function useKnowledgeBase() {
     }
   }, [refreshTree, selectedNodePath, setSelectedNodePath]);
 
+  const deleteNote = useCallback(async (notePath: string) => {
+    try {
+      await api.deleteNote(notePath);
+      if (selectedNodePath === notePath) {
+        setSelectedNodePath(null);
+      }
+      if (currentNote?.path === notePath) {
+        setCurrentNote(null);
+        setContent("");
+      }
+      await refreshTree();
+    } catch (e) {
+      console.error("Failed to delete note:", e);
+      throw e;
+    }
+  }, [currentNote?.path, refreshTree, selectedNodePath, setContent, setCurrentNote, setSelectedNodePath]);
+
   const reorderNotebooks = useCallback(async (orderedPaths: string[]) => {
     try {
       await api.reorderNotebooks(orderedPaths);
@@ -122,9 +157,11 @@ export function useKnowledgeBase() {
     createNote,
     createNotebook,
     moveNote,
+    renameNote,
     renameNotebook,
     updateNotebookVisual,
     deleteNotebook,
+    deleteNote,
     reorderNotebooks,
   };
 }

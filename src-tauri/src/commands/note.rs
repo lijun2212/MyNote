@@ -1,17 +1,45 @@
 use crate::domain::note::{
-    CreateNoteInput, CreateNotebookInput, Note, NoteDetail, NoteOutlineItem, NoteTreeNode,
-    RenameNotebookResult, SaveNoteInput, SaveNoteResult,
+    CreateNoteInput, CreateNotebookInput, MarkdownImportRequest, MarkdownImportResult, Note,
+    NoteDetail, NoteOutlineItem, NoteTreeNode, RenameNotebookResult, SaveNoteInput,
+    SaveNoteResult, InsertImageResult,
 };
 use crate::error::AppError;
 use crate::services::note::{
-    create_note_service, create_notebook_service, delete_notebook_service,
+    create_note_service, create_notebook_service, delete_note_service, delete_notebook_service,
     get_note_by_path_service, get_note_outline_service, get_note_tree_service,
-    import_note_service, move_note_in_root, rename_notebook_service,
+    import_markdown_sources_service, import_note_service, insert_image_for_note_from_selected_path,
+    insert_pasted_image_for_note_from_bytes, move_note_in_root, rename_note_service,
+    rename_notebook_service,
     reorder_notebooks_service, save_note_service,
     update_notebook_visual_service,
 };
 use crate::state::AppState;
-use tauri::State;
+use tauri::{AppHandle, State};
+use tauri_plugin_dialog::DialogExt;
+use tokio::sync::oneshot;
+use ulid::Ulid;
+
+async fn pick_image_file(app: &AppHandle) -> Result<Option<std::path::PathBuf>, AppError> {
+    let (sender, receiver) = oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter("Images", &["png", "jpg", "jpeg", "gif", "webp"])
+        .pick_file(move |file_path| {
+            let result = file_path.map(|value| {
+                value.into_path().map_err(|error| {
+                    AppError::InvalidInput(format!("Invalid selected image path: {}", error))
+                })
+            });
+            let _ = sender.send(result);
+        });
+
+    match receiver.await {
+        Ok(Some(Ok(path))) => Ok(Some(path)),
+        Ok(Some(Err(error))) => Err(error),
+        Ok(None) => Ok(None),
+        Err(_) => Err(AppError::Io("Image picker did not return a selection".into())),
+    }
+}
 
 #[tauri::command]
 pub async fn create_note(
@@ -75,6 +103,71 @@ pub async fn import_note(
 }
 
 #[tauri::command]
+pub async fn import_markdown_sources(
+    state: State<'_, AppState>,
+    request: MarkdownImportRequest,
+) -> Result<MarkdownImportResult, AppError> {
+    import_markdown_sources_service(&state, request)
+}
+
+#[tauri::command]
+pub async fn insert_image_for_note(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    note_path: String,
+) -> Result<Option<InsertImageResult>, AppError> {
+    let root = {
+        let root_guard = state.kb_root_guard();
+        root_guard
+            .as_ref()
+            .ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?
+            .clone()
+    };
+
+    let selected_path = pick_image_file(&app).await?;
+    let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string();
+    let random_source = Ulid::new().to_string().to_ascii_lowercase();
+    let random_suffix = random_source.chars().take(6).collect::<String>();
+
+    insert_image_for_note_from_selected_path(
+        &root,
+        &note_path,
+        selected_path.as_deref(),
+        &timestamp,
+        &random_suffix,
+    )
+}
+
+#[tauri::command]
+pub async fn insert_pasted_image_for_note(
+    state: State<'_, AppState>,
+    note_path: String,
+    mime_type: String,
+    image_bytes: Vec<u8>,
+) -> Result<InsertImageResult, AppError> {
+    let root = {
+        let root_guard = state.kb_root_guard();
+        root_guard
+            .as_ref()
+            .ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?
+            .clone()
+    };
+
+    let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string();
+    let random_source = Ulid::new().to_string().to_ascii_lowercase();
+    let random_suffix = random_source.chars().take(6).collect::<String>();
+
+    insert_pasted_image_for_note_from_bytes(
+        &root,
+        &note_path,
+        &mime_type,
+        &image_bytes,
+        &timestamp,
+        &random_suffix,
+    )
+}
+
+#[tauri::command]
 pub async fn move_note(
     state: State<'_, AppState>,
     source_path: String,
@@ -108,6 +201,15 @@ pub async fn rename_notebook(
 }
 
 #[tauri::command]
+pub async fn rename_note(
+    state: State<'_, AppState>,
+    note_path: String,
+    new_name: String,
+) -> Result<Note, AppError> {
+    rename_note_service(&state, &note_path, &new_name)
+}
+
+#[tauri::command]
 pub async fn update_notebook_visual(
     state: State<'_, AppState>,
     notebook_path: String,
@@ -123,6 +225,14 @@ pub async fn delete_notebook(
     notebook_path: String,
 ) -> Result<(), AppError> {
     delete_notebook_service(&state, &notebook_path)
+}
+
+#[tauri::command]
+pub async fn delete_note(
+    state: State<'_, AppState>,
+    note_path: String,
+) -> Result<(), AppError> {
+    delete_note_service(&state, &note_path)
 }
 
 #[tauri::command]

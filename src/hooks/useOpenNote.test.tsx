@@ -23,6 +23,8 @@ describe("useOpenNote", () => {
     useEditorStore.setState({
       currentNote: null,
       content: "",
+      isOpeningNote: false,
+      openingNotePath: null,
       isComposing: false,
       isDirty: false,
       isSaving: false,
@@ -50,7 +52,30 @@ describe("useOpenNote", () => {
     expect(useAppStore.getState().selectedNodePath).toBe("notes/demo.md");
     expect(useEditorStore.getState().currentNote).toEqual(detail.note);
     expect(useEditorStore.getState().content).toBe(detail.content);
+    expect(useEditorStore.getState().isOpeningNote).toBe(false);
     expect(useLookbackSummaryStore.getState().getRecentOpenCount("notes/demo.md")).toBe(1);
+  });
+
+  it("sets opening note status while loading and clears it afterwards", async () => {
+    const pending = deferred<NoteDetail>();
+    apiMocks.getNoteByPath.mockReturnValueOnce(pending.promise);
+
+    const { result } = renderHook(() => useOpenNote());
+    const openingPromise = act(async () => {
+      await result.current.openNote("notes/slow.md");
+    });
+
+    expect(useEditorStore.getState().isOpeningNote).toBe(true);
+    expect(useEditorStore.getState().openingNotePath).toBe("notes/slow.md");
+
+    pending.resolve(makeNoteDetail({
+      note: makeNoteWithSummary("摘要", { path: "notes/slow.md" }),
+      content: "# Slow\n\nBody",
+    }));
+    await openingPromise;
+
+    expect(useEditorStore.getState().isOpeningNote).toBe(false);
+    expect(useEditorStore.getState().openingNotePath).toBeNull();
   });
 
   it("does not record a recent view for a stale open request", async () => {

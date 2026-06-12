@@ -51,6 +51,7 @@ export function buildAppMenuSchema(options: AppMenuSchemaOptions): MenuSchemaIte
         item("file.newNote", "新建笔记", false),
         item("file.newNotebook", "新建笔记本", false),
         item("file.importNote", "导入笔记", false),
+        item("file.refreshTree", "刷新笔记仓库", hasKnowledgeBase),
       ],
     },
     {
@@ -79,10 +80,11 @@ export function buildAppMenuSchema(options: AppMenuSchemaOptions): MenuSchemaIte
       id: APP_MENU_IDS[3],
       label: "笔记",
       children: [
-        item("note.rename", "重命名", false),
+        item("note.rename", "重命名", hasCurrentNote),
         item("note.move", "移动", false),
         item("note.copyLink", "复制链接", hasCurrentNote),
         item("note.copyWikiLink", "复制 Wiki 链接", hasCurrentNote),
+        item("note.delete", "删除笔记", hasCurrentNote),
         item("note.relations", "关系", false),
       ],
     },
@@ -134,13 +136,16 @@ export function buildContextMenuSchema(payload: ContextMenuPayload): MenuSchemaI
       item("file.newNote", "新建笔记", isEnabled(payload.handlers?.createNote)),
       item("file.newNotebook", "新建笔记本", isEnabled(payload.handlers?.createNotebook)),
       item("file.importNote", "导入笔记", isEnabled(payload.handlers?.importNote)),
+      item("file.refreshTree", "刷新笔记仓库", isEnabled(payload.handlers?.refreshTree)),
     ];
   }
 
   if (payload.type === "editorSelection") {
     return [
+      item("selection.paste", "粘贴", isEnabled(payload.handlers?.paste)),
       item("selection.createWikiLink", "转为双链", isEnabled(payload.handlers?.createWikiLink)),
       item("selection.insertLink", "转为 Markdown 链接", isEnabled(payload.handlers?.insertLink)),
+      item("selection.insertImage", "插入图片", isEnabled(payload.handlers?.insertImage)),
       item("selection.insertTag", "添加标签", isEnabled(payload.handlers?.insertTag)),
       item("selection.relation", "创建知识关联", false),
     ];
@@ -148,10 +153,11 @@ export function buildContextMenuSchema(payload: ContextMenuPayload): MenuSchemaI
 
   if (payload.type === "editorBlank") {
     return [
+      item("blank.paste", "粘贴", isEnabled(payload.handlers?.paste)),
       item("blank.insertLink", "插入 Markdown 链接...", isEnabled(payload.handlers?.insertLink)),
+      item("blank.insertImage", "插入图片", isEnabled(payload.handlers?.insertImage)),
       item("blank.createWikiLink", "插入双链...", isEnabled(payload.handlers?.createWikiLink)),
       item("blank.newNote", "新建笔记", false),
-      item("blank.paste", "粘贴", false),
       item("blank.refreshIndex", "刷新索引", isEnabled(payload.handlers?.refreshIndex)),
       item("blank.showSidebar", "显示侧栏", isEnabled(payload.handlers?.showSidebar)),
     ];
@@ -237,6 +243,7 @@ export function buildContextMenuSchema(payload: ContextMenuPayload): MenuSchemaI
       item("note.move", "移动", isEnabled(payload.handlers?.move)),
       item("note.copyLink", "复制链接", isEnabled(payload.handlers?.copyLink)),
       item("note.copyWikiLink", "复制 Wiki 链接", isEnabled(payload.handlers?.copyWikiLink)),
+      item("note.delete", "删除笔记", isEnabled(payload.handlers?.delete)),
     ];
   }
 

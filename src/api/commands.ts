@@ -17,6 +17,9 @@ import type {
   GraphRelationItem,
   KnowledgeBase,
   LinkItem,
+  MarkdownImportRequest,
+  MarkdownImportResult,
+  InsertImageResult,
   Note,
   NoteGraphAnalysis,
   NoteDetail,
@@ -139,6 +142,26 @@ interface RawNoteGraphAnalysis {
   logic_paths: RawGraphLogicPath[];
   conflicts: RawGraphConflictItem[];
   missing_premises: string[];
+}
+
+type RawMarkdownImportItem = {
+  source_path: string;
+  note: Note;
+};
+
+type RawMarkdownImportMessage = {
+  source_path: string;
+  message: string;
+};
+
+type RawMarkdownImportResult = {
+  imported: RawMarkdownImportItem[];
+  warnings: RawMarkdownImportMessage[];
+  failures: RawMarkdownImportMessage[];
+};
+
+interface RawInsertImageResult {
+  markdown_path: string;
 }
 
 function assertAllowedValue<T extends string>(value: string, allowed: readonly T[], fieldName: string): T {
@@ -279,6 +302,34 @@ function mapNoteGraphAnalysis(analysis: RawNoteGraphAnalysis): NoteGraphAnalysis
     missingPremises: analysis.missing_premises,
   };
 }
+
+function mapMarkdownImportResult(result: RawMarkdownImportResult): MarkdownImportResult {
+  return {
+    imported: result.imported.map((item) => ({
+      sourcePath: item.source_path,
+      note: item.note,
+    })),
+    warnings: result.warnings.map((item) => ({
+      sourcePath: item.source_path,
+      message: item.message,
+    })),
+    failures: result.failures.map((item) => ({
+      sourcePath: item.source_path,
+      message: item.message,
+    })),
+  };
+}
+
+function mapInsertImageResult(result: RawInsertImageResult | null): InsertImageResult | null {
+  if (result === null) {
+    return null;
+  }
+
+  return {
+    markdownPath: result.markdown_path,
+  };
+}
+
 export const api = {
   createKnowledgeBase: (rootPath: string, name: string) =>
     invoke<KnowledgeBase>("create_knowledge_base", { rootPath, name }),
@@ -330,8 +381,22 @@ export const api = {
   importNote: (srcPath: string, destDirectory: string) =>
     invoke<Note>("import_note", { srcPath, destDirectory }),
 
+  importMarkdownSources: (request: MarkdownImportRequest) =>
+    invoke<RawMarkdownImportResult>("import_markdown_sources", { request }).then(mapMarkdownImportResult),
+
+  insertImageForNote: (notePath: string): Promise<InsertImageResult | null> =>
+    invoke<RawInsertImageResult | null>("insert_image_for_note", { notePath }).then(mapInsertImageResult),
+
+  insertPastedImageForNote: (notePath: string, mimeType: string, imageBytes: Uint8Array): Promise<InsertImageResult> =>
+    invoke<RawInsertImageResult>("insert_pasted_image_for_note", { notePath, mimeType, imageBytes }).then((result) => ({
+      markdownPath: result.markdown_path,
+    })),
+
   moveNote: (sourcePath: string, targetDirectory: string) =>
     invoke<Note>("move_note", { sourcePath, targetDirectory }),
+
+  renameNote: (notePath: string, newName: string) =>
+    invoke<Note>("rename_note", { notePath, newName }),
 
   renameNotebook: (oldPath: string, newName: string) =>
     invoke<RenameNotebookResult>("rename_notebook", { oldPath, newName }),
@@ -341,6 +406,9 @@ export const api = {
 
   deleteNotebook: (notebookPath: string) =>
     invoke<void>("delete_notebook", { notebookPath }),
+
+  deleteNote: (notePath: string) =>
+    invoke<void>("delete_note", { notePath }),
 
   reorderNotebooks: (orderedPaths: string[]) =>
     invoke<void>("reorder_notebooks", { orderedPaths }),

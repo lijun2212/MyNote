@@ -270,4 +270,110 @@ describe("api graph commands", () => {
       description: "Accepted rationale",
     });
   });
+
+  it("maps importMarkdownSources batch results into frontend contracts", async () => {
+    tauriMocks.invoke.mockResolvedValueOnce({
+      imported: [
+        {
+          source_path: "/Users/lijun/Desktop/project/docs/a.md",
+          note: {
+            id: "note-1",
+            path: "notes/work/project/docs/a.md",
+            title: "a",
+            summary: null,
+            content_hash: "hash-1",
+            word_count: 10,
+            created_at: "2026-06-09T00:00:00Z",
+            updated_at: "2026-06-09T00:00:00Z",
+            indexed_at: "2026-06-09T00:00:00Z",
+            deleted_at: null,
+          },
+        },
+      ],
+      warnings: [
+        {
+          source_path: "/Users/lijun/Desktop/project/docs/a.md",
+          message: "Skipped external asset ../shared/cover.png",
+        },
+      ],
+      failures: [
+        {
+          source_path: "/Users/lijun/Desktop/project/docs/broken.md",
+          message: "Failed to import markdown file",
+        },
+      ],
+    });
+
+    const result = await api.importMarkdownSources({
+      sources: [{ kind: "directory", path: "/Users/lijun/Desktop/project" }],
+      destDirectory: "notes/work",
+    });
+
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("import_markdown_sources", {
+      request: {
+        sources: [{ kind: "directory", path: "/Users/lijun/Desktop/project" }],
+        destDirectory: "notes/work",
+      },
+    });
+    expect(result.imported[0]?.note.path).toBe("notes/work/project/docs/a.md");
+    expect(result.warnings[0]).toEqual({
+      sourcePath: "/Users/lijun/Desktop/project/docs/a.md",
+      message: "Skipped external asset ../shared/cover.png",
+    });
+    expect(result.failures[0]).toEqual({
+      sourcePath: "/Users/lijun/Desktop/project/docs/broken.md",
+      message: "Failed to import markdown file",
+    });
+  });
+
+  it("calls insert_image_for_note and maps markdownPath", async () => {
+    tauriMocks.invoke.mockResolvedValueOnce({
+      markdown_path: "../assets/20260609-101010-a1b2c3.png",
+    });
+
+    await expect(api.insertImageForNote("notes/demo.md")).resolves.toEqual({
+      markdownPath: "../assets/20260609-101010-a1b2c3.png",
+    });
+
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("insert_image_for_note", {
+      notePath: "notes/demo.md",
+    });
+  });
+
+  it("returns null when insert_image_for_note is canceled by the user", async () => {
+    tauriMocks.invoke.mockResolvedValueOnce(null);
+
+    await expect(api.insertImageForNote("notes/demo.md")).resolves.toBeNull();
+
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("insert_image_for_note", {
+      notePath: "notes/demo.md",
+    });
+  });
+
+  it("calls delete_note with notePath", async () => {
+    tauriMocks.invoke.mockResolvedValueOnce(undefined);
+
+    await expect(api.deleteNote("notes/demo.md")).resolves.toBeUndefined();
+
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("delete_note", {
+      notePath: "notes/demo.md",
+    });
+  });
+
+  it("calls insert_pasted_image_for_note and maps markdownPath", async () => {
+    tauriMocks.invoke.mockResolvedValueOnce({
+      markdown_path: "../assets/20260610-101010-f0e1d2.png",
+    });
+
+    const imageBytes = new Uint8Array([1, 2, 3, 4]);
+    await expect(api.insertPastedImageForNote("notes/demo.md", "image/png", imageBytes)).resolves.toEqual({
+      markdownPath: "../assets/20260610-101010-f0e1d2.png",
+    });
+
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("insert_pasted_image_for_note", {
+      notePath: "notes/demo.md",
+      mimeType: "image/png",
+      imageBytes,
+    });
+  });
 });

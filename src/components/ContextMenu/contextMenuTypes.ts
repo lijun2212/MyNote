@@ -46,6 +46,7 @@ export interface NoteContextMenuPayload extends ContextMenuPayloadBase {
     move?: (payload: NoteContextMenuPayload) => MaybePromise;
     copyLink?: (payload: NoteContextMenuPayload) => MaybePromise;
     copyWikiLink?: (payload: NoteContextMenuPayload) => MaybePromise;
+    delete?: (payload: NoteContextMenuPayload) => MaybePromise;
   };
 }
 
@@ -67,6 +68,7 @@ export interface FileTreeBlankContextMenuPayload extends ContextMenuPayloadBase 
     createNote?: (payload: FileTreeBlankContextMenuPayload) => MaybePromise;
     createNotebook?: (payload: FileTreeBlankContextMenuPayload) => MaybePromise;
     importNote?: (payload: FileTreeBlankContextMenuPayload) => MaybePromise;
+    refreshTree?: (payload: FileTreeBlankContextMenuPayload) => MaybePromise;
   };
 }
 
@@ -74,7 +76,9 @@ export interface EditorSelectionContextMenuPayload extends ContextMenuPayloadBas
   type: "editorSelection";
   selectedText: string;
   handlers?: {
+    paste?: (payload: EditorSelectionContextMenuPayload) => MaybePromise;
     insertLink?: (payload: EditorSelectionContextMenuPayload) => MaybePromise;
+    insertImage?: (payload: EditorSelectionContextMenuPayload) => MaybePromise;
     insertTag?: (payload: EditorSelectionContextMenuPayload) => MaybePromise;
     createWikiLink?: (payload: EditorSelectionContextMenuPayload) => MaybePromise;
   };
@@ -83,7 +87,9 @@ export interface EditorSelectionContextMenuPayload extends ContextMenuPayloadBas
 export interface EditorBlankContextMenuPayload extends ContextMenuPayloadBase {
   type: "editorBlank";
   handlers?: {
+    paste?: (payload: EditorBlankContextMenuPayload) => MaybePromise;
     insertLink?: (payload: EditorBlankContextMenuPayload) => MaybePromise;
+    insertImage?: (payload: EditorBlankContextMenuPayload) => MaybePromise;
     createWikiLink?: (payload: EditorBlankContextMenuPayload) => MaybePromise;
     refreshIndex?: (payload: EditorBlankContextMenuPayload) => MaybePromise;
     showSidebar?: (payload: EditorBlankContextMenuPayload) => MaybePromise;

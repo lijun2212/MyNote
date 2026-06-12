@@ -38,6 +38,11 @@ pub struct SaveNoteResult {
     pub conflict: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InsertImageResult {
+    pub markdown_path: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenameNotebookResult {
     pub notebook_path: String,
@@ -65,6 +70,39 @@ pub struct SaveNoteInput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MarkdownImportSource {
+    File { path: String },
+    Directory { path: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkdownImportRequest {
+    pub sources: Vec<MarkdownImportSource>,
+    pub dest_directory: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarkdownImportItem {
+    pub source_path: String,
+    pub note: Note,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarkdownImportMessage {
+    pub source_path: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarkdownImportResult {
+    pub imported: Vec<MarkdownImportItem>,
+    pub warnings: Vec<MarkdownImportMessage>,
+    pub failures: Vec<MarkdownImportMessage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NoteOutlineItem {
     pub id: String,
     pub text: String,
@@ -73,4 +111,26 @@ pub struct NoteOutlineItem {
     pub line_end: i64,
     pub anchor: String,
     pub children: Vec<NoteOutlineItem>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MarkdownImportRequest, MarkdownImportSource};
+
+    #[test]
+    fn markdown_import_request_accepts_camel_case_dest_directory() {
+        let request: MarkdownImportRequest = serde_json::from_str(
+            r#"{
+                "sources": [{ "kind": "directory", "path": "/tmp/research" }],
+                "destDirectory": "notes/work"
+            }"#,
+        )
+        .expect("expected camelCase request to deserialize");
+
+        assert_eq!(request.dest_directory, "notes/work");
+        assert!(matches!(
+            request.sources.first(),
+            Some(MarkdownImportSource::Directory { path }) if path == "/tmp/research"
+        ));
+    }
 }

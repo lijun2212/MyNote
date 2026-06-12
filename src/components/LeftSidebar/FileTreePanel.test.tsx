@@ -1,10 +1,11 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FileTreePanel } from "./FileTreePanel";
 import { ContextMenuHost } from "../ContextMenu/ContextMenuHost";
 import { ContextMenuProvider } from "../ContextMenu/useContextMenu";
 import { useAppStore } from "../../store/useAppStore";
+import { useEditorStore } from "../../store/useEditorStore";
 import { makeKnowledgeBase, makeNoteDetail, makeNoteWithSummary } from "../../test/testData";
 import type { NoteTreeNode } from "../../types";
 
@@ -21,21 +22,32 @@ const hookMocks = vi.hoisted(() => ({
   createNote: vi.fn(),
   createNotebook: vi.fn(),
   moveNote: vi.fn(),
+  renameNote: vi.fn(),
   renameNotebook: vi.fn(),
   updateNotebookVisual: vi.fn(),
   deleteNotebook: vi.fn(),
+  deleteNote: vi.fn(),
   reorderNotebooks: vi.fn(),
   openNote: vi.fn(),
+}));
+
+const dialogMocks = vi.hoisted(() => ({
+  open: vi.fn(),
 }));
 
 const apiMocks = vi.hoisted(() => ({
   listNotesByTag: vi.fn(),
   getNoteTree: vi.fn(),
   getNoteByPath: vi.fn(),
+  importMarkdownSources: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockResolvedValue(() => {}),
+}));
+
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  open: dialogMocks.open,
 }));
 
 vi.mock("../../hooks/useKnowledgeBase", () => ({
@@ -43,9 +55,11 @@ vi.mock("../../hooks/useKnowledgeBase", () => ({
     createNote: hookMocks.createNote,
     createNotebook: hookMocks.createNotebook,
     moveNote: hookMocks.moveNote,
+    renameNote: hookMocks.renameNote,
     renameNotebook: hookMocks.renameNotebook,
     updateNotebookVisual: hookMocks.updateNotebookVisual,
     deleteNotebook: hookMocks.deleteNotebook,
+    deleteNote: hookMocks.deleteNote,
     reorderNotebooks: hookMocks.reorderNotebooks,
   }),
 }));
@@ -70,16 +84,25 @@ describe("FileTreePanel", () => {
     hookMocks.createNote.mockReset();
     hookMocks.createNotebook.mockReset();
     hookMocks.moveNote.mockReset();
+    hookMocks.renameNote.mockReset();
     hookMocks.renameNotebook.mockReset();
     hookMocks.updateNotebookVisual.mockReset();
     hookMocks.deleteNotebook.mockReset();
+    hookMocks.deleteNote.mockReset();
     hookMocks.reorderNotebooks.mockReset();
     hookMocks.openNote.mockReset();
     apiMocks.listNotesByTag.mockReset();
     apiMocks.getNoteTree.mockReset();
     apiMocks.getNoteByPath.mockReset();
+    apiMocks.importMarkdownSources.mockReset();
+    dialogMocks.open.mockReset();
     apiMocks.listNotesByTag.mockResolvedValue([]);
     apiMocks.getNoteByPath.mockResolvedValue(makeNoteDetail());
+    apiMocks.importMarkdownSources.mockResolvedValue({
+      imported: [],
+      warnings: [],
+      failures: [],
+    });
 
     const tree: NoteTreeNode[] = [
       {
@@ -123,6 +146,18 @@ describe("FileTreePanel", () => {
       selectedNodePath: null,
       selectedTagIds: [],
       refreshTree: vi.fn().mockResolvedValue(undefined),
+    });
+    useEditorStore.setState({
+      currentNote: null,
+      content: "",
+      isComposing: false,
+      isDirty: false,
+      isSaving: false,
+      saveError: null,
+      saveStatus: "saved",
+      showPreview: true,
+      searchNavigationTarget: null,
+      tagNavigationTarget: null,
     });
   });
 
@@ -207,7 +242,7 @@ describe("FileTreePanel", () => {
     expect(noteRow).toHaveStyle({ cursor: "default" });
   });
 
-  it("opens a notebook context menu on right click and keeps unavailable actions disabled", async () => {
+  it("opens a notebook context menu on right click and enables reorder", async () => {
     renderWithContextMenu();
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "法律" }), {
@@ -217,10 +252,10 @@ describe("FileTreePanel", () => {
 
     expect(await screen.findByRole("menu")).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "新建笔记" })).toHaveAttribute("aria-disabled", "false");
-    expect(screen.getByRole("menuitem", { name: "调整顺序" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("menuitem", { name: "调整顺序" })).toHaveAttribute("aria-disabled", "false");
   });
 
-  it("opens a note context menu on right click and leaves unimplemented note actions disabled", async () => {
+  it("opens a note context menu on right click and enables rename/move/delete", async () => {
     renderWithContextMenu();
 
     fireEvent.contextMenu(screen.getByText("案例.md"), {
@@ -230,8 +265,182 @@ describe("FileTreePanel", () => {
 
     expect(await screen.findByRole("menu")).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "打开笔记" })).toHaveAttribute("aria-disabled", "false");
-    expect(screen.getByRole("menuitem", { name: "重命名" })).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByRole("menuitem", { name: "移动" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("menuitem", { name: "删除笔记" })).toHaveAttribute("aria-disabled", "false");
+    expect(screen.getByRole("menuitem", { name: "移动" })).toHaveAttribute("aria-disabled", "false");
+    expect(screen.getByRole("menuitem", { name: "重命名" })).toHaveAttribute("aria-disabled", "false");
+  });
+
+  it("renames a note from the note context menu when a new title is confirmed", async () => {
+    const user = userEvent.setup();
+    hookMocks.renameNote.mockResolvedValue(undefined);
+
+    renderWithContextMenu();
+
+    fireEvent.contextMenu(screen.getByText("案例.md"), {
+      clientX: 140,
+      clientY: 120,
+    });
+
+    await user.click(await screen.findByRole("menuitem", { name: "重命名" }));
+
+    const input = screen.getByRole("textbox", { name: "重命名笔记 案例.md" });
+    await user.clear(input);
+    await user.type(input, "案例-新版{Enter}");
+
+    await waitFor(() => expect(hookMocks.renameNote).toHaveBeenCalledWith("notes/法律/案例.md", "案例-新版"));
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "重命名笔记 案例.md" })).not.toBeInTheDocument());
+  });
+
+  it("moves a note from the note context menu when a target directory is confirmed", async () => {
+    const user = userEvent.setup();
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("notes");
+
+    renderWithContextMenu();
+
+    fireEvent.contextMenu(screen.getByText("案例.md"), {
+      clientX: 140,
+      clientY: 120,
+    });
+
+    await user.click(await screen.findByRole("menuitem", { name: "移动" }));
+
+    expect(promptSpy).toHaveBeenCalled();
+    expect(hookMocks.moveNote).toHaveBeenCalledWith("notes/法律/案例.md", "notes");
+  });
+
+  it("responds to app menu events for create/import note actions", async () => {
+    render(<FileTreePanel />);
+
+    act(() => {
+      window.dispatchEvent(new Event("mynote:menu-create-note"));
+    });
+    expect(await screen.findByPlaceholderText("笔记标题…")).toBeInTheDocument();
+
+    act(() => {
+      window.dispatchEvent(new Event("mynote:menu-create-notebook"));
+    });
+    expect(await screen.findByPlaceholderText("笔记本名称…")).toBeInTheDocument();
+
+    act(() => {
+      window.dispatchEvent(new Event("mynote:menu-import-note"));
+    });
+    expect(await screen.findByRole("menu", { name: "导入来源" })).toBeInTheDocument();
+  });
+
+  it("responds to app menu rename event for notes", async () => {
+    const user = userEvent.setup();
+    hookMocks.renameNote.mockResolvedValue(undefined);
+
+    render(<FileTreePanel />);
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("mynote:menu-rename-note", {
+        detail: { path: "notes/法律/案例.md", noteTitle: "案例" },
+      }));
+    });
+
+    const input = await screen.findByRole("textbox", { name: "重命名笔记 案例.md" });
+    await user.clear(input);
+    await user.type(input, "案例-改名{Enter}");
+
+    await waitFor(() => expect(hookMocks.renameNote).toHaveBeenCalledWith("notes/法律/案例.md", "案例-改名"));
+  });
+
+  it("keeps note rename draft and error inline when renameNote fails", async () => {
+    const user = userEvent.setup();
+    hookMocks.renameNote.mockRejectedValue(new Error("名称已存在"));
+
+    renderWithContextMenu();
+
+    fireEvent.contextMenu(screen.getByText("案例.md"), {
+      clientX: 140,
+      clientY: 120,
+    });
+
+    await user.click(await screen.findByRole("menuitem", { name: "重命名" }));
+
+    const input = screen.getByRole("textbox", { name: "重命名笔记 案例.md" });
+    await user.clear(input);
+    await user.type(input, "冲突名称{Enter}");
+
+    await waitFor(() => expect(hookMocks.renameNote).toHaveBeenCalledWith("notes/法律/案例.md", "冲突名称"));
+    expect(screen.getByRole("textbox", { name: "重命名笔记 案例.md" })).toHaveValue("冲突名称");
+    expect(screen.getByText("名称已存在")).toBeInTheDocument();
+  });
+
+  it("confirms before deleting a note from the note context menu", async () => {
+    const user = userEvent.setup();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    renderWithContextMenu();
+
+    fireEvent.contextMenu(screen.getByText("案例.md"), {
+      clientX: 140,
+      clientY: 120,
+    });
+
+    await user.click(await screen.findByRole("menuitem", { name: "删除笔记" }));
+
+    expect(confirmSpy).toHaveBeenCalledWith("确认删除笔记“案例”并同时删除其附件与图片吗？");
+    expect(hookMocks.deleteNote).toHaveBeenCalledWith("notes/法律/案例.md");
+  });
+
+  it("shows refresh in the file-tree blank context menu and clears a deleted current note after refresh", async () => {
+    const user = userEvent.setup();
+
+    apiMocks.getNoteTree.mockResolvedValueOnce([
+      {
+        id: null,
+        name: "notes",
+        path: "notes",
+        is_dir: true,
+        children: [
+          {
+            id: null,
+            name: "法律",
+            path: "notes/法律",
+            is_dir: true,
+            children: [],
+          },
+        ],
+      },
+    ]);
+
+    useAppStore.setState({ selectedNodePath: "notes/法律/案例.md" });
+    useEditorStore.setState({
+      currentNote: {
+        id: "note-1",
+        path: "notes/法律/案例.md",
+        title: "案例",
+        summary: null,
+        contentHash: "hash-1",
+        wordCount: 12,
+        createdAt: "2026-06-09T00:00:00Z",
+        updatedAt: "2026-06-09T00:00:00Z",
+        indexedAt: "2026-06-09T00:00:00Z",
+        deletedAt: null,
+      },
+      content: "# 案例\n\n正文",
+    });
+
+    const { container } = renderWithContextMenu();
+    const blankArea = container.querySelector('[data-testid="file-tree-blank-area"]');
+    expect(blankArea).not.toBeNull();
+
+    fireEvent.contextMenu(blankArea as Element, {
+      clientX: 120,
+      clientY: 200,
+    });
+
+    expect(await screen.findByRole("menuitem", { name: "刷新笔记仓库" })).toHaveAttribute("aria-disabled", "false");
+
+    await user.click(screen.getByRole("menuitem", { name: "刷新笔记仓库" }));
+
+    await waitFor(() => expect(apiMocks.getNoteTree).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByText("案例.md")).not.toBeInTheDocument());
+    expect(useAppStore.getState().selectedNodePath).toBeNull();
+    expect(useEditorStore.getState().currentNote).toBeNull();
+    expect(useEditorStore.getState().content).toBe("");
   });
 
   it("shows a summary badge before note titles when the note has a summary", () => {
@@ -793,6 +1002,299 @@ describe("FileTreePanel", () => {
     expect(screen.getByRole("option", { name: "法律" })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "未归档" })).not.toBeInTheDocument();
     expect(notebookSelect).toHaveValue("notes/法律");
+  });
+
+  it("supports directory import", async () => {
+    const user = userEvent.setup();
+
+    dialogMocks.open.mockResolvedValueOnce("/tmp/research");
+    apiMocks.importMarkdownSources.mockResolvedValueOnce({
+      imported: [
+        {
+          sourcePath: "/tmp/research/overview.md",
+          note: {
+            id: "note-imported-1",
+            path: "notes/法律/research/overview.md",
+            title: "overview",
+            summary: null,
+            contentHash: "hash-1",
+            wordCount: 12,
+            createdAt: "2026-06-09T00:00:00Z",
+            updatedAt: "2026-06-09T00:00:00Z",
+            indexedAt: "2026-06-09T00:00:00Z",
+            deletedAt: null,
+          },
+        },
+      ],
+      warnings: [],
+      failures: [],
+    });
+
+    render(<FileTreePanel />);
+
+    await user.click(screen.getByRole("button", { name: "导入笔记" }));
+    await user.click(screen.getByRole("menuitem", { name: "导入文件夹" }));
+
+    expect(dialogMocks.open).toHaveBeenCalledWith({ directory: true, multiple: false });
+    expect(await screen.findByText("research")).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "notes/法律" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "确认导入" }));
+
+    await waitFor(() => expect(apiMocks.importMarkdownSources).toHaveBeenCalledWith({
+      sources: [{ kind: "directory", path: "/tmp/research" }],
+      destDirectory: "notes",
+    }));
+  });
+
+  it("anchors the import source menu inside the sidebar without clipping long labels", async () => {
+    const user = userEvent.setup();
+
+    render(<FileTreePanel />);
+
+    await user.click(screen.getByRole("button", { name: "导入笔记" }));
+
+    const menu = screen.getByRole("menu", { name: "导入来源" });
+    expect(menu).toHaveStyle({
+      left: "auto",
+      right: "0px",
+      minWidth: "188px",
+    });
+    expect(screen.getByRole("menuitem", { name: "导入 Markdown 文件" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "导入文件夹" })).toBeInTheDocument();
+  });
+
+  it("keeps newly imported nested directories collapsed after the tree refresh", async () => {
+    const user = userEvent.setup();
+    const refreshTree = vi.fn().mockImplementation(async () => {
+      useAppStore.setState({
+        tree: [
+          {
+            id: null,
+            name: "notes",
+            path: "notes",
+            is_dir: true,
+            children: [
+              {
+                id: null,
+                name: "法律",
+                path: "notes/法律",
+                is_dir: true,
+                children: [
+                  {
+                    id: null,
+                    name: "research",
+                    path: "notes/法律/research",
+                    is_dir: true,
+                    children: [
+                      {
+                        id: "note-imported-1",
+                        name: "overview.md",
+                        path: "notes/法律/research/overview.md",
+                        is_dir: false,
+                        children: [],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+    });
+
+    useAppStore.setState({ refreshTree });
+
+    dialogMocks.open.mockResolvedValueOnce(["/tmp/research/overview.md"]);
+    apiMocks.importMarkdownSources.mockResolvedValueOnce({
+      imported: [
+        {
+          sourcePath: "/tmp/research/overview.md",
+          note: {
+            id: "note-imported-1",
+            path: "notes/法律/research/overview.md",
+            title: "overview",
+            summary: null,
+            contentHash: "hash-1",
+            wordCount: 12,
+            createdAt: "2026-06-09T00:00:00Z",
+            updatedAt: "2026-06-09T00:00:00Z",
+            indexedAt: "2026-06-09T00:00:00Z",
+            deletedAt: null,
+          },
+        },
+      ],
+      warnings: [],
+      failures: [],
+    });
+
+    render(<FileTreePanel />);
+
+    await user.click(screen.getByRole("button", { name: "导入笔记" }));
+    await user.click(screen.getByRole("menuitem", { name: "导入 Markdown 文件" }));
+    await user.click(await screen.findByRole("button", { name: "确认导入" }));
+
+    await waitFor(() => expect(refreshTree).toHaveBeenCalled());
+    const importedDirectoryToggle = await screen.findByRole("button", { name: "research" });
+    expect(importedDirectoryToggle).toHaveAttribute("aria-expanded", "false");
+    await waitFor(() => expect(screen.queryByText("overview.md")).not.toBeInTheDocument());
+  });
+
+  it("opens the last imported note after a successful batch import with no warnings", async () => {
+    const user = userEvent.setup();
+    const refreshTree = vi.fn().mockResolvedValue(undefined);
+
+    useAppStore.setState({ refreshTree });
+
+    dialogMocks.open.mockResolvedValueOnce(["/tmp/research/overview.md"]);
+    apiMocks.importMarkdownSources.mockResolvedValueOnce({
+      imported: [
+        {
+          sourcePath: "/tmp/research/overview.md",
+          note: {
+            id: "note-imported-1",
+            path: "notes/work/overview.md",
+            title: "overview",
+            summary: null,
+            contentHash: "hash-1",
+            wordCount: 12,
+            createdAt: "2026-06-09T00:00:00Z",
+            updatedAt: "2026-06-09T00:00:00Z",
+            indexedAt: "2026-06-09T00:00:00Z",
+            deletedAt: null,
+          },
+        },
+      ],
+      warnings: [],
+      failures: [],
+    });
+
+    render(<FileTreePanel />);
+
+    await user.click(screen.getByRole("button", { name: "导入笔记" }));
+    await user.click(screen.getByRole("menuitem", { name: "导入 Markdown 文件" }));
+    await user.click(await screen.findByRole("button", { name: "确认导入" }));
+
+    await waitFor(() => expect(refreshTree).toHaveBeenCalled());
+    await waitFor(() => expect(hookMocks.openNote).toHaveBeenCalledWith("notes/work/overview.md"));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "关闭" })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("button", { name: "确认导入" })).not.toBeInTheDocument());
+  });
+
+  it("keeps warnings visible", async () => {
+    const user = userEvent.setup();
+
+    dialogMocks.open.mockResolvedValueOnce(["/tmp/research/overview.md"]);
+    apiMocks.importMarkdownSources.mockResolvedValueOnce({
+      imported: [
+        {
+          sourcePath: "/tmp/research/overview.md",
+          note: {
+            id: "note-imported-1",
+            path: "notes/法律/overview.md",
+            title: "overview",
+            summary: null,
+            contentHash: "hash-1",
+            wordCount: 12,
+            createdAt: "2026-06-09T00:00:00Z",
+            updatedAt: "2026-06-09T00:00:00Z",
+            indexedAt: "2026-06-09T00:00:00Z",
+            deletedAt: null,
+          },
+        },
+      ],
+      warnings: [
+        {
+          sourcePath: "/tmp/research/overview.md",
+          message: "Skipped external asset ../shared/cover.png",
+        },
+      ],
+      failures: [],
+    });
+
+    render(<FileTreePanel />);
+
+    await user.click(screen.getByRole("button", { name: "导入笔记" }));
+    await user.click(screen.getByRole("menuitem", { name: "导入 Markdown 文件" }));
+    await user.click(await screen.findByRole("button", { name: "确认导入" }));
+
+    expect(await screen.findByText("Skipped external asset ../shared/cover.png")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "关闭" })).toBeInTheDocument();
+    await waitFor(() => expect(hookMocks.openNote).toHaveBeenCalledWith("notes/法律/overview.md"));
+  });
+
+  it("still refreshes and opens the last imported note when some imports fail", async () => {
+    const user = userEvent.setup();
+
+    dialogMocks.open.mockResolvedValueOnce(["/tmp/research/overview.md"]);
+    apiMocks.importMarkdownSources.mockResolvedValueOnce({
+      imported: [
+        {
+          sourcePath: "/tmp/research/overview.md",
+          note: {
+            id: "note-imported-1",
+            path: "notes/法律/overview.md",
+            title: "overview",
+            summary: null,
+            contentHash: "hash-1",
+            wordCount: 12,
+            createdAt: "2026-06-09T00:00:00Z",
+            updatedAt: "2026-06-09T00:00:00Z",
+            indexedAt: "2026-06-09T00:00:00Z",
+            deletedAt: null,
+          },
+        },
+      ],
+      warnings: [],
+      failures: [
+        {
+          sourcePath: "/tmp/research/broken.md",
+          message: "Failed to import markdown file",
+        },
+      ],
+    });
+
+    render(<FileTreePanel />);
+
+    await user.click(screen.getByRole("button", { name: "导入笔记" }));
+    await user.click(screen.getByRole("menuitem", { name: "导入 Markdown 文件" }));
+    await user.click(await screen.findByRole("button", { name: "确认导入" }));
+
+    expect(await screen.findByText("Failed to import markdown file")).toBeInTheDocument();
+    await waitFor(() => expect(hookMocks.openNote).toHaveBeenCalledWith("notes/法律/overview.md"));
+  });
+
+  it("normalizes custom import directories under notes", async () => {
+    const user = userEvent.setup();
+
+    dialogMocks.open.mockResolvedValueOnce(["/tmp/research/overview.md"]);
+    apiMocks.importMarkdownSources.mockResolvedValueOnce({
+      imported: [],
+      warnings: [],
+      failures: [
+        {
+          sourcePath: "/tmp/research/overview.md",
+          message: "Failed to import markdown file",
+        },
+      ],
+    });
+
+    render(<FileTreePanel />);
+
+    await user.click(screen.getByRole("button", { name: "导入笔记" }));
+    await user.click(screen.getByRole("menuitem", { name: "导入 Markdown 文件" }));
+    await user.click(await screen.findByRole("button", { name: "新目录…" }));
+
+    const customDirInput = screen.getByRole("textbox");
+    await user.clear(customDirInput);
+    await user.type(customDirInput, "work/2024");
+    await user.click(screen.getByRole("button", { name: "确认导入" }));
+
+    await waitFor(() => expect(apiMocks.importMarkdownSources).toHaveBeenCalledWith({
+      sources: [{ kind: "file", path: "/tmp/research/overview.md" }],
+      destDirectory: "notes/work/2024",
+    }));
   });
 
   it("still allows creating a note while tag filtering is active", async () => {

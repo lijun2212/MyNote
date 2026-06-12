@@ -242,6 +242,88 @@ function buildTagInsertText(tagName: string): string {
   return `#${tagName} `;
 }
 
+function buildImageInsertText(markdownPath: string): string {
+  return `![图片](${markdownPath})`;
+}
+
+function canReadClipboard() {
+  return typeof navigator !== "undefined"
+    && !!navigator.clipboard
+    && (typeof navigator.clipboard.read === "function" || typeof navigator.clipboard.readText === "function");
+}
+
+
+async function readPasteInsertText(notePath?: string): Promise<string | null> {
+  if (!canReadClipboard()) {
+    return null;
+  }
+
+  try {
+    if (typeof navigator.clipboard.read === "function") {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const imageType = item.types.find((type) => /^image\/(png|jpe?g|gif|webp)$/i.test(type));
+        if (imageType) {
+          if (!notePath) {
+            return null;
+          }
+          const imageBlob = await item.getType(imageType);
+          const imageBytes = new Uint8Array(await imageBlob.arrayBuffer());
+          if (imageBytes.byteLength === 0) {
+            return null;
+          }
+          const result = await api.insertPastedImageForNote(notePath, imageType, imageBytes);
+          return buildImageInsertText(result.markdownPath);
+        }
+      }
+    }
+
+    if (typeof navigator.clipboard.readText === "function") {
+      const text = await navigator.clipboard.readText();
+      return text || null;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+async function pasteIntoSelectionSnapshot(view: EditorView, snapshot: SelectionSnapshot, notePath?: string) {
+  const insert = await readPasteInsertText(notePath);
+  if (!insert) {
+    return;
+  }
+
+  replaceSelectionSnapshot(view, snapshot, () => ({ insert, anchor: insert.length }));
+}
+
+async function pasteIntoCurrentSelection(view: EditorView, notePath?: string) {
+  const selection = view.state.selection.main;
+  const snapshot: SelectionSnapshot = {
+    from: selection.from,
+    to: selection.to,
+    text: view.state.sliceDoc(selection.from, selection.to),
+  };
+  await pasteIntoSelectionSnapshot(view, snapshot, notePath);
+}
+
+async function pasteIntoCursor(view: EditorView, notePath?: string, at?: number | null) {
+  const insert = await readPasteInsertText(notePath);
+  if (!insert) {
+    return;
+  }
+  insertTextIntoView(view, insert, at);
+}
+
+async function requestImageInsert(notePath: string) {
+  try {
+    return await api.insertImageForNote(notePath);
+  } catch {
+    return null;
+  }
+}
+
 function insertTagIntoView(view: EditorView, tagName: string, at?: number | null) {
   const text = buildTagInsertText(tagName);
   insertTextIntoView(view, text, at);
@@ -329,10 +411,12 @@ export function MarkdownEditor({
   const kb = useAppStore((state) => state.kb);
   const refreshTree = useAppStore((state) => state.refreshTree);
   const setLeftSidebarVisible = useAppStore((state) => state.setLeftSidebarVisible);
+  const currentNote = useEditorStore((state) => state.currentNote);
   const setIsComposing = useEditorStore((state) => state.setIsComposing);
   const isComposing = useEditorStore((state) => state.isComposing);
   const isProgrammaticChange = useRef(false);
   const isProgrammaticScroll = useRef(false);
+  const currentNotePathRef = useRef<string | undefined>(currentNote?.path);
   const programmaticScrollTimerRef = useRef<number | null>(null);
   const navigationHighlightTimerRef = useRef<number | null>(null);
   const [linkPickerMode, setLinkPickerMode] = useState<LinkInsertMode | null>(null);
@@ -439,6 +523,40 @@ export function MarkdownEditor({
       text: view.state.sliceDoc(selection.from, selection.to),
     };
     const selectedText = selectionSnapshot.text.trim();
+    const notePath = currentNote?.path;
+
+    const insertImageFromSelection = notePath
+      ? async () => {
+        const result = await requestImageInsert(notePath);
+        if (!result) {
+          return;
+        }
+        const insert = buildImageInsertText(result.markdownPath);
+        replaceSelectionSnapshot(view, selectionSnapshot, () => ({ insert, anchor: insert.length }));
+      }
+      : undefined;
+
+    const pasteFromSelection = canReadClipboard()
+      ? async () => {
+        await pasteIntoSelectionSnapshot(view, selectionSnapshot, notePath);
+      }
+      : undefined;
+
+    const insertImageFromBlank = notePath
+      ? async () => {
+        const result = await requestImageInsert(notePath);
+        if (!result) {
+          return;
+        }
+        insertTextIntoView(view, buildImageInsertText(result.markdownPath), selectionSnapshot.from);
+      }
+      : undefined;
+
+    const pasteFromBlank = canReadClipboard()
+      ? async () => {
+        await pasteIntoCursor(view, notePath, selectionSnapshot.from);
+      }
+      : undefined;
 
     event.preventDefault();
 
@@ -449,6 +567,8 @@ export function MarkdownEditor({
           type: "editorSelection",
           selectedText,
           handlers: {
+            paste: pasteFromSelection,
+            insertImage: insertImageFromSelection,
             insertLink: () => {
               replaceSelectionSnapshot(view, selectionSnapshot, (text) => {
                 const insert = `[${text}]()`;
@@ -479,6 +599,8 @@ export function MarkdownEditor({
       payload: {
         type: "editorBlank",
         handlers: {
+          paste: pasteFromBlank,
+          insertImage: insertImageFromBlank,
           insertLink: () => openLinkPicker("markdown"),
           createWikiLink: () => openLinkPicker("wiki"),
           refreshIndex: async () => {
@@ -542,6 +664,10 @@ export function MarkdownEditor({
   }, [kb, linkPickerMode, linkPickerQuery]);
 
   useEffect(() => {
+    currentNotePathRef.current = currentNote?.path;
+  }, [currentNote?.path]);
+
+  useEffect(() => {
     if (!editorRef.current) return;
 
     const startState = EditorState.create({
@@ -553,7 +679,20 @@ export function MarkdownEditor({
         lineNumbers(),
         markdown({ base: markdownLanguage }),
         EditorView.lineWrapping,
-        keymap.of([...defaultKeymap, ...historyKeymap]),
+        keymap.of([
+          {
+            key: "Mod-v",
+            run: (view) => {
+              if (!canReadClipboard()) {
+                return false;
+              }
+              void pasteIntoCurrentSelection(view, currentNotePathRef.current);
+              return true;
+            },
+          },
+          ...defaultKeymap,
+          ...historyKeymap,
+        ]),
         inlineTagPlugin,
         searchNavigationPlugin,
         EditorView.domEventHandlers({
@@ -795,7 +934,12 @@ export function MarkdownEditor({
   return (
     <>
       <div
-        onContextMenu={handleEditorContextMenu}
+        onContextMenuCapture={(event) => {
+          // Intercept in capture phase to suppress platform-native callouts before they render.
+          event.preventDefault();
+          event.stopPropagation();
+          handleEditorContextMenu(event);
+        }}
         onDragOver={(event) => {
           const tagName = readDraggedTagName(event.dataTransfer);
           logTagDrag("wrapper-dragover", {

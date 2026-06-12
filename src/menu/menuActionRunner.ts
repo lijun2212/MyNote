@@ -23,6 +23,7 @@ export interface MenuActionRunnerHandlers {
   createNote?: () => MaybePromise;
   createNotebook?: () => MaybePromise;
   importNote?: () => MaybePromise;
+  refreshFileTree?: () => MaybePromise;
   openSearch?: () => MaybePromise;
   openAiSettings?: () => MaybePromise;
   testAiConnection?: () => MaybePromise;
@@ -33,6 +34,7 @@ export interface MenuActionRunnerHandlers {
   openCurrentNote?: (payload: NoteContextMenuPayload) => MaybePromise;
   moveCurrentNote?: (payload: NoteContextMenuPayload) => MaybePromise;
   renameCurrentNote?: (payload: NoteContextMenuPayload) => MaybePromise;
+  deleteCurrentNote?: (payload: NoteContextMenuPayload) => MaybePromise;
   copyCurrentNoteLink?: (payload: NoteContextMenuPayload) => MaybePromise;
   copyCurrentNoteWikiLink?: (payload: NoteContextMenuPayload) => MaybePromise;
   createNoteInNotebook?: (payload: NotebookContextMenuPayload) => MaybePromise;
@@ -40,10 +42,14 @@ export interface MenuActionRunnerHandlers {
   reorderNotebook?: (payload: NotebookContextMenuPayload) => MaybePromise;
   deleteNotebook?: (payload: NotebookContextMenuPayload) => MaybePromise;
   deleteTag?: (payload: TagContextMenuPayload) => MaybePromise;
+  pasteFromSelection?: (payload: EditorSelectionContextMenuPayload) => MaybePromise;
   insertLinkFromSelection?: (payload: EditorSelectionContextMenuPayload) => MaybePromise;
+  insertImageFromSelection?: (payload: EditorSelectionContextMenuPayload) => MaybePromise;
   insertTagFromSelection?: (payload: EditorSelectionContextMenuPayload) => MaybePromise;
   createWikiLinkFromSelection?: (payload: EditorSelectionContextMenuPayload) => MaybePromise;
+  pasteFromBlank?: (payload: EditorBlankContextMenuPayload) => MaybePromise;
   insertLinkFromBlank?: (payload: EditorBlankContextMenuPayload) => MaybePromise;
+  insertImageFromBlank?: (payload: EditorBlankContextMenuPayload) => MaybePromise;
   createWikiLinkFromBlank?: (payload: EditorBlankContextMenuPayload) => MaybePromise;
   refreshIndex?: (payload: EditorBlankContextMenuPayload) => MaybePromise;
   showLeftSidebar?: (payload: EditorBlankContextMenuPayload) => MaybePromise;
@@ -212,6 +218,7 @@ export function createMenuActionRunner(handlers: MenuActionRunnerHandlers) {
     "file.newNote": () => requireHandler(handlers, "file.newNote", "createNote")(),
     "file.newNotebook": () => requireHandler(handlers, "file.newNotebook", "createNotebook")(),
     "file.importNote": () => requireHandler(handlers, "file.importNote", "importNote")(),
+    "file.refreshTree": () => requireHandler(handlers, "file.refreshTree", "refreshFileTree")(),
     "edit.rename": (payload) => requireHandler(handlers, "edit.rename", "renameCurrentNote")(assertNotePayload(payload)),
     "edit.move": (payload) => requireHandler(handlers, "edit.move", "moveCurrentNote")(assertNotePayload(payload)),
     "edit.copyLink": (payload) => requireHandler(handlers, "edit.copyLink", "copyCurrentNoteLink")(assertNotePayload(payload)),
@@ -227,6 +234,7 @@ export function createMenuActionRunner(handlers: MenuActionRunnerHandlers) {
     "note.move": (payload) => requireHandler(handlers, "note.move", "moveCurrentNote")(assertNotePayload(payload)),
     "note.copyLink": (payload) => requireHandler(handlers, "note.copyLink", "copyCurrentNoteLink")(assertNotePayload(payload)),
     "note.copyWikiLink": (payload) => requireHandler(handlers, "note.copyWikiLink", "copyCurrentNoteWikiLink")(assertNotePayload(payload)),
+    "note.delete": (payload) => requireHandler(handlers, "note.delete", "deleteCurrentNote")(assertNotePayload(payload)),
     "help.shortcuts": () => requireHandler(handlers, "help.shortcuts", "openShortcuts")(),
     "help.about": () => requireHandler(handlers, "help.about", "openAbout")(),
     "notebook.createNote": (payload) => requireHandler(handlers, "notebook.createNote", "createNoteInNotebook")(assertNotebookPayload(payload)),
@@ -235,10 +243,14 @@ export function createMenuActionRunner(handlers: MenuActionRunnerHandlers) {
     "notebook.delete": (payload) => requireHandler(handlers, "notebook.delete", "deleteNotebook")(assertNotebookPayload(payload)),
     "note.open": (payload) => requireHandler(handlers, "note.open", "openCurrentNote")(assertNotePayload(payload)),
     "tag.delete": (payload) => requireHandler(handlers, "tag.delete", "deleteTag")(assertTagPayload(payload)),
+    "selection.paste": (payload) => requireHandler(handlers, "selection.paste", "pasteFromSelection")(assertEditorSelectionPayload(payload)),
     "selection.insertLink": (payload) => requireHandler(handlers, "selection.insertLink", "insertLinkFromSelection")(assertEditorSelectionPayload(payload)),
+    "selection.insertImage": (payload) => requireHandler(handlers, "selection.insertImage", "insertImageFromSelection")(assertEditorSelectionPayload(payload)),
     "selection.insertTag": (payload) => requireHandler(handlers, "selection.insertTag", "insertTagFromSelection")(assertEditorSelectionPayload(payload)),
     "selection.createWikiLink": (payload) => requireHandler(handlers, "selection.createWikiLink", "createWikiLinkFromSelection")(assertEditorSelectionPayload(payload)),
+    "blank.paste": (payload) => requireHandler(handlers, "blank.paste", "pasteFromBlank")(assertEditorBlankPayload(payload)),
     "blank.insertLink": (payload) => requireHandler(handlers, "blank.insertLink", "insertLinkFromBlank")(assertEditorBlankPayload(payload)),
+    "blank.insertImage": (payload) => requireHandler(handlers, "blank.insertImage", "insertImageFromBlank")(assertEditorBlankPayload(payload)),
     "blank.createWikiLink": (payload) => requireHandler(handlers, "blank.createWikiLink", "createWikiLinkFromBlank")(assertEditorBlankPayload(payload)),
     "blank.refreshIndex": (payload) => requireHandler(handlers, "blank.refreshIndex", "refreshIndex")(assertEditorBlankPayload(payload)),
     "blank.showSidebar": (payload) => requireHandler(handlers, "blank.showSidebar", "showLeftSidebar")(assertEditorBlankPayload(payload)),

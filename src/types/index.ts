@@ -24,6 +24,35 @@ export interface NoteDetail {
   content: string;
 }
 
+export type MarkdownImportSource =
+  | { kind: "file"; path: string }
+  | { kind: "directory"; path: string };
+
+export interface MarkdownImportRequest {
+  sources: MarkdownImportSource[];
+  destDirectory: string;
+}
+
+export interface MarkdownImportItem {
+  sourcePath: string;
+  note: Note;
+}
+
+export interface MarkdownImportMessage {
+  sourcePath: string;
+  message: string;
+}
+
+export interface MarkdownImportResult {
+  imported: MarkdownImportItem[];
+  warnings: MarkdownImportMessage[];
+  failures: MarkdownImportMessage[];
+}
+
+export interface InsertImageResult {
+  markdownPath: string;
+}
+
 export interface NoteOutlineItem {
   id: string;
   text: string;

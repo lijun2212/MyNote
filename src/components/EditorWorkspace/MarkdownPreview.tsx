@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import DOMPurify from "dompurify";
 import MarkdownIt from "markdown-it";
@@ -239,6 +240,81 @@ function normalizeInternalNotePath(href: string): string | undefined {
   }
 
   return normalizedPath;
+}
+
+function normalizeKbRelativePath(path: string): string | null {
+  const normalized = path.replace(/\\/g, "/").trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const stack: string[] = [];
+  for (const segment of normalized.split("/")) {
+    if (!segment || segment === ".") {
+      continue;
+    }
+    if (segment === "..") {
+      if (stack.length === 0) {
+        return null;
+      }
+      stack.pop();
+      continue;
+    }
+    stack.push(segment);
+  }
+
+  return stack.join("/");
+}
+
+function resolveMarkdownImageToKbRelativePath(rawSrc: string, notePath: string | undefined): string | null {
+  const src = rawSrc.trim();
+  if (!src || /^(?:[a-z][a-z+.-]*:|#)/i.test(src)) {
+    return null;
+  }
+
+  const bareSrc = src.split(/[?#]/, 1)[0] ?? "";
+  if (!bareSrc) {
+    return null;
+  }
+
+  if (bareSrc.startsWith("/")) {
+    return normalizeKbRelativePath(bareSrc.replace(/^\/+/, ""));
+  }
+
+  if (bareSrc.startsWith("notes/") || bareSrc.startsWith("assets/")) {
+    return normalizeKbRelativePath(bareSrc);
+  }
+
+  if (!notePath) {
+    return null;
+  }
+
+  const noteDir = notePath.split("/").slice(0, -1).join("/");
+  const combined = noteDir ? `${noteDir}/${bareSrc}` : bareSrc;
+  return normalizeKbRelativePath(combined);
+}
+
+function rewriteLocalImageSourcesForTauri(
+  container: HTMLElement,
+  kbRootPath: string | undefined,
+  notePath: string | undefined,
+) {
+  if (!kbRootPath) {
+    return;
+  }
+
+  const normalizedRoot = kbRootPath.replace(/\/$/, "");
+  const images = Array.from(container.querySelectorAll<HTMLImageElement>("img[src]"));
+  for (const image of images) {
+    const originalSrc = image.getAttribute("src") ?? "";
+    const relativePath = resolveMarkdownImageToKbRelativePath(originalSrc, notePath);
+    if (!relativePath) {
+      continue;
+    }
+
+    const absolutePath = `${normalizedRoot}/${relativePath}`;
+    image.setAttribute("src", convertFileSrc(absolutePath));
+  }
 }
 
 function decodeHrefFragment(value: string): string {
@@ -641,6 +717,7 @@ export function MarkdownPreview({
   const currentEditorContent = useEditorStore((s) => s.content);
   const selectedNodePath = useAppStore((s) => s.selectedNodePath);
   const setRightSidebarVisible = useAppStore((s) => s.setRightSidebarVisible);
+  const kbRootPath = useAppStore((s) => s.kb?.root_path);
 
   const openWikiNote = async (title: string, requestId = beginOpenNote()) => {
     try {
@@ -752,6 +829,13 @@ export function MarkdownPreview({
     enhanceSearchNavigationTarget(containerRef.current, activeSearchNavigationTarget);
     enhanceResizableTables(containerRef.current);
   }, [content, activePreviewNavigationTarget, activeSearchNavigationTarget, isFrontMatterNavigationActive]);
+
+  useEffect(() => {
+    if (!containerRef.current) {
+      return;
+    }
+    rewriteLocalImageSourcesForTauri(containerRef.current, kbRootPath, currentNote?.path ?? undefined);
+  }, [content, kbRootPath, currentNote?.path]);
 
   useEffect(() => {
     const scrollContainer = scrollContainerRef.current;
@@ -1149,8 +1233,12 @@ export function MarkdownPreview({
           white-space: pre;
         }
         .markdown-preview-content img {
+          display: block;
           max-width: 100%;
+          width: auto;
           height: auto;
+          object-fit: contain;
+          margin: 0.85em auto;
         }
         .markdown-preview-content .inline-tag-chip {
           display: inline-flex;

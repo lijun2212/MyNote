@@ -202,6 +202,57 @@ describe("MarkdownPreview", () => {
     expect(previewContent).toHaveStyle({ fontFamily: "var(--font-reading)" });
   });
 
+  it("keeps preview images inside the content pane with natural sizing", () => {
+    const { container } = render(
+      <MarkdownPreview
+        content={[
+          "# 图片示例",
+          "",
+          "![图片](../assets/diagram.png)",
+        ].join("\n")}
+      />,
+    );
+
+    const previewContent = container.querySelector("[data-testid='markdown-preview-content']");
+    const image = container.querySelector("img");
+
+    expect(previewContent).toHaveStyle({ width: "100%", maxWidth: "none" });
+    expect(image).toHaveAttribute("src", "../assets/diagram.png");
+    expect(image).toHaveStyle({
+      display: "block",
+      maxWidth: "100%",
+      width: "auto",
+      height: "auto",
+      objectFit: "contain",
+      margin: "0.85em auto",
+    });
+  });
+
+  it("rewrites local markdown image paths to tauri asset urls when knowledge base is open", () => {
+    useAppStore.setState({
+      kb: {
+        id: "kb-1",
+        name: "Demo KB",
+        root_path: "/Users/lijun/KnowledgeBase",
+        created_at: "2026-06-10T00:00:00Z",
+        updated_at: "2026-06-10T00:00:00Z",
+      },
+    });
+    useEditorStore.setState({
+      currentNote: makeNote({ path: "notes/project/demo.md" }),
+    });
+
+    const { container } = render(
+      <MarkdownPreview
+        content="![图片](../../assets/20260610-092845-01ktrd.png)"
+      />,
+    );
+
+    const image = container.querySelector("img") as HTMLImageElement | null;
+    expect(image).not.toBeNull();
+    expect(image?.getAttribute("src")).toBe("asset:///Users/lijun/KnowledgeBase/assets/20260610-092845-01ktrd.png");
+  });
+
   it("renders fenced code blocks with distinct Typora-like formatting", () => {
     const { container } = render(
       <MarkdownPreview

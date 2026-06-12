@@ -11,6 +11,7 @@ export function useOpenNote() {
   const setSelectedNodePath = useAppStore((s) => s.setSelectedNodePath);
   const setCurrentNote = useEditorStore((s) => s.setCurrentNote);
   const setContent = useEditorStore((s) => s.setContent);
+  const setNoteOpening = useEditorStore((s) => s.setNoteOpening);
   const recordLookbackOpen = useLookbackSummaryStore((s) => s.recordOpen);
 
   const beginOpenNote = useCallback(() => {
@@ -28,6 +29,7 @@ export function useOpenNote() {
     if (requestId !== latestOpenRequestId) return;
 
     setSelectedNodePath(path);
+    setNoteOpening(true, path);
 
     try {
       const detail = await api.getNoteByPath(path);
@@ -38,8 +40,12 @@ export function useOpenNote() {
     } catch (e) {
       if (requestId !== latestOpenRequestId) return;
       console.error("Failed to open note:", e);
+    } finally {
+      if (requestId === latestOpenRequestId) {
+        setNoteOpening(false);
+      }
     }
-  }, [beginOpenNote, recordLookbackOpen, setSelectedNodePath, setCurrentNote, setContent]);
+  }, [beginOpenNote, recordLookbackOpen, setSelectedNodePath, setCurrentNote, setContent, setNoteOpening]);
 
   return { openNote, beginOpenNote, isOpenNoteRequestCurrent };
 }

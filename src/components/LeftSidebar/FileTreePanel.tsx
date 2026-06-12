@@ -4,11 +4,12 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useAppStore } from "../../store/useAppStore";
 import { useKnowledgeBase } from "../../hooks/useKnowledgeBase";
 import { useOpenNote } from "../../hooks/useOpenNote";
+import { useRefreshNoteTree } from "../../hooks/useRefreshNoteTree";
 import { FileTreeNode } from "./FileTreeNode";
 import { ImportDialog } from "./ImportDialog";
 import { api } from "../../api/commands";
 import { useContextMenu } from "../ContextMenu/useContextMenu";
-import type { NoteTreeNode } from "../../types";
+import type { MarkdownImportSource, NoteTreeNode } from "../../types";
 import { buildNotebookTreeView } from "./notebookTree";
 import { getDropDirectoryPath } from "./fileTreeDrag";
 
@@ -16,6 +17,11 @@ const DRAG_DEBUG_PREFIX = "[mynote:note-drag]";
 const NOTE_DRAG_SOURCE_SELECTOR = "[data-note-drag-source]";
 const NOTE_DROP_DIRECTORY_SELECTOR = "[data-note-drop-directory]";
 const NOTE_DRAG_THRESHOLD_PX = 4;
+const REQUEST_CREATE_NOTE_EVENT = "mynote:menu-create-note";
+const REQUEST_CREATE_NOTEBOOK_EVENT = "mynote:menu-create-notebook";
+const REQUEST_IMPORT_NOTE_EVENT = "mynote:menu-import-note";
+const REQUEST_RENAME_NOTE_EVENT = "mynote:menu-rename-note";
+const REQUEST_MOVE_NOTE_EVENT = "mynote:menu-move-note";
 
 const NOTEBOOK_ICON_PRESETS = [
   { value: "folder", label: "文件夹", glyph: "F" },
@@ -62,6 +68,18 @@ function getEventElement(target: EventTarget | null): Element | null {
   return null;
 }
 
+function getNoteDirectoryPath(notePath: string): string {
+  const segments = notePath.split("/");
+  if (segments.length <= 1) {
+    return "notes";
+  }
+  return segments.slice(0, -1).join("/") || "notes";
+}
+
+function isValidMoveTargetDirectory(path: string): boolean {
+  return path === "notes" || (path.startsWith("notes/") && !path.startsWith("notes/__unarchived__"));
+}
+
 type InternalNoteDrag = {
   sourcePath: string;
   label: string;
@@ -82,12 +100,15 @@ export function FileTreePanel() {
     createNote,
     createNotebook,
     moveNote,
+    renameNote,
     renameNotebook,
     updateNotebookVisual,
     deleteNotebook,
+    deleteNote,
     reorderNotebooks,
   } = useKnowledgeBase();
   const { openNote } = useOpenNote();
+  const refreshNoteTree = useRefreshNoteTree();
   const { openContextMenu } = useContextMenu();
   const [inputVisible, setInputVisible] = useState(false);
   const [inputValue, setInputValue] = useState("");
@@ -100,20 +121,67 @@ export function FileTreePanel() {
   const [dragOverPath, setDragOverPath] = useState<string | null>(null);
   const [dragPreview, setDragPreview] = useState<InternalNoteDrag | null>(null);
   const [renamingNotebookPath, setRenamingNotebookPath] = useState<string | null>(null);
+  const [renamingNotePath, setRenamingNotePath] = useState<string | null>(null);
   const [colorPickerNotebookPath, setColorPickerNotebookPath] = useState<string | null>(null);
   const [deleteConfirmNotebookPath, setDeleteConfirmNotebookPath] = useState<string | null>(null);
   const [renameDrafts, setRenameDrafts] = useState<Record<string, string>>({});
+  const [noteRenameDrafts, setNoteRenameDrafts] = useState<Record<string, string>>({});
   const [notebookErrors, setNotebookErrors] = useState<Record<string, string | null>>({});
+  const [noteErrors, setNoteErrors] = useState<Record<string, string | null>>({});
   const pointerDragSourcePathRef = useRef<string | null>(null);
   const internalNoteDragRef = useRef<InternalNoteDrag | null>(null);
   const fullTreeRef = useRef<NoteTreeNode[]>(tree);
-  const [importFiles, setImportFiles] = useState<string[] | null>(null);
+  const knownDirectoryPathsRef = useRef<Set<string>>(new Set());
+  const [importSourcePickerOpen, setImportSourcePickerOpen] = useState(false);
+  const [importSources, setImportSources] = useState<MarkdownImportSource[] | null>(null);
   const treeView = selectedTagIds.length > 0 ? tree : buildNotebookTreeView(tree);
   const notebookSourceTree = selectedTagIds.length > 0 ? fullTreeRef.current : tree;
 
   function collectNotebookRoots(nodes: NoteTreeNode[]) {
     const notesRoot = nodes.find((node) => node.is_dir && node.path === "notes");
     return notesRoot?.children.filter((node) => node.is_dir) ?? [];
+  }
+
+function getNoteTitleFromPath(notePath: string): string {
+  const filename = notePath.split("/").pop() ?? notePath;
+  return filename.replace(/\.md$/i, "");
+}
+
+  function collectImportDirectories(nodes: NoteTreeNode[]): string[] {
+    const directories = new Set<string>();
+
+    function visit(items: NoteTreeNode[]) {
+      for (const item of items) {
+        if (item.is_dir) {
+          directories.add(item.path);
+          visit(item.children);
+          continue;
+        }
+
+        const parts = item.path.split("/");
+        if (parts.length > 1) {
+          directories.add(parts.slice(0, -1).join("/"));
+        }
+      }
+    }
+
+    visit(nodes);
+    return directories.size > 0 ? [...directories] : ["notes"];
+  }
+
+  function collectDirectoryPaths(nodes: NoteTreeNode[]): string[] {
+    const directories: string[] = [];
+
+    function visit(items: NoteTreeNode[]) {
+      for (const item of items) {
+        if (!item.is_dir) continue;
+        directories.push(item.path);
+        visit(item.children);
+      }
+    }
+
+    visit(nodes);
+    return directories;
   }
 
   function isTopLevelNotebookPath(path: string) {
@@ -151,6 +219,17 @@ export function FileTreePanel() {
     if (tree.some((node) => node.path === "notes" && node.is_dir)) {
       fullTreeRef.current = tree;
     }
+  }, [tree]);
+
+  useEffect(() => {
+    const nextPaths = collectDirectoryPaths(tree);
+    const knownPaths = knownDirectoryPathsRef.current;
+    if (knownPaths.size === 0) {
+      nextPaths.forEach((path) => knownPaths.add(path));
+      return;
+    }
+
+    nextPaths.forEach((path) => knownPaths.add(path));
   }, [tree]);
 
   useEffect(() => {
@@ -345,18 +424,75 @@ export function FileTreePanel() {
     };
   }, [selectedTagIds]);
 
-  // Collect unique directories from tree
-  const existingDirs = tree
-    .filter(n => n.is_dir)
-    .map(n => n.path)
-    .concat(tree.filter(n => !n.is_dir).map(n => {
-      const parts = n.path.split("/");
-      return parts.length > 1 ? parts.slice(0, -1).join("/") : "";
-    }).filter(Boolean));
-  const uniqueDirs = [...new Set(existingDirs.length ? existingDirs : ["notes"])];
+  useEffect(() => {
+    const handleCreateNoteRequest = () => {
+      void handleNewNote();
+    };
+    const handleCreateNotebookRequest = () => {
+      handleNewNotebook();
+    };
+    const handleImportNoteRequest = () => {
+      void handleImport();
+    };
+    const handleRenameNoteRequest = (event: Event) => {
+      const detail = (event as CustomEvent<{ path?: string; noteTitle?: string }>).detail;
+      const targetPath = detail?.path;
+      if (!targetPath) {
+        return;
+      }
+      const visibleNode = findNoteNodeByPath(treeView, targetPath);
+      if (visibleNode) {
+        beginNoteRename(visibleNode);
+        return;
+      }
+
+      const fallbackTitle = detail?.noteTitle ?? getNoteTitleFromPath(targetPath);
+      const nextName = window.prompt("输入新的笔记名称：", fallbackTitle)?.trim();
+      if (!nextName || nextName === fallbackTitle) {
+        return;
+      }
+
+      void renameNote(targetPath, nextName).catch((error) => {
+        window.alert(error instanceof Error ? error.message : String(error));
+      });
+    };
+    const handleMoveNoteRequest = (event: Event) => {
+      const detail = (event as CustomEvent<{ path?: string }>).detail;
+      const targetPath = detail?.path;
+      if (!targetPath) {
+        return;
+      }
+      void handleMoveNote(targetPath);
+    };
+
+    window.addEventListener(REQUEST_CREATE_NOTE_EVENT, handleCreateNoteRequest);
+    window.addEventListener(REQUEST_CREATE_NOTEBOOK_EVENT, handleCreateNotebookRequest);
+    window.addEventListener(REQUEST_IMPORT_NOTE_EVENT, handleImportNoteRequest);
+    window.addEventListener(REQUEST_RENAME_NOTE_EVENT, handleRenameNoteRequest as EventListener);
+    window.addEventListener(REQUEST_MOVE_NOTE_EVENT, handleMoveNoteRequest as EventListener);
+
+    return () => {
+      window.removeEventListener(REQUEST_CREATE_NOTE_EVENT, handleCreateNoteRequest);
+      window.removeEventListener(REQUEST_CREATE_NOTEBOOK_EVENT, handleCreateNotebookRequest);
+      window.removeEventListener(REQUEST_IMPORT_NOTE_EVENT, handleImportNoteRequest);
+      window.removeEventListener(REQUEST_RENAME_NOTE_EVENT, handleRenameNoteRequest as EventListener);
+      window.removeEventListener(REQUEST_MOVE_NOTE_EVENT, handleMoveNoteRequest as EventListener);
+    };
+  });
+
+  const importDirectorySourceTree = selectedTagIds.length > 0 ? fullTreeRef.current : tree;
+  const uniqueDirs = collectImportDirectories(importDirectorySourceTree);
   const topLevelNotebookPaths = treeView
     .filter((node) => node.is_dir && isTopLevelNotebookPath(node.path))
     .map((node) => node.path);
+
+  function getDefaultExpanded(node: NoteTreeNode, depth: number) {
+    if (!node.is_dir) return true;
+    if (depth === 0 || isTopLevelNotebookPath(node.path)) {
+      return true;
+    }
+    return knownDirectoryPathsRef.current.has(node.path);
+  }
 
   async function handleSelect(node: NoteTreeNode) {
     if (node.is_dir) return;
@@ -429,6 +565,13 @@ export function FileTreePanel() {
     }));
   }
 
+  function clearNoteError(path: string) {
+    setNoteErrors((current) => ({
+      ...current,
+      [path]: null,
+    }));
+  }
+
   function beginNotebookRename(node: NoteTreeNode) {
     clearNotebookError(node.path);
     setRenameDrafts((current) => ({
@@ -438,11 +581,49 @@ export function FileTreePanel() {
     setRenamingNotebookPath(node.path);
     setColorPickerNotebookPath(null);
     setDeleteConfirmNotebookPath(null);
+    setRenamingNotePath(null);
+  }
+
+  function findNoteNodeByPath(nodes: NoteTreeNode[], path: string): NoteTreeNode | null {
+    for (const node of nodes) {
+      if (!node.is_dir && node.path === path) {
+        return node;
+      }
+
+      if (node.is_dir) {
+        const child = findNoteNodeByPath(node.children, path);
+        if (child) {
+          return child;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  function beginNoteRename(node: NoteTreeNode) {
+    clearNoteError(node.path);
+    setNoteRenameDrafts((current) => ({
+      ...current,
+      [node.path]: current[node.path] ?? getNoteTitle(node),
+    }));
+    setRenamingNotePath(node.path);
+    setRenamingNotebookPath(null);
+    setColorPickerNotebookPath(null);
+    setDeleteConfirmNotebookPath(null);
   }
 
   function handleNotebookRenameChange(path: string, value: string) {
     clearNotebookError(path);
     setRenameDrafts((current) => ({
+      ...current,
+      [path]: value,
+    }));
+  }
+
+  function handleNoteRenameChange(path: string, value: string) {
+    clearNoteError(path);
+    setNoteRenameDrafts((current) => ({
       ...current,
       [path]: value,
     }));
@@ -456,6 +637,16 @@ export function FileTreePanel() {
       return nextDrafts;
     });
     setRenamingNotebookPath((current) => (current === path ? null : current));
+  }
+
+  function cancelNoteRename(path: string) {
+    clearNoteError(path);
+    setNoteRenameDrafts((current) => {
+      const nextDrafts = { ...current };
+      delete nextDrafts[path];
+      return nextDrafts;
+    });
+    setRenamingNotePath((current) => (current === path ? null : current));
   }
 
   function toggleNotebookColorPicker(path: string) {
@@ -493,6 +684,33 @@ export function FileTreePanel() {
         setRenamingNotebookPath((current) => (current === node.path ? null : current));
     } catch (error) {
       setNotebookErrors((current) => ({
+        ...current,
+        [node.path]: error instanceof Error ? error.message : String(error),
+      }));
+    }
+  }
+
+  async function handleRenameNoteSubmit(node: NoteTreeNode) {
+    const nextName = (noteRenameDrafts[node.path] ?? getNoteTitle(node)).trim();
+    if (!nextName) {
+      setNoteErrors((current) => ({
+        ...current,
+        [node.path]: "笔记名称不能为空",
+      }));
+      return;
+    }
+
+    try {
+      await renameNote(node.path, nextName);
+      setNoteRenameDrafts((current) => {
+        const nextDrafts = { ...current };
+        delete nextDrafts[node.path];
+        return nextDrafts;
+      });
+      clearNoteError(node.path);
+      setRenamingNotePath((current) => (current === node.path ? null : current));
+    } catch (error) {
+      setNoteErrors((current) => ({
         ...current,
         [node.path]: error instanceof Error ? error.message : String(error),
       }));
@@ -553,6 +771,64 @@ export function FileTreePanel() {
     }
   }
 
+  function handleNotebookReorderFromContext(path: string) {
+    const orderedPaths = treeView
+      .filter((node) => node.is_dir && isTopLevelNotebookPath(node.path))
+      .map((node) => node.path);
+    const currentIndex = orderedPaths.indexOf(path);
+    if (currentIndex < 0 || orderedPaths.length <= 1) {
+      return;
+    }
+
+    const canMoveUp = currentIndex > 0;
+    const canMoveDown = currentIndex < orderedPaths.length - 1;
+
+    let direction: -1 | 1 | null = null;
+    if (canMoveUp && canMoveDown) {
+      const moveUp = window.confirm("调整顺序：点击“确定”上移，点击“取消”下移。");
+      direction = moveUp ? -1 : 1;
+    } else if (canMoveUp) {
+      direction = -1;
+    } else if (canMoveDown) {
+      direction = 1;
+    }
+
+    if (!direction) {
+      return;
+    }
+
+    void handleReorderNotebook(path, direction);
+  }
+
+  async function handleMoveNote(notePath: string) {
+    const directories = collectDirectoryPaths(fullTreeRef.current)
+      .filter(isValidMoveTargetDirectory);
+    const targetOptions = directories.length > 0 ? directories : ["notes"];
+    const currentDirectory = getNoteDirectoryPath(notePath);
+    const defaultTarget = targetOptions.includes(currentDirectory)
+      ? currentDirectory
+      : targetOptions[0] ?? "notes";
+
+    const promptText = [
+      "输入目标目录路径（例如 notes/法律）：",
+      "",
+      "可用目录：",
+      ...targetOptions,
+    ].join("\n");
+
+    const selectedTarget = window.prompt(promptText, defaultTarget)?.trim();
+    if (!selectedTarget || selectedTarget === currentDirectory) {
+      return;
+    }
+
+    if (!targetOptions.includes(selectedTarget)) {
+      window.alert("目标目录无效，请从可用目录中选择。");
+      return;
+    }
+
+    await moveNote(notePath, selectedTarget);
+  }
+
   function handleNoteInputBlur(e: React.FocusEvent<HTMLInputElement>) {
     if (e.currentTarget.parentElement?.contains(e.relatedTarget as Node | null)) {
       return;
@@ -571,14 +847,26 @@ export function FileTreePanel() {
   }
 
   async function handleImport() {
+    setImportSourcePickerOpen((current) => !current);
+  }
+
+  async function handleImportMarkdownFiles() {
     const selected = await open({
       multiple: true,
       filters: [{ name: "Markdown", extensions: ["md"] }],
     });
+    setImportSourcePickerOpen(false);
     if (!selected) return;
     const files = Array.isArray(selected) ? selected : [selected];
     if (files.length === 0) return;
-    setImportFiles(files);
+    setImportSources(files.map((path) => ({ kind: "file", path })));
+  }
+
+  async function handleImportDirectory() {
+    const selected = await open({ directory: true, multiple: false });
+    setImportSourcePickerOpen(false);
+    if (!selected || Array.isArray(selected)) return;
+    setImportSources([{ kind: "directory", path: selected }]);
   }
 
   function handleStartDragFile(node: NoteTreeNode, event: React.DragEvent<HTMLDivElement>) {
@@ -710,6 +998,7 @@ export function FileTreePanel() {
               setInputVisible(true);
             },
             rename: () => beginNotebookRename(node),
+            reorder: () => handleNotebookReorderFromContext(node.path),
             delete: () => toggleNotebookDeleteConfirmation(node.path),
           },
         },
@@ -726,8 +1015,17 @@ export function FileTreePanel() {
         path: node.path,
         handlers: {
           open: () => openNote(node.path),
+          rename: () => beginNoteRename(node),
+          move: () => handleMoveNote(node.path),
           copyLink: () => writeClipboardText(node.path),
           copyWikiLink: () => writeClipboardText(`[[${getNoteTitle(node)}]]`),
+          delete: async () => {
+            const confirmed = window.confirm(`确认删除笔记“${getNoteTitle(node)}”并同时删除其附件与图片吗？`);
+            if (!confirmed) {
+              return;
+            }
+            await deleteNote(node.path);
+          },
         },
       },
     });
@@ -748,6 +1046,7 @@ export function FileTreePanel() {
           createNote: () => void handleNewNote(),
           createNotebook: handleNewNotebook,
           importNote: handleImport,
+          refreshTree: () => refreshNoteTree(),
         },
       },
     });
@@ -766,14 +1065,78 @@ export function FileTreePanel() {
           文件
         </span>
         <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-          <button
-            onClick={handleImport}
-            aria-label="导入 Markdown 文件"
-            style={{ fontSize: 14, background: "none", border: "none", cursor: "pointer", lineHeight: 1, color: "#555", padding: "2px 4px" }}
-            title="导入 Markdown 文件"
-          >
-            ↓
-          </button>
+          <div style={{ position: "relative" }}>
+            <button
+              onClick={handleImport}
+              aria-label="导入笔记"
+              style={{ fontSize: 14, background: "none", border: "none", cursor: "pointer", lineHeight: 1, color: "#555", padding: "2px 4px" }}
+              title="导入笔记"
+            >
+              ↓
+            </button>
+            {importSourcePickerOpen && (
+              <div
+                role="menu"
+                aria-label="导入来源"
+                style={{
+                  position: "absolute",
+                  left: "auto",
+                  right: 0,
+                  top: "calc(100% + 6px)",
+                  minWidth: 188,
+                  width: "max-content",
+                  maxWidth: "min(240px, calc(100vw - 24px))",
+                  padding: 6,
+                  borderRadius: 8,
+                  border: "1px solid #d0d7de",
+                  background: "#fff",
+                  boxShadow: "0 10px 30px rgba(15, 23, 42, 0.12)",
+                  zIndex: 20,
+                }}
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => void handleImportMarkdownFiles()}
+                  style={{
+                    width: "100%",
+                    display: "block",
+                    textAlign: "left",
+                    padding: "8px 10px",
+                    border: "none",
+                    borderRadius: 6,
+                    background: "transparent",
+                    fontSize: 13,
+                    whiteSpace: "nowrap",
+                    color: "#111827",
+                    cursor: "pointer",
+                  }}
+                >
+                  导入 Markdown 文件
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => void handleImportDirectory()}
+                  style={{
+                    width: "100%",
+                    display: "block",
+                    textAlign: "left",
+                    padding: "8px 10px",
+                    border: "none",
+                    borderRadius: 6,
+                    background: "transparent",
+                    fontSize: 13,
+                    whiteSpace: "nowrap",
+                    color: "#111827",
+                    cursor: "pointer",
+                  }}
+                >
+                  导入文件夹
+                </button>
+              </div>
+            )}
+          </div>
           <button
             onClick={handleNewNotebook}
             aria-label="新建笔记本"
@@ -993,6 +1356,7 @@ export function FileTreePanel() {
         onContextMenu={handleBlankAreaContextMenu}
         onPointerUp={handlePointerDragEnd}
         onPointerCancel={handlePointerDragEnd}
+        data-testid="file-tree-blank-area"
         style={{ flex: 1, overflowY: "auto", paddingTop: 4, position: "relative" }}
       >
         {treeView.map((node) => {
@@ -1005,6 +1369,7 @@ export function FileTreePanel() {
               key={node.path}
               node={node}
               depth={0}
+              getDefaultExpanded={getDefaultExpanded}
               isNotebook={isNotebook}
               isRenamingNotebook={renamingNotebookPath === node.path}
               isPickingNotebookColor={colorPickerNotebookPath === node.path}
@@ -1080,9 +1445,16 @@ export function FileTreePanel() {
               )}
               renameValue={renameDrafts[node.path] ?? node.name}
               onBeginNotebookRename={() => beginNotebookRename(node)}
+              renamingNotePath={renamingNotePath}
+              noteRenameDrafts={noteRenameDrafts}
+              noteErrors={noteErrors}
+              onBeginNoteRename={beginNoteRename}
               onNotebookRenameChange={(value) => handleNotebookRenameChange(node.path, value)}
               onNotebookRenameSubmit={() => void handleRenameNotebook(node)}
               onNotebookRenameCancel={() => cancelNotebookRename(node.path)}
+              onNoteRenameChange={handleNoteRenameChange}
+              onNoteRenameSubmit={(targetNode) => void handleRenameNoteSubmit(targetNode)}
+              onNoteRenameCancel={cancelNoteRename}
               onNotebookColorTrigger={() => toggleNotebookColorPicker(node.path)}
               onMoveNotebookUp={() => void handleReorderNotebook(node.path, -1)}
               onMoveNotebookDown={() => void handleReorderNotebook(node.path, 1)}
@@ -1106,13 +1478,12 @@ export function FileTreePanel() {
         })}
       </div>
 
-      {importFiles && (
+      {importSources && (
         <ImportDialog
-          files={importFiles}
+          sources={importSources}
           existingDirs={uniqueDirs}
-          onClose={() => setImportFiles(null)}
+          onClose={() => setImportSources(null)}
           onDone={async (importedNote) => {
-            setImportFiles(null);
             await refreshTree();
             if (importedNote) {
               await openNote(importedNote.path);
