@@ -243,7 +243,8 @@ export function FileTreeNode({
     }
 
     renameInputRef.current.focus();
-    renameInputRef.current.select();
+    const length = renameInputRef.current.value.length;
+    renameInputRef.current.setSelectionRange(length, length);
   }, [isRenamingNotebook]);
 
   useEffect(() => {
@@ -252,7 +253,8 @@ export function FileTreeNode({
     }
 
     noteRenameInputRef.current.focus();
-    noteRenameInputRef.current.select();
+    const length = noteRenameInputRef.current.value.length;
+    noteRenameInputRef.current.setSelectionRange(length, length);
   }, [isRenamingNote]);
 
   if (node.is_dir) {
@@ -776,31 +778,11 @@ export function FileTreeNode({
           gap: 6,
         }}
       >
-        {node.has_summary && (
-          <span
-            data-testid={`summary-badge:${node.path}`}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flex: "0 0 auto",
-              padding: "1px 6px",
-              borderRadius: 999,
-              background: "#fff1f2",
-              color: "#be123c",
-              fontSize: 11,
-              fontWeight: 600,
-              lineHeight: 1.4,
-            }}
-          >
-            摘要
-          </span>
-        )}
         {isRenamingNote ? (
           <form
             onSubmit={(event) => {
               event.preventDefault();
-              onNoteRenameSubmit?.();
+              onNoteRenameSubmit?.(node);
             }}
             onClick={(event) => event.stopPropagation()}
             style={{ flex: 1, minWidth: 0 }}
@@ -837,7 +819,62 @@ export function FileTreeNode({
             />
           </form>
         ) : (
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{node.name}</span>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "minmax(0, 8fr) minmax(0, 2fr)",
+              alignItems: "center",
+              flex: 1,
+              minWidth: 0,
+              columnGap: 6,
+            }}
+          >
+            <span
+              title={node.name}
+              style={{
+                minWidth: 0,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {node.name}
+            </span>
+            <span
+              aria-hidden="true"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "flex-start",
+                minWidth: 0,
+                gap: 4,
+              }}
+            >
+              {node.has_summary ? (
+                <span
+                  data-testid={`summary-badge:${node.path}`}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flex: "0 0 auto",
+                    width: 15,
+                    height: 15,
+                    borderRadius: 999,
+                    background: "#2563eb",
+                    color: "#ffffff",
+                    fontSize: 9,
+                    fontWeight: 700,
+                    lineHeight: 1,
+                    textTransform: "uppercase",
+                    boxShadow: isSelected ? "0 0 0 1px rgba(255,255,255,0.6)" : "none",
+                  }}
+                >
+                  <span style={{ display: "block", lineHeight: 1, transform: "translateY(-0.5px)" }}>S</span>
+                </span>
+              ) : null}
+            </span>
+          </div>
         )}
       </div>
       {noteError ? (

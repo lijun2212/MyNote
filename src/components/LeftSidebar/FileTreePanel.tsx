@@ -1046,7 +1046,9 @@ function getNoteTitleFromPath(notePath: string): string {
           createNote: () => void handleNewNote(),
           createNotebook: handleNewNotebook,
           importNote: handleImport,
-          refreshTree: () => refreshNoteTree(),
+          refreshTree: () => {
+            void refreshNoteTree();
+          },
         },
       },
     });

@@ -686,6 +686,7 @@ function readColumnWidths(cols: HTMLTableColElement[]): number[] {
 
 interface Props {
   content: string;
+  projectionMode?: boolean;
   searchNavigationTarget?: SearchNavigationTarget | null;
   tagNavigationTarget?: TagNavigationTarget | null;
   sourceLineSyncSignal?: SourceLineSyncSignal | null;
@@ -694,6 +695,7 @@ interface Props {
 
 export function MarkdownPreview({
   content,
+  projectionMode = false,
   searchNavigationTarget,
   tagNavigationTarget,
   sourceLineSyncSignal,
@@ -827,8 +829,10 @@ export function MarkdownPreview({
       activePreviewNavigationTarget,
     );
     enhanceSearchNavigationTarget(containerRef.current, activeSearchNavigationTarget);
-    enhanceResizableTables(containerRef.current);
-  }, [content, activePreviewNavigationTarget, activeSearchNavigationTarget, isFrontMatterNavigationActive]);
+    if (!projectionMode) {
+      enhanceResizableTables(containerRef.current);
+    }
+  }, [content, activePreviewNavigationTarget, activeSearchNavigationTarget, isFrontMatterNavigationActive, projectionMode]);
 
   useEffect(() => {
     if (!containerRef.current) {
@@ -979,6 +983,10 @@ export function MarkdownPreview({
     };
 
     const handleTablePointerDown = (e: PointerEvent) => {
+      if (projectionMode) {
+        return;
+      }
+
       const target = e.target as HTMLElement;
       const handle = target.closest(".markdown-table-resize-handle") as HTMLElement | null;
       if (!handle) return;
@@ -1014,13 +1022,19 @@ export function MarkdownPreview({
       }
 
       e.preventDefault();
+      if (projectionMode && linkTarget.linkType !== "external") {
+        return;
+      }
+
       await openPreviewLinkTarget(linkTarget);
     };
 
     container.addEventListener("pointerdown", handleTablePointerDown);
-    window.addEventListener("pointermove", handleTablePointerMove);
-    window.addEventListener("pointerup", stopTableResize);
-    window.addEventListener("pointercancel", stopTableResize);
+    if (!projectionMode) {
+      window.addEventListener("pointermove", handleTablePointerMove);
+      window.addEventListener("pointerup", stopTableResize);
+      window.addEventListener("pointercancel", stopTableResize);
+    }
     container.addEventListener("click", handleClick);
     return () => {
       if (navigationHighlightTimerRef.current !== null) {
@@ -1036,9 +1050,14 @@ export function MarkdownPreview({
       }
       stopTableResize();
     };
-  }, [openNote, beginOpenNote, isOpenNoteRequestCurrent]);
+  }, [openNote, beginOpenNote, isOpenNoteRequestCurrent, projectionMode]);
 
   const handlePreviewContextMenu = async (event: React.MouseEvent<HTMLDivElement>) => {
+    if (projectionMode) {
+      event.preventDefault();
+      return;
+    }
+
     const target = getEventElement(event.target);
     if (!target) {
       return;

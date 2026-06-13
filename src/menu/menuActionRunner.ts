@@ -28,6 +28,9 @@ export interface MenuActionRunnerHandlers {
   openAiSettings?: () => MaybePromise;
   testAiConnection?: () => MaybePromise;
   toggleAutoSummaryAgent?: () => MaybePromise;
+  openProjection?: () => MaybePromise;
+  closeProjection?: () => MaybePromise;
+  toggleProjectionFollowScroll?: () => MaybePromise;
   toggleLeftSidebar?: () => MaybePromise;
   toggleRightSidebar?: () => MaybePromise;
   setEditorMode?: (mode: EditorMode) => MaybePromise;
@@ -227,6 +230,9 @@ export function createMenuActionRunner(handlers: MenuActionRunnerHandlers) {
     "view.toggleRightSidebar": () => requireHandler(handlers, "view.toggleRightSidebar", "toggleRightSidebar")(),
     "view.editorOnly": () => requireHandler(handlers, "view.editorOnly", "setEditorMode")("editor"),
     "view.split": () => requireHandler(handlers, "view.split", "setEditorMode")("split"),
+    "view.openProjection": () => requireHandler(handlers, "view.openProjection", "openProjection")(),
+    "view.closeProjection": () => requireHandler(handlers, "view.closeProjection", "closeProjection")(),
+    "view.projectionFollowScroll": () => requireHandler(handlers, "view.projectionFollowScroll", "toggleProjectionFollowScroll")(),
     "ai.settings": () => requireHandler(handlers, "ai.settings", "openAiSettings")(),
     "ai.testConnection": () => requireHandler(handlers, "ai.testConnection", "testAiConnection")(),
     "ai.toggleAutoSummaryAgent": () => requireHandler(handlers, "ai.toggleAutoSummaryAgent", "toggleAutoSummaryAgent")(),

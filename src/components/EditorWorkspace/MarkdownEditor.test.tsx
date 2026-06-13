@@ -1,4 +1,5 @@
-import { render, fireEvent, waitFor, screen } from "@testing-library/react";
+import { render, fireEvent, waitFor, screen, createEvent } from "@testing-library/react";
+import { act } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { EditorView } from "@codemirror/view";
 import userEvent from "@testing-library/user-event";
@@ -10,13 +11,18 @@ import { useEditorStore } from "../../store/useEditorStore";
 import { ContextMenuHost } from "../ContextMenu/ContextMenuHost";
 import { ContextMenuProvider } from "../ContextMenu/useContextMenu";
 import { useAppStore } from "../../store/useAppStore";
-import { makeKnowledgeBase, makeNote, makeSearchResult } from "../../test/testData";
+import { deferred, makeKnowledgeBase, makeNote, makeSearchResult } from "../../test/testData";
+import { StatusBar } from "../StatusBar";
+
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn().mockResolvedValue(() => {}),
+}));
 
 describe("MarkdownEditor", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     clearActiveDraggedTagName();
-    useEditorStore.setState({ currentNote: null, isComposing: false });
+    useEditorStore.setState({ currentNote: null, isComposing: false, statusNotice: null });
     if (typeof Range !== "undefined") {
       Object.defineProperty(Range.prototype, "getClientRects", {
         configurable: true,
@@ -724,32 +730,25 @@ describe("MarkdownEditor", () => {
     }
   });
 
-  it("pastes clipboard image from the blank editor context menu as markdown image syntax", async () => {
+  it("prefers clipboard text over native image on context-menu paste", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    const insertPastedImageForNote = vi.spyOn(api, "insertPastedImageForNote").mockResolvedValue({
-      markdownPath: "../assets/pasted.png",
+    const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    const nativeClipboardPaste = vi.spyOn(api, "insertPastedImageFromClipboardForNote").mockResolvedValue({
+      markdownPath: "../assets/native-clipboard.png",
     });
     useEditorStore.getState().setCurrentNote(makeNote({ path: "notes/current.md" }));
-    const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
-    const imageBlob = new Blob(["png-binary"], { type: "image/png" });
 
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: {
-        read: vi.fn().mockResolvedValue([
-          {
-            types: ["image/png"],
-            getType: vi.fn().mockResolvedValue(imageBlob),
-          },
-        ]),
-        readText: vi.fn().mockResolvedValue(""),
+        readText: vi.fn().mockResolvedValue("复制出来的文字"),
       },
     });
 
     const { container } = render(
       <ContextMenuProvider>
-        <MarkdownEditor initialContent="" onChange={onChange} />
+        <MarkdownEditor initialContent="原文" onChange={onChange} />
         <ContextMenuHost />
       </ContextMenuProvider>,
     );
@@ -758,9 +757,429 @@ describe("MarkdownEditor", () => {
     fireEvent.contextMenu(editorRoot, { clientX: 24, clientY: 32 });
     await user.click(await screen.findByRole("menuitem", { name: "粘贴" }));
 
-    expect(insertPastedImageForNote).toHaveBeenCalledWith("notes/current.md", "image/png", expect.any(Uint8Array));
+    await waitFor(() => {
+      expect(onChange.mock.lastCall?.[0]).toContain("复制出来的文字");
+    });
+
+    expect(nativeClipboardPaste).not.toHaveBeenCalled();
+
+    if (originalClipboardDescriptor) {
+      Object.defineProperty(navigator, "clipboard", originalClipboardDescriptor);
+    } else {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: undefined,
+      });
+    }
+  });
+
+  it("pastes clipboard image from paste event data as markdown image syntax", async () => {
+    const onChange = vi.fn();
+    const insertPastedImageForNote = vi.spyOn(api, "insertPastedImageForNote").mockResolvedValue({
+      markdownPath: "../assets/pasted.png",
+    });
+    useEditorStore.getState().setCurrentNote(makeNote({ path: "notes/current.md" }));
+    const imageBlob = new Blob(["png-binary"], { type: "image/png" });
+
+    const { container } = render(
+      <ContextMenuProvider>
+        <MarkdownEditor initialContent="" onChange={onChange} />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const editorContent = container.querySelector(".cm-content") as HTMLElement;
+    const pasteEvent = createEvent.paste(editorContent);
+    Object.defineProperty(pasteEvent, "clipboardData", {
+      configurable: true,
+      value: {
+        items: [
+          {
+            kind: "file",
+            type: "image/png",
+            getAsFile: () => imageBlob,
+          },
+        ],
+        getData: () => "",
+      },
+    });
+    fireEvent(editorContent, pasteEvent);
+
+    await waitFor(() => {
+      expect(insertPastedImageForNote).toHaveBeenCalledWith("notes/current.md", "image/png", expect.any(Uint8Array));
+    });
     await waitFor(() => {
       expect(onChange.mock.lastCall?.[0]).toContain("![图片](../assets/pasted.png)");
+    });
+  });
+
+  it("pastes plain text from paste event data explicitly", async () => {
+    const onChange = vi.fn();
+
+    const { container } = render(
+      <ContextMenuProvider>
+        <MarkdownEditor initialContent="正文" onChange={onChange} />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const editorContent = container.querySelector(".cm-content") as HTMLElement;
+    const pasteEvent = createEvent.paste(editorContent);
+    Object.defineProperty(pasteEvent, "clipboardData", {
+      configurable: true,
+      value: {
+        items: [],
+        getData: (type: string) => (type === "text/plain" ? "来自剪贴板的文字" : ""),
+      },
+    });
+    fireEvent(editorContent, pasteEvent);
+
+    expect(pasteEvent.defaultPrevented).toBe(true);
+
+    await waitFor(() => {
+      expect(onChange.mock.lastCall?.[0]).toContain("来自剪贴板的文字");
+    });
+  });
+
+  it("downloads remote images referenced by pasted markdown text and rewrites them to local assets", async () => {
+    const onChange = vi.fn();
+    const rewriteRemoteImages = vi.spyOn(api, "rewritePastedRemoteImages")
+      .mockResolvedValueOnce(["### 业务流程设计", "![图片](../assets/remote-1.png)", "![图片](../assets/remote-2.png)"].join("\n"));
+    useEditorStore.getState().setCurrentNote(makeNote({ path: "notes/current.md" }));
+
+    const { container } = render(
+      <ContextMenuProvider>
+        <MarkdownEditor initialContent="" onChange={onChange} />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const editorContent = container.querySelector(".cm-content") as HTMLElement;
+    const pastedMarkdown = [
+      "### 业务流程设计",
+      "![](https://cdn.example.com/a.png)",
+      '<img src="https://cdn.example.com/b.png" width="640">',
+    ].join("\n");
+    const pasteEvent = createEvent.paste(editorContent);
+    Object.defineProperty(pasteEvent, "clipboardData", {
+      configurable: true,
+      value: {
+        items: [],
+        getData: (type: string) => (type === "text/plain" ? pastedMarkdown : ""),
+      },
+    });
+
+    fireEvent(editorContent, pasteEvent);
+
+    await waitFor(() => {
+      expect(rewriteRemoteImages).toHaveBeenCalledWith("notes/current.md", pastedMarkdown);
+    });
+    await waitFor(() => {
+      const inserted = onChange.mock.lastCall?.[0] ?? "";
+      expect(inserted).toContain("![图片](../assets/remote-1.png)");
+      expect(inserted).toContain("![图片](../assets/remote-2.png)");
+      expect(inserted).not.toContain("https://cdn.example.com/a.png");
+      expect(inserted).not.toContain("https://cdn.example.com/b.png");
+    });
+  });
+
+  it("downloads remote images referenced by multiline markdown image syntax", async () => {
+    const onChange = vi.fn();
+    const rewriteRemoteImages = vi.spyOn(api, "rewritePastedRemoteImages")
+      .mockResolvedValueOnce(["### 业务流程设计", "![图片](../assets/feishu-remote.svg)"].join("\n"));
+    useEditorStore.getState().setCurrentNote(makeNote({ path: "notes/current.md" }));
+
+    const { container } = render(
+      <ContextMenuProvider>
+        <MarkdownEditor initialContent="" onChange={onChange} />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const editorContent = container.querySelector(".cm-content") as HTMLElement;
+    const pastedMarkdown = [
+      "### 业务流程设计",
+      "![](",
+      "https://cdn.example.com/diagram.svg",
+      ")",
+    ].join("\n");
+    const pasteEvent = createEvent.paste(editorContent);
+    Object.defineProperty(pasteEvent, "clipboardData", {
+      configurable: true,
+      value: {
+        items: [],
+        getData: (type: string) => (type === "text/plain" ? pastedMarkdown : ""),
+      },
+    });
+
+    fireEvent(editorContent, pasteEvent);
+
+    await waitFor(() => {
+      expect(rewriteRemoteImages).toHaveBeenCalledWith("notes/current.md", pastedMarkdown);
+    });
+    await waitFor(() => {
+      const inserted = onChange.mock.lastCall?.[0] ?? "";
+      expect(inserted).toContain("![图片](../assets/feishu-remote.svg)");
+      expect(inserted).not.toContain("https://cdn.example.com/diagram.svg");
+    });
+  });
+
+  it("downloads remote images referenced by multiline html image syntax in plain text", async () => {
+    const onChange = vi.fn();
+    const rewriteRemoteImages = vi.spyOn(api, "rewritePastedRemoteImages")
+      .mockResolvedValueOnce("![图片](../assets/feishu-html.png)");
+    useEditorStore.getState().setCurrentNote(makeNote({ path: "notes/current.md" }));
+
+    const { container } = render(
+      <ContextMenuProvider>
+        <MarkdownEditor initialContent="" onChange={onChange} />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const editorContent = container.querySelector(".cm-content") as HTMLElement;
+    const pastedText = [
+      "<img",
+      'src="https://cdn.example.com/feishu.png" width="1251" title=""',
+      'crop="0,0,1,1" id="uff1c0cc2" class="ne-image">',
+    ].join("\n");
+    const pasteEvent = createEvent.paste(editorContent);
+    Object.defineProperty(pasteEvent, "clipboardData", {
+      configurable: true,
+      value: {
+        items: [],
+        getData: (type: string) => (type === "text/plain" ? pastedText : ""),
+      },
+    });
+
+    fireEvent(editorContent, pasteEvent);
+
+    await waitFor(() => {
+      expect(rewriteRemoteImages).toHaveBeenCalledWith("notes/current.md", pastedText);
+    });
+    await waitFor(() => {
+      const inserted = onChange.mock.lastCall?.[0] ?? "";
+      expect(inserted).toContain("![图片](../assets/feishu-html.png)");
+      expect(inserted).not.toContain("https://cdn.example.com/feishu.png");
+      expect(inserted).not.toContain("<img");
+    });
+  });
+
+  it("downloads remote images referenced by pasted html when plain text is unavailable", async () => {
+    const onChange = vi.fn();
+    const rewriteRemoteImages = vi.spyOn(api, "rewritePastedRemoteImages")
+      .mockResolvedValueOnce(["流程图", "![图片](../assets/html-remote.png)"].join("\n"));
+    useEditorStore.getState().setCurrentNote(makeNote({ path: "notes/current.md" }));
+
+    const { container } = render(
+      <ContextMenuProvider>
+        <MarkdownEditor initialContent="" onChange={onChange} />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const editorContent = container.querySelector(".cm-content") as HTMLElement;
+    const pastedHtml = "<section><p>流程图</p><img src=\"https://cdn.example.com/html.png\" width=\"600\"></section>";
+    const pasteEvent = createEvent.paste(editorContent);
+    Object.defineProperty(pasteEvent, "clipboardData", {
+      configurable: true,
+      value: {
+        items: [],
+        getData: (type: string) => {
+          if (type === "text/html") return pastedHtml;
+          return "";
+        },
+      },
+    });
+
+    fireEvent(editorContent, pasteEvent);
+
+    await waitFor(() => {
+      expect(rewriteRemoteImages).toHaveBeenCalledWith(
+        "notes/current.md",
+        ["流程图", "", '<img src="https://cdn.example.com/html.png">'].join("\n"),
+      );
+    });
+    await waitFor(() => {
+      const inserted = onChange.mock.lastCall?.[0] ?? "";
+      expect(inserted).toContain("流程图");
+      expect(inserted).toContain("![图片](../assets/html-remote.png)");
+      expect(inserted).not.toContain("https://cdn.example.com/html.png");
+    });
+  });
+
+  it("closes an open editor context menu when paste starts", async () => {
+    const onChange = vi.fn();
+
+    const { container } = render(
+      <ContextMenuProvider>
+        <MarkdownEditor initialContent="正文" onChange={onChange} />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const editorRoot = container.querySelector(".cm-editor") as HTMLElement;
+    const editorContent = container.querySelector(".cm-content") as HTMLElement;
+    fireEvent.contextMenu(editorRoot, { clientX: 24, clientY: 32 });
+
+    expect(await screen.findByRole("menuitem", { name: "粘贴" })).toBeInTheDocument();
+
+    fireEvent.paste(editorContent);
+
+    await waitFor(() => {
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    });
+  });
+
+  it("suppresses the editor context menu during a keyboard paste shortcut", async () => {
+    const onChange = vi.fn();
+
+    const { container } = render(
+      <ContextMenuProvider>
+        <MarkdownEditor initialContent="正文" onChange={onChange} />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const editorRoot = container.querySelector(".cm-editor") as HTMLElement;
+    const editorContent = container.querySelector(".cm-content") as HTMLElement;
+    fireEvent.contextMenu(editorRoot, { clientX: 24, clientY: 32 });
+
+    expect(await screen.findByRole("menuitem", { name: "粘贴" })).toBeInTheDocument();
+
+    fireEvent.keyDown(editorContent, { key: "v", metaKey: true });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    });
+
+    fireEvent.contextMenu(editorRoot, { clientX: 24, clientY: 32 });
+
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("falls back to the native clipboard image command when the paste event exposes no text or file items", async () => {
+    const onChange = vi.fn();
+    const nativeClipboardPaste = vi.spyOn(api, "insertPastedImageFromClipboardForNote").mockResolvedValue({
+      markdownPath: "../assets/native-clipboard.png",
+    });
+    useEditorStore.getState().setCurrentNote(makeNote({ path: "notes/current.md" }));
+
+    const { container } = render(
+      <ContextMenuProvider>
+        <MarkdownEditor initialContent="正文" onChange={onChange} />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const editorContent = container.querySelector(".cm-content") as HTMLElement;
+    const pasteEvent = createEvent.paste(editorContent);
+    Object.defineProperty(pasteEvent, "clipboardData", {
+      configurable: true,
+      value: {
+        items: [],
+        getData: () => "",
+      },
+    });
+    fireEvent(editorContent, pasteEvent);
+
+    await waitFor(() => {
+      expect(nativeClipboardPaste).toHaveBeenCalledWith("notes/current.md");
+    });
+
+    await waitFor(() => {
+      expect(onChange.mock.lastCall?.[0]).toContain("![图片](../assets/native-clipboard.png)");
+    });
+  });
+
+  it("does not trigger a keyboard fallback read before the native paste event", async () => {
+    const onChange = vi.fn();
+    const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    const nativeClipboardPaste = vi.spyOn(api, "insertPastedImageFromClipboardForNote");
+    useEditorStore.getState().setCurrentNote(makeNote({ path: "notes/current.md" }));
+
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        readText: vi.fn().mockResolvedValue("键盘粘贴的文字"),
+      },
+    });
+
+    const { container } = render(
+      <ContextMenuProvider>
+        <MarkdownEditor initialContent="正文" onChange={onChange} />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const editorContent = container.querySelector(".cm-content") as HTMLElement;
+    const keydownEvent = createEvent.keyDown(editorContent, { key: "v", metaKey: true });
+    fireEvent(editorContent, keydownEvent);
+
+    expect(keydownEvent.defaultPrevented).toBe(false);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(nativeClipboardPaste).not.toHaveBeenCalled();
+    expect(screen.getByRole("status")).toHaveTextContent("正在处理粘贴...");
+
+    if (originalClipboardDescriptor) {
+      Object.defineProperty(navigator, "clipboard", originalClipboardDescriptor);
+    } else {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: undefined,
+      });
+    }
+  });
+
+  it("does not run keyboard fallback before a delayed paste event arrives", async () => {
+    vi.useFakeTimers();
+    const onChange = vi.fn();
+    const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    const rewriteRemoteImages = vi.spyOn(api, "rewritePastedRemoteImages").mockResolvedValue("![图片](../assets/delayed.png)");
+
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        readText: vi.fn().mockResolvedValue("键盘兜底原始文本"),
+      },
+    });
+
+    useEditorStore.getState().setCurrentNote(makeNote({ path: "notes/current.md" }));
+
+    const { container } = render(
+      <ContextMenuProvider>
+        <MarkdownEditor initialContent="正文" onChange={onChange} />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const editorContent = container.querySelector(".cm-content") as HTMLElement;
+    fireEvent.keyDown(editorContent, { key: "v", metaKey: true });
+
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+    });
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(rewriteRemoteImages).not.toHaveBeenCalled();
+
+    vi.useRealTimers();
+
+    const pasteEvent = createEvent.paste(editorContent);
+    Object.defineProperty(pasteEvent, "clipboardData", {
+      configurable: true,
+      value: {
+        items: [],
+        getData: (type: string) => (type === "text/plain" ? "![](https://cdn.example.com/delayed.png)" : ""),
+      },
+    });
+    fireEvent(editorContent, pasteEvent);
+
+    await waitFor(() => {
+      expect(rewriteRemoteImages).toHaveBeenCalledWith("notes/current.md", "![](https://cdn.example.com/delayed.png)");
+    });
+    await waitFor(() => {
+      expect(onChange.mock.lastCall?.[0]).toContain("![图片](../assets/delayed.png)");
     });
 
     if (originalClipboardDescriptor) {
@@ -771,6 +1190,177 @@ describe("MarkdownEditor", () => {
         value: undefined,
       });
     }
+  });
+
+  it("shows immediate feedback as soon as keyboard paste starts", async () => {
+    const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    useEditorStore.getState().setCurrentNote(makeNote({ path: "notes/current.md" }));
+
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        readText: vi.fn().mockResolvedValue(""),
+      },
+    });
+
+    const { container } = render(
+      <ContextMenuProvider>
+        <MarkdownEditor initialContent="正文" onChange={vi.fn()} />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const editorContent = container.querySelector(".cm-content") as HTMLElement;
+    fireEvent.keyDown(editorContent, { key: "v", metaKey: true });
+
+    expect(screen.getByRole("status")).toHaveTextContent("正在处理粘贴...");
+
+    if (originalClipboardDescriptor) {
+      Object.defineProperty(navigator, "clipboard", originalClipboardDescriptor);
+    } else {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: undefined,
+      });
+    }
+  });
+
+  it("falls back to keyboard clipboard text when no paste event arrives after the safety delay", async () => {
+    vi.useFakeTimers();
+    const onChange = vi.fn();
+    const readClipboardTextForPaste = vi.spyOn(api, "readClipboardTextForPaste").mockResolvedValue("键盘粘贴的文字");
+    const nativeClipboardPaste = vi.spyOn(api, "insertPastedImageFromClipboardForNote").mockResolvedValue(null);
+    useEditorStore.getState().setCurrentNote(makeNote({ path: "notes/current.md" }));
+
+    const { container } = render(
+      <ContextMenuProvider>
+        <MarkdownEditor initialContent="正文" onChange={onChange} />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const editorContent = container.querySelector(".cm-content") as HTMLElement;
+    fireEvent.keyDown(editorContent, { key: "v", metaKey: true });
+
+    expect(screen.getByRole("status")).toHaveTextContent("正在处理粘贴...");
+
+    await act(async () => {
+      vi.advanceTimersByTime(1300);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(readClipboardTextForPaste).toHaveBeenCalledWith("notes/current.md");
+    expect(onChange.mock.lastCall?.[0]).toContain("键盘粘贴的文字");
+    expect(nativeClipboardPaste).not.toHaveBeenCalled();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it("does not prevent the native copy shortcut when text is selected", () => {
+    const { container } = render(
+      <ContextMenuProvider>
+        <MarkdownEditor initialContent="项目周报 第二段" onChange={vi.fn()} />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const editorRoot = container.querySelector(".cm-editor") as HTMLElement;
+    const view = EditorView.findFromDOM(editorRoot);
+    view?.dispatch({ selection: { anchor: 0, head: 4 } });
+
+    const editorContent = container.querySelector(".cm-content") as HTMLElement;
+    const keydownEvent = createEvent.keyDown(editorContent, { key: "c", metaKey: true });
+
+    fireEvent(editorContent, keydownEvent);
+
+    expect(keydownEvent.defaultPrevented).toBe(false);
+  });
+
+  it("mirrors the selected text into navigator.clipboard on keyboard copy", async () => {
+    vi.useFakeTimers();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    useEditorStore.getState().setCurrentNote(makeNote({ path: "notes/current.md" }));
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText,
+      },
+    });
+
+    const { container } = render(
+      <ContextMenuProvider>
+        <MarkdownEditor initialContent="项目周报 第二段" onChange={vi.fn()} />
+        <StatusBar />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const editorRoot = container.querySelector(".cm-editor") as HTMLElement;
+    const view = EditorView.findFromDOM(editorRoot);
+    view?.dispatch({ selection: { anchor: 0, head: 4 } });
+
+    const editorContent = container.querySelector(".cm-content") as HTMLElement;
+    const keydownEvent = createEvent.keyDown(editorContent, { key: "c", metaKey: true });
+
+    fireEvent(editorContent, keydownEvent);
+
+    expect(keydownEvent.defaultPrevented).toBe(false);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(writeText).toHaveBeenCalledWith("项目周报");
+
+    expect(screen.getByText("● 已拷贝")).toBeInTheDocument();
+    expect(screen.getByText("● 已拷贝")).toHaveStyle({ color: "#0969da" });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1600);
+    });
+
+    expect(screen.queryByText("● 已拷贝")).not.toBeInTheDocument();
+
+    if (originalClipboardDescriptor) {
+      Object.defineProperty(navigator, "clipboard", originalClipboardDescriptor);
+    } else {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: undefined,
+      });
+    }
+
+    vi.useRealTimers();
+  });
+
+  it("writes selected text into clipboardData on copy events", () => {
+    const { container } = render(
+      <ContextMenuProvider>
+        <MarkdownEditor initialContent="项目周报 第二段" onChange={vi.fn()} />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const editorRoot = container.querySelector(".cm-editor") as HTMLElement;
+    const view = EditorView.findFromDOM(editorRoot);
+    view?.dispatch({ selection: { anchor: 0, head: 4 } });
+
+    const editorContent = container.querySelector(".cm-content") as HTMLElement;
+    const copyEvent = createEvent.copy(editorContent);
+    const setData = vi.fn();
+    Object.defineProperty(copyEvent, "clipboardData", {
+      configurable: true,
+      value: {
+        setData,
+      },
+    });
+
+    fireEvent(editorContent, copyEvent);
+
+    expect(setData).toHaveBeenCalledWith("text/plain", "项目周报");
+    expect(copyEvent.defaultPrevented).toBe(true);
   });
 
   it("inserts a wiki link from the blank editor context menu using the note picker", async () => {

@@ -71,5 +71,5 @@ export function useAutoSave() {
     if (currentNote) {
       lastSavedHashRef.current = currentNote.content_hash;
     }
-  }, [currentNote?.id]);
+  }, [currentNote?.id, currentNote?.content_hash]);
 }

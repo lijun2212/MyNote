@@ -12,10 +12,13 @@ import { useSidebarResize } from "../hooks/useSidebarResize";
 import { useAppStore } from "../store/useAppStore";
 import { useAiSettingsStore } from "../store/useAiSettingsStore";
 import { useEditorStore } from "../store/useEditorStore";
+import { useProjectionStore } from "../store/useProjectionStore";
 import { ContextMenuHost } from "./ContextMenu/ContextMenuHost";
 import { ContextMenuProvider } from "./ContextMenu/useContextMenu";
 import { AiSettingsDialog } from "./Settings/AiSettingsDialog";
 import { useRefreshNoteTree } from "../hooks/useRefreshNoteTree";
+import { useProjectionLifecycle } from "../hooks/useProjectionLifecycle";
+import { closeProjectionWindow, openProjectionWindow } from "../projection/windowApi";
 import { api } from "../api/commands";
 import "../styles/layout.css";
 
@@ -44,7 +47,13 @@ function ignoreAsyncError() {
   return undefined;
 }
 
+function toProjectionErrorMessage(error: unknown) {
+  return error instanceof Error && error.message ? error.message : "投影窗口启动失败";
+}
+
 export function AppShell() {
+  useProjectionLifecycle();
+
   const kb = useAppStore((s) => s.kb);
   const leftSidebarVisible = useAppStore((s) => s.leftSidebarVisible);
   const rightSidebarVisible = useAppStore((s) => s.rightSidebarVisible);
@@ -62,6 +71,8 @@ export function AppShell() {
   const openAiSettings = useAiSettingsStore((s) => s.openDialog);
   const testAiConnection = useAiSettingsStore((s) => s.testDefaultProfile);
   const toggleAutoSummaryAgent = useAiSettingsStore((s) => s.toggleAutoSummaryAgent);
+  const projectionEnabled = useProjectionStore((s) => s.projectionEnabled);
+  const projectionFollowScroll = useProjectionStore((s) => s.projectionFollowScroll);
 
   useEffect(() => {
     void loadAiSettings().catch(() => undefined);
@@ -94,19 +105,52 @@ export function AppShell() {
     editorMode,
     hasDefaultAiProfile: Boolean(defaultAiProfile),
     autoSummaryAgentEnabled: Boolean(aiSettings?.enabled && defaultAiProfile?.enabled),
-  }), [aiSettings?.enabled, currentNote, defaultAiProfile, editorMode, kb, leftSidebarVisible, rightSidebarVisible]);
+    projectionEnabled,
+    projectionFollowScroll,
+  }), [
+    aiSettings?.enabled,
+    currentNote,
+    defaultAiProfile,
+    editorMode,
+    kb,
+    leftSidebarVisible,
+    projectionEnabled,
+    projectionFollowScroll,
+    rightSidebarVisible,
+  ]);
 
   const menuRunner = useMemo(() => createMenuActionRunner({
     createNote: () => dispatchWindowEvent(new Event(REQUEST_CREATE_NOTE_EVENT)),
     createNotebook: () => dispatchWindowEvent(new Event(REQUEST_CREATE_NOTEBOOK_EVENT)),
     importNote: () => dispatchWindowEvent(new Event(REQUEST_IMPORT_NOTE_EVENT)),
-    refreshFileTree: () => refreshNoteTree(),
+    refreshFileTree: async () => {
+      await refreshNoteTree();
+    },
     openSearch: () => dispatchWindowEvent(new Event(OPEN_SEARCH_EVENT)),
     openAiSettings: () => openAiSettings(),
     testAiConnection: () => {
       void testAiConnection().catch(ignoreAsyncError);
     },
     toggleAutoSummaryAgent: () => toggleAutoSummaryAgent().catch(ignoreAsyncError),
+    openProjection: async () => {
+      const store = useProjectionStore.getState();
+      store.beginSession();
+
+      try {
+        await openProjectionWindow();
+      } catch (error) {
+        store.markClosed();
+        store.setError(toProjectionErrorMessage(error));
+      }
+    },
+    closeProjection: async () => {
+      await closeProjectionWindow();
+      useProjectionStore.getState().markClosed();
+    },
+    toggleProjectionFollowScroll: () => {
+      const store = useProjectionStore.getState();
+      store.setFollowScroll(!store.projectionFollowScroll);
+    },
     toggleLeftSidebar: () => toggleLeftSidebar(),
     toggleRightSidebar: () => toggleRightSidebar(),
     setEditorMode: (mode) => setEditorMode(mode),
@@ -144,7 +188,9 @@ export function AppShell() {
     insertLinkFromSelection: () => undefined,
     insertTagFromSelection: () => undefined,
     createWikiLinkFromSelection: () => undefined,
-    refreshIndex: () => refreshNoteTree(),
+    refreshIndex: async () => {
+      await refreshNoteTree();
+    },
     showLeftSidebar: () => setLeftSidebarVisible(true),
     openShortcuts: () => dispatchWindowEvent(new Event(REQUEST_SHORTCUTS_EVENT)),
     openAbout: () => dispatchWindowEvent(new Event(REQUEST_ABOUT_EVENT)),

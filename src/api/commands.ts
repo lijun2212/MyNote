@@ -164,6 +164,10 @@ interface RawInsertImageResult {
   markdown_path: string;
 }
 
+interface RawRewritePastedRemoteImagesResult {
+  text: string;
+}
+
 function assertAllowedValue<T extends string>(value: string, allowed: readonly T[], fieldName: string): T {
   if ((allowed as readonly string[]).includes(value)) {
     return value as T;
@@ -391,6 +395,15 @@ export const api = {
     invoke<RawInsertImageResult>("insert_pasted_image_for_note", { notePath, mimeType, imageBytes }).then((result) => ({
       markdownPath: result.markdown_path,
     })),
+
+  insertPastedImageFromClipboardForNote: (notePath: string): Promise<InsertImageResult | null> =>
+    invoke<RawInsertImageResult | null>("insert_pasted_image_from_clipboard_for_note", { notePath }).then(mapInsertImageResult),
+
+  rewritePastedRemoteImages: (notePath: string, text: string): Promise<string> =>
+    invoke<RawRewritePastedRemoteImagesResult>("rewrite_pasted_remote_images", { notePath, text }).then((result) => result.text),
+
+  readClipboardTextForPaste: (notePath: string): Promise<string | null> =>
+    invoke<RawRewritePastedRemoteImagesResult | null>("read_clipboard_text_for_paste", { notePath }).then((result) => result?.text ?? null),
 
   moveNote: (sourcePath: string, targetDirectory: string) =>
     invoke<Note>("move_note", { sourcePath, targetDirectory }),

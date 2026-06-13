@@ -252,32 +252,47 @@ function canReadClipboard() {
     && (typeof navigator.clipboard.read === "function" || typeof navigator.clipboard.readText === "function");
 }
 
+function canWriteClipboard() {
+  return typeof navigator !== "undefined"
+    && !!navigator.clipboard
+    && typeof navigator.clipboard.writeText === "function";
+}
 
-async function readPasteInsertText(notePath?: string): Promise<string | null> {
+function getSelectedEditorText(view: EditorView) {
+  const selection = view.state.selection.main;
+  if (selection.empty) {
+    return "";
+  }
+  return view.state.sliceDoc(selection.from, selection.to);
+}
+
+function writeSelectionToClipboardData(view: EditorView, clipboardData: DataTransfer | null) {
+  const selectedText = getSelectedEditorText(view);
+  if (!selectedText || typeof clipboardData?.setData !== "function") {
+    return false;
+  }
+
+  clipboardData.setData("text/plain", selectedText);
+  return true;
+}
+
+async function mirrorSelectionToClipboard(view: EditorView) {
+  const selectedText = getSelectedEditorText(view);
+  if (!selectedText || !canWriteClipboard()) {
+    return false;
+  }
+
+  await navigator.clipboard.writeText(selectedText);
+  return true;
+}
+
+
+async function readClipboardText(): Promise<string | null> {
   if (!canReadClipboard()) {
     return null;
   }
 
   try {
-    if (typeof navigator.clipboard.read === "function") {
-      const items = await navigator.clipboard.read();
-      for (const item of items) {
-        const imageType = item.types.find((type) => /^image\/(png|jpe?g|gif|webp)$/i.test(type));
-        if (imageType) {
-          if (!notePath) {
-            return null;
-          }
-          const imageBlob = await item.getType(imageType);
-          const imageBytes = new Uint8Array(await imageBlob.arrayBuffer());
-          if (imageBytes.byteLength === 0) {
-            return null;
-          }
-          const result = await api.insertPastedImageForNote(notePath, imageType, imageBytes);
-          return buildImageInsertText(result.markdownPath);
-        }
-      }
-    }
-
     if (typeof navigator.clipboard.readText === "function") {
       const text = await navigator.clipboard.readText();
       return text || null;
@@ -289,23 +304,66 @@ async function readPasteInsertText(notePath?: string): Promise<string | null> {
   return null;
 }
 
-async function pasteIntoSelectionSnapshot(view: EditorView, snapshot: SelectionSnapshot, notePath?: string) {
-  const insert = await readPasteInsertText(notePath);
+
+async function readClipboardTextForPaste(notePath?: string): Promise<string | null> {
+  if (notePath) {
+    try {
+      const text = await api.readClipboardTextForPaste(notePath);
+      if (text) {
+        return text;
+      }
+    } catch {
+      // Fall back to the browser clipboard APIs below.
+    }
+  }
+
+  return await readClipboardText();
+}
+
+
+async function readPasteInsertText(notePath?: string): Promise<string | null> {
+  const text = await readClipboardTextForPaste(notePath);
+  if (text) {
+    return text;
+  }
+
+  if (notePath) {
+    try {
+      const nativeImageResult = await api.insertPastedImageFromClipboardForNote(notePath);
+      if (nativeImageResult) {
+        return buildImageInsertText(nativeImageResult.markdownPath);
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+async function pasteIntoSelectionSnapshot(
+  view: EditorView,
+  snapshot: SelectionSnapshot,
+  notePath?: string,
+  onBeforeNativeImageRead?: () => void,
+) {
+  let insert = await readClipboardTextForPaste(notePath);
+  if (!insert && notePath) {
+    onBeforeNativeImageRead?.();
+    try {
+      const nativeImageResult = await api.insertPastedImageFromClipboardForNote(notePath);
+      if (nativeImageResult) {
+        insert = buildImageInsertText(nativeImageResult.markdownPath);
+      }
+    } catch {
+      insert = null;
+    }
+  }
   if (!insert) {
     return;
   }
 
   replaceSelectionSnapshot(view, snapshot, () => ({ insert, anchor: insert.length }));
-}
-
-async function pasteIntoCurrentSelection(view: EditorView, notePath?: string) {
-  const selection = view.state.selection.main;
-  const snapshot: SelectionSnapshot = {
-    from: selection.from,
-    to: selection.to,
-    text: view.state.sliceDoc(selection.from, selection.to),
-  };
-  await pasteIntoSelectionSnapshot(view, snapshot, notePath);
 }
 
 async function pasteIntoCursor(view: EditorView, notePath?: string, at?: number | null) {
@@ -314,6 +372,133 @@ async function pasteIntoCursor(view: EditorView, notePath?: string, at?: number 
     return;
   }
   insertTextIntoView(view, insert, at);
+}
+
+function readClipboardImageItem(dataTransfer: DataTransfer | null) {
+  const items = Array.from(dataTransfer?.items ?? []);
+  return items.find((item) => item.kind === "file" && /^image\/(png|jpe?g|gif|webp)$/i.test(item.type)) ?? null;
+}
+
+function convertPastedHtmlToText(html: string) {
+  if (!html || typeof DOMParser === "undefined") {
+    return null;
+  }
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, "text/html");
+  const blockTags = new Set(["P", "DIV", "SECTION", "ARTICLE", "LI", "UL", "OL", "TABLE", "TR", "TD", "TH", "H1", "H2", "H3", "H4", "H5", "H6"]);
+
+  function serializeNode(node: Node): string {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return node.textContent ?? "";
+    }
+
+    if (!(node instanceof HTMLElement)) {
+      return "";
+    }
+
+    if (node.tagName === "BR") {
+      return "\n";
+    }
+
+    if (node.tagName === "IMG") {
+      const src = node.getAttribute("src")?.trim();
+      return src ? `\n<img src="${src}">\n` : "";
+    }
+
+    const content = Array.from(node.childNodes).map(serializeNode).join("");
+    if (blockTags.has(node.tagName)) {
+      return `${content}\n`;
+    }
+
+    return content;
+  }
+
+  const serialized = Array.from(doc.body.childNodes).map(serializeNode).join("");
+  const normalized = serialized
+    .replace(/\n{3,}/g, "\n\n")
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .join("\n")
+    .trim();
+
+  return normalized || null;
+}
+
+async function readPasteInsertTextFromClipboardData(dataTransfer: DataTransfer | null, notePath?: string): Promise<string | null> {
+  const imageItem = readClipboardImageItem(dataTransfer);
+  if (imageItem) {
+    if (!notePath) {
+      return null;
+    }
+    const imageFile = imageItem.getAsFile();
+    if (!imageFile) {
+      return null;
+    }
+    const imageBytes = new Uint8Array(await imageFile.arrayBuffer());
+    if (imageBytes.byteLength === 0) {
+      return null;
+    }
+    const result = await api.insertPastedImageForNote(notePath, imageItem.type, imageBytes);
+    return buildImageInsertText(result.markdownPath);
+  }
+
+  const text = dataTransfer?.getData("text/plain") ?? "";
+  if (text) {
+    return notePath ? await api.rewritePastedRemoteImages(notePath, text) : text;
+  }
+
+  const html = dataTransfer?.getData("text/html") ?? "";
+  const htmlText = convertPastedHtmlToText(html);
+  if (!htmlText) {
+    return null;
+  }
+
+  return notePath ? await api.rewritePastedRemoteImages(notePath, htmlText) : htmlText;
+}
+
+async function pasteClipboardDataIntoCurrentSelection(
+  view: EditorView,
+  dataTransfer: DataTransfer | null,
+  notePath?: string,
+  onPendingChange?: (pending: boolean) => void,
+) {
+  const selection = view.state.selection.main;
+  const snapshot: SelectionSnapshot = {
+    from: selection.from,
+    to: selection.to,
+    text: view.state.sliceDoc(selection.from, selection.to),
+  };
+  onPendingChange?.(true);
+  let insert: string | null = null;
+  try {
+    insert = await readPasteInsertTextFromClipboardData(dataTransfer, notePath);
+  } finally {
+    onPendingChange?.(false);
+  }
+  if (!insert) {
+    return;
+  }
+  replaceSelectionSnapshot(view, snapshot, () => ({ insert, anchor: insert.length }));
+}
+
+async function pasteNativeClipboardImageIntoCurrentSelection(view: EditorView, notePath?: string) {
+  if (!notePath) {
+    return;
+  }
+
+  const selection = view.state.selection.main;
+  const snapshot: SelectionSnapshot = {
+    from: selection.from,
+    to: selection.to,
+    text: view.state.sliceDoc(selection.from, selection.to),
+  };
+  const result = await api.insertPastedImageFromClipboardForNote(notePath);
+  if (!result) {
+    return;
+  }
+  const insert = buildImageInsertText(result.markdownPath);
+  replaceSelectionSnapshot(view, snapshot, () => ({ insert, anchor: insert.length }));
 }
 
 async function requestImageInsert(notePath: string) {
@@ -397,6 +582,8 @@ function getDropPosition(view: EditorView, x: number, y: number): number | null 
   }
 }
 
+const KEYBOARD_PASTE_FALLBACK_DELAY_MS = 1200;
+
 export function MarkdownEditor({
   initialContent,
   onChange,
@@ -407,7 +594,27 @@ export function MarkdownEditor({
 }: Props) {
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
-  const { openContextMenu } = useContextMenu();
+  const { openContextMenu, closeContextMenu } = useContextMenu();
+  const suppressContextMenuRef = useRef(false);
+  const suppressContextMenuTimerRef = useRef<number | null>(null);
+  const keyboardPasteFallbackTimerRef = useRef<number | null>(null);
+  const suppressEditorContextMenu = () => {
+    suppressContextMenuRef.current = true;
+    if (suppressContextMenuTimerRef.current !== null) {
+      window.clearTimeout(suppressContextMenuTimerRef.current);
+    }
+    suppressContextMenuTimerRef.current = window.setTimeout(() => {
+      suppressContextMenuRef.current = false;
+      suppressContextMenuTimerRef.current = null;
+    }, 800);
+    closeContextMenu();
+  };
+  const cancelKeyboardPasteFallback = () => {
+    if (keyboardPasteFallbackTimerRef.current !== null) {
+      window.clearTimeout(keyboardPasteFallbackTimerRef.current);
+      keyboardPasteFallbackTimerRef.current = null;
+    }
+  };
   const kb = useAppStore((state) => state.kb);
   const refreshTree = useAppStore((state) => state.refreshTree);
   const setLeftSidebarVisible = useAppStore((state) => state.setLeftSidebarVisible);
@@ -419,11 +626,45 @@ export function MarkdownEditor({
   const currentNotePathRef = useRef<string | undefined>(currentNote?.path);
   const programmaticScrollTimerRef = useRef<number | null>(null);
   const navigationHighlightTimerRef = useRef<number | null>(null);
+  const copyNoticeTimerRef = useRef<number | null>(null);
   const [linkPickerMode, setLinkPickerMode] = useState<LinkInsertMode | null>(null);
   const [linkPickerQuery, setLinkPickerQuery] = useState("");
   const [linkPickerResults, setLinkPickerResults] = useState<SearchResult[]>([]);
   const [linkPickerLoading, setLinkPickerLoading] = useState(false);
   const [linkPickerError, setLinkPickerError] = useState<string | null>(null);
+  const [pasteFeedbackState, setPasteFeedbackState] = useState<"shortcut" | "image" | null>(null);
+  const setStatusNotice = useEditorStore((state) => state.setStatusNotice);
+
+  const scheduleKeyboardPasteFallback = (view: EditorView) => {
+    cancelKeyboardPasteFallback();
+    const selection = view.state.selection.main;
+    const snapshot: SelectionSnapshot = {
+      from: selection.from,
+      to: selection.to,
+      text: view.state.sliceDoc(selection.from, selection.to),
+    };
+
+    keyboardPasteFallbackTimerRef.current = window.setTimeout(() => {
+      keyboardPasteFallbackTimerRef.current = null;
+      void pasteIntoSelectionSnapshot(
+        view,
+        snapshot,
+        currentNotePathRef.current,
+        () => setPasteFeedbackState("image"),
+      ).finally(() => setPasteFeedbackState(null));
+    }, KEYBOARD_PASTE_FALLBACK_DELAY_MS);
+  };
+
+  const showCopiedNotice = () => {
+    setStatusNotice("已拷贝");
+    if (copyNoticeTimerRef.current !== null) {
+      window.clearTimeout(copyNoticeTimerRef.current);
+    }
+    copyNoticeTimerRef.current = window.setTimeout(() => {
+      setStatusNotice(null);
+      copyNoticeTimerRef.current = null;
+    }, 1600);
+  };
 
   const closeLinkPicker = () => {
     setLinkPickerMode(null);
@@ -509,6 +750,12 @@ export function MarkdownEditor({
   const handleEditorContextMenu = (event: React.MouseEvent<HTMLDivElement>) => {
     const view = viewRef.current;
     if (!view) {
+      return;
+    }
+
+    if (suppressContextMenuRef.current) {
+      event.preventDefault();
+      event.stopPropagation();
       return;
     }
 
@@ -667,6 +914,13 @@ export function MarkdownEditor({
     currentNotePathRef.current = currentNote?.path;
   }, [currentNote?.path]);
 
+  useEffect(() => () => {
+    if (copyNoticeTimerRef.current !== null) {
+      window.clearTimeout(copyNoticeTimerRef.current);
+    }
+    cancelKeyboardPasteFallback();
+  }, []);
+
   useEffect(() => {
     if (!editorRef.current) return;
 
@@ -680,22 +934,71 @@ export function MarkdownEditor({
         markdown({ base: markdownLanguage }),
         EditorView.lineWrapping,
         keymap.of([
-          {
-            key: "Mod-v",
-            run: (view) => {
-              if (!canReadClipboard()) {
-                return false;
-              }
-              void pasteIntoCurrentSelection(view, currentNotePathRef.current);
-              return true;
-            },
-          },
           ...defaultKeymap,
           ...historyKeymap,
         ]),
         inlineTagPlugin,
         searchNavigationPlugin,
         EditorView.domEventHandlers({
+          keydown: (event, view) => {
+            if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "v") {
+              suppressEditorContextMenu();
+              setPasteFeedbackState("shortcut");
+              scheduleKeyboardPasteFallback(view);
+              return false;
+            }
+
+            if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "c") {
+              void mirrorSelectionToClipboard(view)
+                .then((copied) => {
+                  if (copied) {
+                    showCopiedNotice();
+                  }
+                })
+                .catch(() => undefined);
+            }
+            return false;
+          },
+          copy: (event, view) => {
+            if (!writeSelectionToClipboardData(view, event.clipboardData)) {
+              return false;
+            }
+
+            event.preventDefault();
+            showCopiedNotice();
+            return true;
+          },
+          paste: (event, view) => {
+            suppressEditorContextMenu();
+            cancelKeyboardPasteFallback();
+            const imageItem = readClipboardImageItem(event.clipboardData);
+            const plainText = event.clipboardData?.getData("text/plain") ?? "";
+            const htmlText = event.clipboardData?.getData("text/html") ?? "";
+            if (imageItem) {
+              event.preventDefault();
+              setPasteFeedbackState("image");
+              void pasteClipboardDataIntoCurrentSelection(
+                view,
+                event.clipboardData,
+                currentNotePathRef.current,
+                (pending) => setPasteFeedbackState(pending ? "image" : null),
+              );
+              return true;
+            }
+
+            if (plainText || htmlText) {
+              setPasteFeedbackState(null);
+              event.preventDefault();
+              void pasteClipboardDataIntoCurrentSelection(view, event.clipboardData, currentNotePathRef.current);
+              return true;
+            }
+
+            event.preventDefault();
+            setPasteFeedbackState("image");
+            void pasteNativeClipboardImageIntoCurrentSelection(view, currentNotePathRef.current)
+              .finally(() => setPasteFeedbackState(null));
+            return true;
+          },
           compositionstart: () => {
             setIsComposing(true);
             return false;
@@ -775,6 +1078,9 @@ export function MarkdownEditor({
       }
       if (programmaticScrollTimerRef.current !== null) {
         window.clearTimeout(programmaticScrollTimerRef.current);
+      }
+      if (suppressContextMenuTimerRef.current !== null) {
+        window.clearTimeout(suppressContextMenuTimerRef.current);
       }
       view.destroy();
       viewRef.current = null;
@@ -956,9 +1262,30 @@ export function MarkdownEditor({
         onDrop={handleExternalTagDrop}
         onPointerUp={handlePointerTagDrop}
         data-mynote-editor-drop-target="true"
-        style={{ width: "100%", height: "100%", minWidth: 0, overflow: "hidden" }}
+        style={{ width: "100%", height: "100%", minWidth: 0, overflow: "hidden", position: "relative" }}
       >
         <div ref={editorRef} style={{ width: "100%", height: "100%", minWidth: 0, overflow: "hidden" }} />
+        {pasteFeedbackState ? (
+          <div
+            role="status"
+            aria-live="polite"
+            style={{
+              position: "absolute",
+              right: 12,
+              bottom: 12,
+              padding: "6px 10px",
+              borderRadius: 999,
+              background: "rgba(15, 23, 42, 0.86)",
+              color: "#fff",
+              fontSize: 12,
+              lineHeight: 1.2,
+              boxShadow: "0 8px 24px rgba(15, 23, 42, 0.18)",
+              pointerEvents: "none",
+            }}
+          >
+            {pasteFeedbackState === "shortcut" ? "正在处理粘贴..." : "正在粘贴图片..."}
+          </div>
+        ) : null}
       </div>
       {linkPickerMode ? (
         <div

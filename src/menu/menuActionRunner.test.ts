@@ -12,6 +12,9 @@ function createHandlers() {
     openAiSettings: vi.fn().mockResolvedValue(undefined),
     testAiConnection: vi.fn().mockResolvedValue(undefined),
     toggleAutoSummaryAgent: vi.fn().mockResolvedValue(undefined),
+    openProjection: vi.fn().mockResolvedValue(undefined),
+    closeProjection: vi.fn().mockResolvedValue(undefined),
+    toggleProjectionFollowScroll: vi.fn().mockResolvedValue(undefined),
     toggleLeftSidebar: vi.fn().mockResolvedValue(undefined),
     toggleRightSidebar: vi.fn().mockResolvedValue(undefined),
     setEditorMode: vi.fn().mockResolvedValue(undefined),
@@ -200,6 +203,19 @@ describe("menuActionRunner", () => {
 
     await expect(runner.run("view.split")).resolves.toBe(true);
     expect(handlers.setEditorMode).toHaveBeenCalledWith("split");
+  });
+
+  it("routes projection view actions to the provided handlers", async () => {
+    const handlers = createHandlers();
+    const runner = createMenuActionRunner(handlers);
+
+    await expect(runner.run("view.openProjection")).resolves.toBe(true);
+    await expect(runner.run("view.closeProjection")).resolves.toBe(true);
+    await expect(runner.run("view.projectionFollowScroll")).resolves.toBe(true);
+
+    expect(handlers.openProjection).toHaveBeenCalledOnce();
+    expect(handlers.closeProjection).toHaveBeenCalledOnce();
+    expect(handlers.toggleProjectionFollowScroll).toHaveBeenCalledOnce();
   });
 
   it("routes view.editorOnly to the editor mode handler", async () => {

@@ -148,6 +148,8 @@ function collectEnabledActionIds() {
     editorMode: "split",
     hasDefaultAiProfile: true,
     autoSummaryAgentEnabled: true,
+    projectionEnabled: false,
+    projectionFollowScroll: true,
   }).flatMap((item) => item.children ?? []).filter((item) => item.enabled !== false).map((item) => item.id);
 
   const notebookActions = buildContextMenuSchema(notebookPayload)
@@ -225,6 +227,8 @@ describe("menuSchema", () => {
       editorMode: "split",
       hasDefaultAiProfile: false,
       autoSummaryAgentEnabled: false,
+      projectionEnabled: false,
+      projectionFollowScroll: true,
     });
 
     expect(schema.map((item) => item.id)).toEqual([
@@ -237,7 +241,7 @@ describe("menuSchema", () => {
     ]);
   });
 
-  it("keeps graph and revision entries disabled as planned placeholders", () => {
+  it("does not expose unfinished placeholder entries in the app menu", () => {
     const schema = buildAppMenuSchema({
       hasKnowledgeBase: true,
       hasCurrentNote: true,
@@ -246,11 +250,16 @@ describe("menuSchema", () => {
       editorMode: "editor",
       hasDefaultAiProfile: false,
       autoSummaryAgentEnabled: false,
+      projectionEnabled: false,
+      projectionFollowScroll: true,
     });
 
     const viewMenu = schema.find((item) => item.id === "view");
-    expect(viewMenu?.children?.find((item) => item.id === "view.graph")?.enabled).toBe(false);
-    expect(viewMenu?.children?.find((item) => item.id === "view.revisions")?.enabled).toBe(false);
+    const noteMenu = schema.find((item) => item.id === "note");
+
+    expect(viewMenu?.children?.some((item) => item.id === "view.graph")).toBe(false);
+    expect(viewMenu?.children?.some((item) => item.id === "view.revisions")).toBe(false);
+    expect(noteMenu?.children?.some((item) => item.id === "note.relations")).toBe(false);
   });
 
   it("marks editor layout entries as checked from the derived editor mode", () => {
@@ -262,6 +271,8 @@ describe("menuSchema", () => {
       editorMode: "editor",
       hasDefaultAiProfile: false,
       autoSummaryAgentEnabled: false,
+      projectionEnabled: false,
+      projectionFollowScroll: true,
     });
     const splitSchema = buildAppMenuSchema({
       hasKnowledgeBase: true,
@@ -271,6 +282,8 @@ describe("menuSchema", () => {
       editorMode: "split",
       hasDefaultAiProfile: false,
       autoSummaryAgentEnabled: false,
+      projectionEnabled: false,
+      projectionFollowScroll: true,
     });
 
     const editorViewMenu = editorSchema.find((item) => item.id === "view");
@@ -291,6 +304,8 @@ describe("menuSchema", () => {
       editorMode: "split",
       hasDefaultAiProfile: true,
       autoSummaryAgentEnabled: true,
+      projectionEnabled: false,
+      projectionFollowScroll: true,
     });
     const disabledSchema = buildAppMenuSchema({
       hasKnowledgeBase: true,
@@ -300,6 +315,8 @@ describe("menuSchema", () => {
       editorMode: "split",
       hasDefaultAiProfile: false,
       autoSummaryAgentEnabled: false,
+      projectionEnabled: false,
+      projectionFollowScroll: true,
     });
 
     const enabledAiMenu = enabledSchema.find((item) => item.id === "ai");
@@ -326,11 +343,126 @@ describe("menuSchema", () => {
       editorMode: "split",
       hasDefaultAiProfile: false,
       autoSummaryAgentEnabled: false,
+      projectionEnabled: false,
+      projectionFollowScroll: true,
     });
 
     const fileMenu = schema.find((item) => item.id === "file");
     expect(fileMenu?.children?.map((item) => item.id)).toContain("file.refreshTree");
     expect(fileMenu?.children?.find((item) => item.id === "file.refreshTree")?.enabled).toBe(true);
+  });
+
+  it("enables file creation and help actions when available", () => {
+    const enabledSchema = buildAppMenuSchema({
+      hasKnowledgeBase: true,
+      hasCurrentNote: false,
+      leftSidebarVisible: true,
+      rightSidebarVisible: false,
+      editorMode: "split",
+      hasDefaultAiProfile: false,
+      autoSummaryAgentEnabled: false,
+      projectionEnabled: false,
+      projectionFollowScroll: true,
+    });
+    const disabledSchema = buildAppMenuSchema({
+      hasKnowledgeBase: false,
+      hasCurrentNote: false,
+      leftSidebarVisible: true,
+      rightSidebarVisible: false,
+      editorMode: "split",
+      hasDefaultAiProfile: false,
+      autoSummaryAgentEnabled: false,
+      projectionEnabled: false,
+      projectionFollowScroll: true,
+    });
+
+    const enabledFileMenu = enabledSchema.find((item) => item.id === "file");
+    const disabledFileMenu = disabledSchema.find((item) => item.id === "file");
+    const helpMenu = enabledSchema.find((item) => item.id === "help");
+
+    expect(enabledFileMenu?.children?.find((item) => item.id === "file.newNote")?.enabled).toBe(true);
+    expect(enabledFileMenu?.children?.find((item) => item.id === "file.newNotebook")?.enabled).toBe(true);
+    expect(enabledFileMenu?.children?.find((item) => item.id === "file.importNote")?.enabled).toBe(true);
+    expect(disabledFileMenu?.children?.find((item) => item.id === "file.newNote")?.enabled).toBe(false);
+    expect(disabledFileMenu?.children?.find((item) => item.id === "file.newNotebook")?.enabled).toBe(false);
+    expect(disabledFileMenu?.children?.find((item) => item.id === "file.importNote")?.enabled).toBe(false);
+    expect(helpMenu?.children?.find((item) => item.id === "help.shortcuts")?.enabled).toBe(true);
+    expect(helpMenu?.children?.find((item) => item.id === "help.about")?.enabled).toBe(true);
+  });
+
+    it("enables note edit actions in the app menu when a current note exists", () => {
+      const enabledSchema = buildAppMenuSchema({
+        hasKnowledgeBase: true,
+        hasCurrentNote: true,
+        leftSidebarVisible: true,
+        rightSidebarVisible: false,
+        editorMode: "split",
+        hasDefaultAiProfile: false,
+        autoSummaryAgentEnabled: false,
+        projectionEnabled: false,
+        projectionFollowScroll: true,
+      });
+      const disabledSchema = buildAppMenuSchema({
+        hasKnowledgeBase: true,
+        hasCurrentNote: false,
+        leftSidebarVisible: true,
+        rightSidebarVisible: false,
+        editorMode: "split",
+        hasDefaultAiProfile: false,
+        autoSummaryAgentEnabled: false,
+        projectionEnabled: false,
+        projectionFollowScroll: true,
+      });
+
+      const enabledEditMenu = enabledSchema.find((item) => item.id === "edit");
+      const enabledNoteMenu = enabledSchema.find((item) => item.id === "note");
+      const disabledEditMenu = disabledSchema.find((item) => item.id === "edit");
+      const disabledNoteMenu = disabledSchema.find((item) => item.id === "note");
+
+      expect(enabledEditMenu?.children?.find((item) => item.id === "edit.rename")?.enabled).toBe(true);
+      expect(enabledEditMenu?.children?.find((item) => item.id === "edit.move")?.enabled).toBe(true);
+      expect(enabledNoteMenu?.children?.find((item) => item.id === "note.move")?.enabled).toBe(true);
+      expect(disabledEditMenu?.children?.find((item) => item.id === "edit.rename")?.enabled).toBe(false);
+      expect(disabledEditMenu?.children?.find((item) => item.id === "edit.move")?.enabled).toBe(false);
+      expect(disabledNoteMenu?.children?.find((item) => item.id === "note.move")?.enabled).toBe(false);
+    });
+
+  it("shows projection actions in the view menu and reflects projection state", () => {
+    const inactiveSchema = buildAppMenuSchema({
+      hasKnowledgeBase: true,
+      hasCurrentNote: true,
+      leftSidebarVisible: true,
+      rightSidebarVisible: false,
+      editorMode: "split",
+      hasDefaultAiProfile: false,
+      autoSummaryAgentEnabled: false,
+      projectionEnabled: false,
+      projectionFollowScroll: true,
+    });
+    const activeSchema = buildAppMenuSchema({
+      hasKnowledgeBase: true,
+      hasCurrentNote: true,
+      leftSidebarVisible: true,
+      rightSidebarVisible: false,
+      editorMode: "split",
+      hasDefaultAiProfile: false,
+      autoSummaryAgentEnabled: false,
+      projectionEnabled: true,
+      projectionFollowScroll: false,
+    });
+
+    const inactiveViewMenu = inactiveSchema.find((item) => item.id === "view");
+    const activeViewMenu = activeSchema.find((item) => item.id === "view");
+
+    expect(inactiveViewMenu?.children?.some((item) => item.id === "view.openProjection")).toBe(true);
+    expect(inactiveViewMenu?.children?.find((item) => item.id === "view.openProjection")?.enabled).toBe(true);
+    expect(inactiveViewMenu?.children?.find((item) => item.id === "view.closeProjection")?.enabled).toBe(false);
+    expect(inactiveViewMenu?.children?.find((item) => item.id === "view.projectionFollowScroll")?.enabled).toBe(false);
+
+    expect(activeViewMenu?.children?.find((item) => item.id === "view.openProjection")?.enabled).toBe(false);
+    expect(activeViewMenu?.children?.find((item) => item.id === "view.closeProjection")?.enabled).toBe(true);
+    expect(activeViewMenu?.children?.find((item) => item.id === "view.projectionFollowScroll")?.enabled).toBe(true);
+    expect(activeViewMenu?.children?.find((item) => item.id === "view.projectionFollowScroll")?.checked).toBe(false);
   });
 
   it("builds notebook and note context menus as different object menus", () => {

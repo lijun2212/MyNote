@@ -7,6 +7,12 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
+fn is_local_conflict_path(path: &std::path::Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with(".local-conflict.md"))
+}
+
 pub struct WatcherHandle {
     _watcher: RecommendedWatcher,
 }
@@ -39,6 +45,7 @@ pub fn start_watching(root: PathBuf, app_handle: AppHandle) -> Result<WatcherHan
                         .paths
                         .into_iter()
                         .filter(|p| p.extension().map(|e| e == "md").unwrap_or(false))
+                        .filter(|p| !is_local_conflict_path(p))
                         .collect();
                     if paths.is_empty() || !should_process {
                         continue;

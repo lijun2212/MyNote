@@ -376,4 +376,47 @@ describe("api graph commands", () => {
       imageBytes,
     });
   });
+
+  it("calls insert_pasted_image_from_clipboard_for_note and maps markdownPath", async () => {
+    tauriMocks.invoke.mockResolvedValueOnce({
+      markdown_path: "../assets/20260612-101010-a1b2c3.png",
+    });
+
+    await expect(api.insertPastedImageFromClipboardForNote("notes/demo.md")).resolves.toEqual({
+      markdownPath: "../assets/20260612-101010-a1b2c3.png",
+    });
+
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("insert_pasted_image_from_clipboard_for_note", {
+      notePath: "notes/demo.md",
+    });
+  });
+
+  it("calls rewrite_pasted_remote_images and returns rewritten text", async () => {
+    tauriMocks.invoke.mockResolvedValueOnce({
+      text: "![图片](../assets/20260613-101010-a1b2c3.png)",
+    });
+
+    await expect(api.rewritePastedRemoteImages("notes/demo.md", "![](https://cdn.example.com/a.png)")).resolves.toBe(
+      "![图片](../assets/20260613-101010-a1b2c3.png)",
+    );
+
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("rewrite_pasted_remote_images", {
+      notePath: "notes/demo.md",
+      text: "![](https://cdn.example.com/a.png)",
+    });
+  });
+
+  it("calls read_clipboard_text_for_paste and returns rewritten clipboard text", async () => {
+    tauriMocks.invoke.mockResolvedValueOnce({
+      text: "![图片](../assets/20260613-121212-f0e1d2.png)",
+    });
+
+    await expect(api.readClipboardTextForPaste("notes/demo.md")).resolves.toBe(
+      "![图片](../assets/20260613-121212-f0e1d2.png)",
+    );
+
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("read_clipboard_text_for_paste", {
+      notePath: "notes/demo.md",
+    });
+  });
 });

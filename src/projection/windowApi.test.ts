@@ -1,0 +1,58 @@
+import { describe, expect, it, vi } from "vitest";
+import { tauriMocks } from "../test/setup";
+import {
+  closeProjectionWindow,
+  emitProjectionState,
+  getProjectionWindowCapabilities,
+  openProjectionWindow,
+} from "./windowApi";
+
+describe("projection windowApi", () => {
+  it("creates and focuses the projection preview window with the expected label and role", async () => {
+    await openProjectionWindow();
+
+    expect(tauriMocks.createWebviewWindow).toHaveBeenCalledWith(
+      "projection-preview",
+      expect.objectContaining({
+        title: "Projection Preview",
+        url: "/?windowRole=projection-preview",
+        visible: true,
+        focus: true,
+        center: true,
+      }),
+    );
+    expect(tauriMocks.showWebviewWindow).toHaveBeenCalledWith("projection-preview");
+    expect(tauriMocks.focusWebviewWindow).toHaveBeenCalledWith("projection-preview");
+  });
+
+  it("closes the current projection window", async () => {
+    await closeProjectionWindow();
+
+    expect(tauriMocks.getWebviewWindowByLabel).toHaveBeenCalledWith("projection-preview");
+    expect(tauriMocks.closeWebviewWindow).toHaveBeenCalledTimes(1);
+    expect(tauriMocks.getCurrentWebviewWindow).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when the projection preview window is unavailable", async () => {
+    tauriMocks.getWebviewWindowByLabel.mockReturnValue(null);
+
+    await closeProjectionWindow();
+
+    expect(tauriMocks.getWebviewWindowByLabel).toHaveBeenCalledWith("projection-preview");
+    expect(tauriMocks.closeWebviewWindow).not.toHaveBeenCalled();
+    expect(tauriMocks.getCurrentWebviewWindow).not.toHaveBeenCalled();
+  });
+
+  it("emits projection events to the projection preview window", async () => {
+    await emitProjectionState("projection:state-sync", { revision: 1 });
+
+    expect(tauriMocks.emitTo).toHaveBeenCalledWith("projection-preview", "projection:state-sync", { revision: 1 });
+  });
+
+  it("reports conservative projection window capabilities", () => {
+    expect(getProjectionWindowCapabilities()).toEqual({
+      supportsExternalMonitorPlacement: false,
+      supportsFullscreenProjection: true,
+    });
+  });
+});

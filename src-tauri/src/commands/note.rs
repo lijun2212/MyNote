@@ -8,7 +8,8 @@ use crate::services::note::{
     create_note_service, create_notebook_service, delete_note_service, delete_notebook_service,
     get_note_by_path_service, get_note_outline_service, get_note_tree_service,
     import_markdown_sources_service, import_note_service, insert_image_for_note_from_selected_path,
-    insert_pasted_image_for_note_from_bytes, move_note_in_root, rename_note_service,
+    insert_pasted_image_for_note_from_bytes, insert_pasted_image_for_note_from_native_clipboard,
+    move_note_in_root, read_clipboard_text_for_paste_in_root, rename_note_service, rewrite_pasted_remote_images_in_text,
     rename_notebook_service,
     reorder_notebooks_service, save_note_service,
     update_notebook_visual_service,
@@ -18,6 +19,11 @@ use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 use tokio::sync::oneshot;
 use ulid::Ulid;
+
+#[derive(serde::Serialize)]
+pub struct RewritePastedRemoteImagesResult {
+    text: String,
+}
 
 async fn pick_image_file(app: &AppHandle) -> Result<Option<std::path::PathBuf>, AppError> {
     let (sender, receiver) = oneshot::channel();
@@ -165,6 +171,89 @@ pub async fn insert_pasted_image_for_note(
         &timestamp,
         &random_suffix,
     )
+}
+
+#[tauri::command]
+pub async fn insert_pasted_image_from_clipboard_for_note(
+    state: State<'_, AppState>,
+    note_path: String,
+) -> Result<Option<InsertImageResult>, AppError> {
+    let root = {
+        let root_guard = state.kb_root_guard();
+        root_guard
+            .as_ref()
+            .ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?
+            .clone()
+    };
+
+    let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string();
+    let random_source = Ulid::new().to_string().to_ascii_lowercase();
+    let random_suffix = random_source.chars().take(6).collect::<String>();
+
+    let result = insert_pasted_image_for_note_from_native_clipboard(
+        &root,
+        &note_path,
+        &timestamp,
+        &random_suffix,
+    )?;
+
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn rewrite_pasted_remote_images(
+    state: State<'_, AppState>,
+    note_path: String,
+    text: String,
+) -> Result<RewritePastedRemoteImagesResult, AppError> {
+    let root = {
+        let root_guard = state.kb_root_guard();
+        root_guard
+            .as_ref()
+            .ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?
+            .clone()
+    };
+
+    let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string();
+    let random_source = Ulid::new().to_string().to_ascii_lowercase();
+    let random_suffix = random_source.chars().take(6).collect::<String>();
+
+    let rewritten = rewrite_pasted_remote_images_in_text(
+        &root,
+        &note_path,
+        &text,
+        &timestamp,
+        &random_suffix,
+    ).await?;
+
+    Ok(RewritePastedRemoteImagesResult { text: rewritten })
+}
+
+#[tauri::command]
+pub async fn read_clipboard_text_for_paste(
+    state: State<'_, AppState>,
+    note_path: String,
+) -> Result<Option<RewritePastedRemoteImagesResult>, AppError> {
+    let root = {
+        let root_guard = state.kb_root_guard();
+        root_guard
+            .as_ref()
+            .ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?
+            .clone()
+    };
+
+    let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string();
+    let random_source = Ulid::new().to_string().to_ascii_lowercase();
+    let random_suffix = random_source.chars().take(6).collect::<String>();
+
+    let text = read_clipboard_text_for_paste_in_root(
+        &root,
+        &note_path,
+        &timestamp,
+        &random_suffix,
+    ).await?;
+
+    Ok(text.map(|text| RewritePastedRemoteImagesResult { text }))
 }
 
 #[tauri::command]

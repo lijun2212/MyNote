@@ -5,7 +5,7 @@ use crate::domain::note::{
     InsertImageResult,
 };
 use crate::error::{AppError, AppResult};
-use crate::infrastructure::fs::{atomic_write, normalize_kb_relative_path, resolve_kb_path, safe_filename};
+use crate::infrastructure::fs::{atomic_write, normalize_kb_relative_path, normalize_relative, resolve_kb_path, safe_filename};
 use crate::infrastructure::markdown::{
     extract_links, extract_note_outline_blocks_from_content, render_note, FrontMatter,
 };
@@ -15,14 +15,89 @@ use crate::services::notebook_visual::{
     save_notebook_visual, visual_for_path, NotebookVisualMap,
 };
 use crate::state::AppState;
+use arboard::Clipboard;
+use image::{ColorType, ImageEncoder, codecs::png::PngEncoder};
+use reqwest::Client;
 use rusqlite::params;
 use rusqlite::OptionalExtension;
+use std::process::Command;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use tauri::State;
 use ulid::Ulid;
 
-const SUPPORTED_IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp"];
+const SUPPORTED_IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "svg"];
+
+fn is_local_conflict_path(path: &str) -> bool {
+    path.ends_with(".local-conflict.md")
+}
+
+fn build_conflict_backup_path(note_path: &str) -> String {
+    let note_stem = note_path.trim_end_matches(".md").replace('/', "__");
+    format!(
+        ".mynote/conflicts/{}.local-conflict.{}.md",
+        note_stem,
+        Ulid::new()
+    )
+}
+
+fn move_local_conflict_file_to_internal_storage(root: &Path, source_rel_path: &str) -> AppResult<String> {
+    let source_abs = resolve_kb_path(root, source_rel_path)?;
+    let target_rel = build_conflict_backup_path(source_rel_path);
+    let target_abs = resolve_kb_path(root, &target_rel)?;
+
+    if let Some(parent) = target_abs.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    std::fs::rename(&source_abs, &target_abs).or_else(|_| {
+        let content = std::fs::read_to_string(&source_abs)?;
+        atomic_write(&target_abs, &content)?;
+        std::fs::remove_file(&source_abs)?;
+        Ok::<(), AppError>(())
+    })?;
+
+    Ok(target_rel)
+}
+
+pub fn migrate_local_conflict_files_in_root(conn: &rusqlite::Connection, root: &Path) -> AppResult<Vec<String>> {
+    fn visit(root: &Path, dir: &Path, files: &mut Vec<String>) -> AppResult<()> {
+        let mut entries = std::fs::read_dir(dir)?.collect::<Result<Vec<_>, _>>()?;
+        entries.sort_by_key(|entry| entry.path());
+
+        for entry in entries {
+            let path = entry.path();
+            if entry.file_type()?.is_dir() {
+                visit(root, &path, files)?;
+                continue;
+            }
+
+            let rel = normalize_relative(root, &path)?;
+            if is_local_conflict_path(&rel) {
+                files.push(rel);
+            }
+        }
+
+        Ok(())
+    }
+
+    let notes_dir = root.join("notes");
+    if !notes_dir.is_dir() {
+        return Ok(Vec::new());
+    }
+
+    let mut legacy_conflicts = Vec::new();
+    visit(root, &notes_dir, &mut legacy_conflicts)?;
+
+    let mut migrated = Vec::new();
+    for rel_path in legacy_conflicts {
+        move_local_conflict_file_to_internal_storage(root, &rel_path)?;
+        mark_note_deleted_by_path(conn, &rel_path)?;
+        migrated.push(rel_path);
+    }
+
+    Ok(migrated)
+}
 
 pub fn create_notebook_in_root(root: &Path, name: &str, _icon: &str, _color: &str) -> AppResult<String> {
     let trimmed_name = name.trim();
@@ -231,22 +306,16 @@ pub fn get_note_outline_service(state: &State<AppState>, rel_path: &str) -> AppR
     get_note_outline_in_root(root, rel_path)
 }
 
-pub fn save_note_service(state: &State<AppState>, input: SaveNoteInput) -> AppResult<SaveNoteResult> {
-    let root_guard = state.kb_root_guard();
-    let root = root_guard.as_ref().ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?;
-    let mut db_guard = state.db_guard();
-    let conn = db_guard.as_mut().ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
-
+fn save_note_in_root(conn: &rusqlite::Connection, root: &Path, input: SaveNoteInput) -> AppResult<SaveNoteResult> {
     let (path, current_hash): (String, String) = conn.query_row(
         "SELECT path, content_hash FROM notes WHERE id = ?1",
         params![input.note_id],
         |row| Ok((row.get(0)?, row.get(1)?)),
     ).map_err(|_| AppError::NotFound(format!("Note not found: {}", input.note_id)))?;
 
-    // Conflict detection
     if let Some(expected) = &input.expected_hash {
         if expected != &current_hash {
-            let conflict_path = path.replace(".md", ".local-conflict.md");
+            let conflict_path = build_conflict_backup_path(&path);
             let abs_conflict = resolve_kb_path(root, &conflict_path)?;
             atomic_write(&abs_conflict, &input.content)?;
             let note = get_note_by_path_service_inner(conn, root, &path)?;
@@ -259,6 +328,15 @@ pub fn save_note_service(state: &State<AppState>, input: SaveNoteInput) -> AppRe
 
     let note = index_note_full(conn, root, &path, &input.content)?;
     Ok(SaveNoteResult { note, conflict: false })
+}
+
+pub fn save_note_service(state: &State<AppState>, input: SaveNoteInput) -> AppResult<SaveNoteResult> {
+    let root_guard = state.kb_root_guard();
+    let root = root_guard.as_ref().ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?;
+    let mut db_guard = state.db_guard();
+    let conn = db_guard.as_mut().ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
+
+    save_note_in_root(conn, root, input)
 }
 
 fn get_note_by_path_service_inner(conn: &rusqlite::Connection, _root: &Path, rel_path: &str) -> AppResult<Note> {
@@ -283,14 +361,14 @@ fn get_note_by_path_service_inner(conn: &rusqlite::Connection, _root: &Path, rel
     })
 }
 
-pub fn list_notes_service(state: &State<AppState>) -> AppResult<Vec<Note>> {
-    let db_guard = state.db_guard();
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
-
+fn list_notes_in_conn(conn: &rusqlite::Connection) -> AppResult<Vec<Note>> {
     let mut stmt = conn.prepare(
-        "SELECT id, path, title, summary, content_hash, word_count, created_at, updated_at, indexed_at, deleted_at FROM notes WHERE deleted_at IS NULL ORDER BY path"
+                "SELECT id, path, title, summary, content_hash, word_count, created_at, updated_at, indexed_at, deleted_at
+                 FROM notes
+                 WHERE deleted_at IS NULL
+                 ORDER BY path"
     )?;
-    let notes = stmt.query_map([], |row| Ok(Note {
+        let notes = stmt.query_map([], |row| Ok(Note {
         id: row.get(0)?,
         path: row.get(1)?,
         title: row.get(2)?,
@@ -305,7 +383,17 @@ pub fn list_notes_service(state: &State<AppState>) -> AppResult<Vec<Note>> {
     .collect::<Result<Vec<_>, _>>()
     .map_err(|e| AppError::Database(e.to_string()))?;
 
-    Ok(notes)
+    Ok(notes
+        .into_iter()
+        .filter(|note| !is_local_conflict_path(&note.path))
+        .collect())
+}
+
+pub fn list_notes_service(state: &State<AppState>) -> AppResult<Vec<Note>> {
+    let db_guard = state.db_guard();
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
+
+    list_notes_in_conn(conn)
 }
 
 fn ensure_dir_node(children: &mut Vec<NoteTreeNode>, path: &str, name: &str) -> usize {
@@ -525,6 +613,12 @@ pub fn rename_note_in_root(
         .ok_or_else(|| AppError::InvalidInput(format!("Invalid note path: {}", source_rel)))?;
     let new_name = normalize_new_note_name(new_name)?;
     let target_filename = format!("{}.md", new_name);
+    let desired_rel = format!("{}/{}", parent_dir, target_filename);
+
+    if desired_rel == source_rel {
+        return Ok(source_note);
+    }
+
     let target_rel = next_available_note_path(conn, root, parent_dir, &target_filename)?;
 
     if target_rel == source_rel {
@@ -1225,6 +1319,29 @@ fn import_single_markdown_file_in_root(
     dest_directory: &str,
 ) -> AppResult<Note> {
     let src = Path::new(src_path);
+
+    if let Ok(src_abs) = src.canonicalize() {
+        let root_abs = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+
+        if src_abs.starts_with(&root_abs) {
+            if let Ok(relative) = src_abs.strip_prefix(&root_abs) {
+                let managed_rel = relative
+                    .components()
+                    .filter_map(|component| match component {
+                        std::path::Component::Normal(value) => Some(value.to_string_lossy().to_string()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("/");
+
+                if !managed_rel.is_empty() {
+                    let managed_rel = normalize_managed_note_path(&managed_rel)?;
+                    return get_note_by_path_service_inner(conn, root, &managed_rel);
+                }
+            }
+        }
+    }
+
     let content = std::fs::read_to_string(src_path)?;
     let validated_dest_directory = validate_existing_note_target_directory(root, dest_directory)?;
     import_markdown_content_in_root(conn, root, src, &content, &validated_dest_directory)
@@ -1350,6 +1467,7 @@ pub fn supported_image_extension_from_mime_type(mime_type: &str) -> AppResult<St
         "image/jpg" => "jpg",
         "image/gif" => "gif",
         "image/webp" => "webp",
+        "image/svg+xml" => "svg",
         _ => {
             return Err(AppError::InvalidInput(format!(
                 "Unsupported image mime type: {}",
@@ -1435,11 +1553,263 @@ pub fn insert_pasted_image_for_note_from_bytes(
     Ok(InsertImageResult { markdown_path })
 }
 
+pub async fn rewrite_pasted_remote_images_in_text(
+    root: &Path,
+    note_path: &str,
+    text: &str,
+    timestamp: &str,
+    random_suffix_seed: &str,
+) -> AppResult<String> {
+    let remote_urls = extract_remote_image_urls_from_text(text);
+    if remote_urls.is_empty() {
+        return Ok(text.to_string());
+    }
+
+    let client = Client::new();
+    let mut rewritten_text = text.to_string();
+
+    for (index, url) in remote_urls.iter().enumerate() {
+        let response = match client.get(url).send().await {
+            Ok(response) => response,
+            Err(_) => continue,
+        };
+
+        if !response.status().is_success() {
+            continue;
+        }
+
+        let mime_type = match infer_remote_image_mime_type(url, response.headers().get(reqwest::header::CONTENT_TYPE).and_then(|v| v.to_str().ok())) {
+            Some(mime_type) => mime_type,
+            None => continue,
+        };
+
+        let bytes = match response.bytes().await {
+            Ok(bytes) if !bytes.is_empty() => bytes,
+            _ => continue,
+        };
+
+        let suffix = if index == 0 {
+            random_suffix_seed.to_string()
+        } else {
+            format!("{}{:02}", random_suffix_seed, index)
+        };
+
+        let result = insert_pasted_image_for_note_from_bytes(
+            root,
+            note_path,
+            &mime_type,
+            bytes.as_ref(),
+            timestamp,
+            &suffix.chars().take(8).collect::<String>(),
+        )?;
+
+        rewritten_text = replace_remote_image_reference(&rewritten_text, url, &format!("![图片]({})", result.markdown_path));
+    }
+
+    Ok(rewritten_text)
+}
+
+pub async fn read_clipboard_text_for_paste_in_root(
+    root: &Path,
+    note_path: &str,
+    timestamp: &str,
+    random_suffix_seed: &str,
+) -> AppResult<Option<String>> {
+    let html = read_macos_clipboard_text("html").ok().filter(|value| !value.trim().is_empty());
+    let text = read_macos_clipboard_text("txt").ok().filter(|value| !value.trim().is_empty());
+
+    let candidate = if let Some(html) = html {
+        convert_pasted_html_to_text(&html).or(text)
+    } else {
+        text
+    };
+
+    let Some(candidate) = candidate else {
+        return Ok(None);
+    };
+
+    let rewritten = rewrite_pasted_remote_images_in_text(
+        root,
+        note_path,
+        &candidate,
+        timestamp,
+        random_suffix_seed,
+    ).await?;
+
+    Ok(Some(rewritten))
+}
+
+pub fn insert_pasted_image_for_note_from_native_clipboard(
+    root: &Path,
+    note_path: &str,
+    timestamp: &str,
+    random_suffix: &str,
+) -> AppResult<Option<InsertImageResult>> {
+    let mut clipboard = Clipboard::new()
+        .map_err(|error| AppError::InvalidInput(format!("Unable to access clipboard: {error}")))?;
+
+    let image = match clipboard.get_image() {
+        Ok(image) => image,
+        Err(error) => {
+            if native_clipboard_error_means_no_image(&error.to_string()) {
+                return Ok(None);
+            }
+            return Err(AppError::InvalidInput(format!("Unable to read clipboard image: {error}")));
+        }
+    };
+
+    let mut encoded = Vec::new();
+    let encoder = PngEncoder::new(&mut encoded);
+    encoder
+        .write_image(
+            image.bytes.as_ref(),
+            image.width as u32,
+            image.height as u32,
+            ColorType::Rgba8.into(),
+        )
+        .map_err(|error| AppError::InvalidInput(format!("Unable to encode clipboard image: {error}")))?;
+
+    insert_pasted_image_for_note_from_bytes(
+        root,
+        note_path,
+        "image/png",
+        &encoded,
+        timestamp,
+        random_suffix,
+    )
+    .map(Some)
+}
+
+fn native_clipboard_error_means_no_image(message: &str) -> bool {
+    let normalized = message.to_ascii_lowercase();
+    normalized.contains("content not available")
+        || normalized.contains("does not contain")
+        || normalized.contains("requested format")
+        || normalized.contains("clipboard is empty")
+}
+
+fn extract_remote_image_urls_from_text(text: &str) -> Vec<String> {
+    let mut urls = Vec::new();
+    let mut seen = HashSet::new();
+
+    for captures in regex::Regex::new(r#"!\[[^\]]*\]\(\s*(https?://[^)\s]+)\s*\)"#).unwrap().captures_iter(text) {
+        if let Some(url) = captures.get(1).map(|m| m.as_str().to_string()) {
+            if seen.insert(url.clone()) {
+                urls.push(url);
+            }
+        }
+    }
+
+    for captures in regex::Regex::new(r#"<img\b[^>]*\bsrc=["'](https?://[^"']+)["'][^>]*>"#).unwrap().captures_iter(text) {
+        if let Some(url) = captures.get(1).map(|m| m.as_str().to_string()) {
+            if seen.insert(url.clone()) {
+                urls.push(url);
+            }
+        }
+    }
+
+    urls
+}
+
+fn infer_remote_image_mime_type(url: &str, content_type: Option<&str>) -> Option<String> {
+    let normalized_content_type = content_type
+        .and_then(|value| value.split(';').next())
+        .map(|value| value.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+
+    if matches!(normalized_content_type.as_str(), "image/png" | "image/jpeg" | "image/jpg" | "image/gif" | "image/webp" | "image/svg+xml") {
+        return Some(normalized_content_type);
+    }
+
+    let normalized_url = url.to_ascii_lowercase();
+    if normalized_url.ends_with(".png") {
+        return Some("image/png".into());
+    }
+    if normalized_url.ends_with(".jpg") || normalized_url.ends_with(".jpeg") {
+        return Some("image/jpeg".into());
+    }
+    if normalized_url.ends_with(".gif") {
+        return Some("image/gif".into());
+    }
+    if normalized_url.ends_with(".webp") {
+        return Some("image/webp".into());
+    }
+    if normalized_url.ends_with(".svg") {
+        return Some("image/svg+xml".into());
+    }
+
+    None
+}
+
+fn replace_remote_image_reference(text: &str, url: &str, replacement: &str) -> String {
+    let escaped_url = regex::escape(url);
+    let markdown_pattern = regex::Regex::new(&format!(r#"!\[[^\]]*\]\(\s*{}\s*\)"#, escaped_url)).unwrap();
+    let html_pattern = regex::Regex::new(&format!(r#"<img\b[^>]*\bsrc=["']{}["'][^>]*>"#, escaped_url)).unwrap();
+    let replaced = markdown_pattern.replace_all(text, replacement).to_string();
+    html_pattern.replace_all(&replaced, replacement).to_string()
+}
+
+fn read_macos_clipboard_text(preference: &str) -> AppResult<String> {
+    let output = Command::new("pbpaste")
+        .args(["-Prefer", preference])
+        .output()
+        .map_err(|error| AppError::InvalidInput(format!("Unable to read clipboard text: {error}")))?;
+
+    if !output.status.success() {
+        return Err(AppError::InvalidInput(format!(
+            "Unable to read clipboard text with pbpaste -Prefer {}",
+            preference,
+        )));
+    }
+
+    String::from_utf8(output.stdout)
+        .map_err(|error| AppError::InvalidInput(format!("Clipboard text is not valid UTF-8: {error}")))
+}
+
+fn convert_pasted_html_to_text(html: &str) -> Option<String> {
+    let mut text = html.to_string();
+    let br_pattern = regex::Regex::new(r"(?i)<br\s*/?>").unwrap();
+    text = br_pattern.replace_all(&text, "\n").to_string();
+
+    let img_pattern = regex::Regex::new(r#"(?is)<img\b[^>]*\bsrc=["']([^"']+)["'][^>]*>"#).unwrap();
+    text = img_pattern
+        .replace_all(&text, "\n[[MYNOTE_REMOTE_IMAGE::$1]]\n")
+        .to_string();
+
+    let block_pattern = regex::Regex::new(r"(?i)</?(p|div|section|article|li|ul|ol|table|tr|td|th|h1|h2|h3|h4|h5|h6)[^>]*>").unwrap();
+    text = block_pattern.replace_all(&text, "\n").to_string();
+
+    let tag_pattern = regex::Regex::new(r"(?is)<[^>]+>").unwrap();
+    text = tag_pattern.replace_all(&text, "").to_string();
+
+    let normalized = text
+        .replace("\r\n", "\n")
+        .replace('\r', "\n");
+    let normalized = regex::Regex::new(r"\n{3,}").unwrap().replace_all(&normalized, "\n\n").to_string();
+    let normalized = normalized
+        .lines()
+        .map(|line| line.trim_end())
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string();
+
+    let normalized = regex::Regex::new(r#"\[\[MYNOTE_REMOTE_IMAGE::(https?://[^\]\n]+)\]\]"#)
+        .unwrap()
+        .replace_all(&normalized, "<img src=\"$1\">")
+        .to_string();
+
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
+}
+
 fn collect_markdown_files(dir: &Path) -> AppResult<Vec<PathBuf>> {
     fn visit(dir: &Path, files: &mut Vec<PathBuf>) -> AppResult<()> {
         let mut entries = std::fs::read_dir(dir)?.collect::<Result<Vec<_>, _>>()?;
         entries.sort_by_key(|entry| entry.path());
-
         for entry in entries {
             let path = entry.path();
             if entry.file_type()?.is_dir() {
@@ -1587,7 +1957,7 @@ fn import_markdown_directory_into_result(
         }) {
             Ok(content) => match import_markdown_content_in_root(conn, root, &markdown_file, &content, &target_dir) {
                 Ok(note) => result.imported.push(MarkdownImportItem {
-                    source_path: source_file_path,
+                    source_path: source_file_path.clone(),
                     note,
                 }),
                 Err(err) => result.failures.push(MarkdownImportMessage {
@@ -1683,16 +2053,20 @@ mod tests {
     use super::{
         build_imported_image_filename, build_markdown_asset_path_for_note, build_tree,
         build_tree_with_directories, build_tree_with_visuals, create_notebook_in_root,
+        convert_pasted_html_to_text,
         delete_note_in_root, delete_notebook_in_root, get_note_outline_in_root,
-        import_markdown_sources_in_root,
+        import_markdown_sources_in_root, import_single_markdown_file_in_root,
         insert_image_for_note_from_selected_path, insert_pasted_image_for_note_from_bytes,
-        move_note_in_root, rename_note_in_root, rename_notebook_in_root, reorder_notebooks_in_root,
+        list_notes_in_conn, move_note_in_root, rename_note_in_root, rename_notebook_in_root, reorder_notebooks_in_root,
+        rewrite_pasted_remote_images_in_text, save_note_in_root,
+        native_clipboard_error_means_no_image,
         supported_image_extension, supported_image_extension_from_mime_type,
         update_notebook_visual_in_root,
     };
-    use crate::domain::note::{InsertImageResult, MarkdownImportRequest, MarkdownImportSource, Note};
+    use crate::domain::note::{InsertImageResult, MarkdownImportRequest, MarkdownImportSource, Note, SaveNoteInput};
     use crate::error::AppError;
     use crate::infrastructure::db::open_and_migrate;
+    use mockito::Server;
     use rusqlite::params;
     use crate::services::index::index_note_full;
     use crate::services::notebook_visual::{load_notebook_visuals, save_notebook_visual};
@@ -1738,12 +2112,13 @@ mod tests {
         assert_eq!(supported_image_extension_from_mime_type("image/jpg").unwrap(), "jpg");
         assert_eq!(supported_image_extension_from_mime_type("image/gif").unwrap(), "gif");
         assert_eq!(supported_image_extension_from_mime_type("image/webp").unwrap(), "webp");
+        assert_eq!(supported_image_extension_from_mime_type("image/svg+xml").unwrap(), "svg");
         assert_eq!(supported_image_extension_from_mime_type("image/png; charset=binary").unwrap(), "png");
     }
 
     #[test]
     fn image_insert_rejects_unsupported_mime_types() {
-        let err = supported_image_extension_from_mime_type("image/svg+xml").unwrap_err();
+        let err = supported_image_extension_from_mime_type("image/bmp").unwrap_err();
 
         assert!(matches!(err, AppError::InvalidInput(_)));
         assert!(err.to_string().contains("Unsupported image mime type"));
@@ -1783,6 +2158,26 @@ mod tests {
         .unwrap();
 
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn native_clipboard_no_image_detection_accepts_expected_platform_messages() {
+        assert!(native_clipboard_error_means_no_image(
+            "The clipboard contents were not available in the requested format or the clipboard is empty."
+        ));
+        assert!(native_clipboard_error_means_no_image(
+            "Clipboard content not available"
+        ));
+        assert!(native_clipboard_error_means_no_image(
+            "The clipboard does not contain an image"
+        ));
+    }
+
+    #[test]
+    fn native_clipboard_no_image_detection_rejects_real_failures() {
+        assert!(!native_clipboard_error_means_no_image(
+            "Unable to access clipboard backend"
+        ));
     }
 
     #[test]
@@ -1842,6 +2237,50 @@ mod tests {
             std::fs::read(root.path().join("assets/20260610-101010-f0e1d2.png")).unwrap(),
             b"fake-png-bytes"
         );
+    }
+
+    #[tokio::test]
+    async fn rewrite_pasted_remote_images_in_text_downloads_and_rewrites_remote_markdown_image() {
+        let root = TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join("notes/project")).unwrap();
+        std::fs::create_dir_all(root.path().join("assets")).unwrap();
+
+        let mut server = Server::new_async().await;
+        let image_mock = server
+            .mock("GET", "/remote.png")
+            .with_status(200)
+            .with_header("content-type", "image/png")
+            .with_body(vec![1_u8, 2, 3, 4])
+            .create_async()
+            .await;
+
+        let source = format!("![]({}/remote.png)", server.url());
+        let rewritten = rewrite_pasted_remote_images_in_text(
+            root.path(),
+            "notes/project/demo.md",
+            &source,
+            "20260613-101010",
+            "a1b2c3",
+        )
+        .await
+        .unwrap();
+
+        image_mock.assert_async().await;
+        assert_eq!(rewritten, "![图片](../../assets/20260613-101010-a1b2c3.png)");
+        assert_eq!(
+            std::fs::read(root.path().join("assets/20260613-101010-a1b2c3.png")).unwrap(),
+            vec![1_u8, 2, 3, 4]
+        );
+    }
+
+    #[test]
+    fn convert_pasted_html_to_text_preserves_remote_image_placeholders() {
+        let html = "<section><p>流程图</p><img src=\"https://cdn.example.com/html.png\" width=\"600\"></section>";
+
+        let converted = convert_pasted_html_to_text(html).unwrap();
+
+        assert!(converted.contains("流程图"));
+        assert!(converted.contains("<img src=\"https://cdn.example.com/html.png\">"));
     }
 
     #[test]
@@ -2214,6 +2653,28 @@ mod tests {
 
         assert_eq!(renamed.path, "notes/work/demo-renamed-1.md");
         assert!(root.path().join("notes/work/demo-renamed-1.md").exists());
+    }
+
+    #[test]
+    fn rename_note_in_root_keeps_same_path_when_name_is_unchanged() {
+        let root = TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join("notes/work")).unwrap();
+
+        let source_rel = "notes/work/demo.md";
+        let source_abs = root.path().join(source_rel);
+        let content = "---\nid: note-demo\ntitle: Demo\n---\n\n# Demo\n";
+        std::fs::write(&source_abs, content).unwrap();
+
+        let db_path = root.path().join("index.sqlite");
+        let conn = open_and_migrate(&db_path).unwrap();
+        let original = index_note_full(&conn, root.path(), source_rel, content).unwrap();
+
+        let renamed = rename_note_in_root(&conn, root.path(), source_rel, "demo").unwrap();
+
+        assert_eq!(renamed.id, original.id);
+        assert_eq!(renamed.path, source_rel);
+        assert!(root.path().join(source_rel).exists());
+        assert!(!root.path().join("notes/work/demo-1.md").exists());
     }
 
     #[test]
@@ -2643,6 +3104,34 @@ mod tests {
         assert!(reserved_deleted_at.is_some());
     }
 
+        #[test]
+        fn import_single_markdown_file_in_root_reuses_same_managed_path_without_copy_suffix() {
+            let root = TempDir::new().unwrap();
+            std::fs::create_dir_all(root.path().join("notes/work")).unwrap();
+
+            let source_rel = "notes/work/demo.md";
+            let source_abs = root.path().join(source_rel);
+            let content = "---\nid: note-demo\ntitle: Demo\n---\n\n# Demo\n";
+            std::fs::write(&source_abs, content).unwrap();
+
+            let db_path = root.path().join("index.sqlite");
+            let conn = open_and_migrate(&db_path).unwrap();
+            let original = index_note_full(&conn, root.path(), source_rel, content).unwrap();
+
+            let imported = import_single_markdown_file_in_root(
+                &conn,
+                root.path(),
+                &source_abs.to_string_lossy(),
+                "notes/work",
+            )
+            .unwrap();
+
+            assert_eq!(imported.id, original.id);
+            assert_eq!(imported.path, source_rel);
+            assert!(root.path().join(source_rel).exists());
+            assert!(!root.path().join("notes/work/demo-1.md").exists());
+        }
+
     #[test]
     fn import_markdown_sources_renames_conflicting_assets_and_rewrites_imported_note_links() {
         let root = TempDir::new().unwrap();
@@ -2857,6 +3346,71 @@ mod tests {
 
         assert!(matches!(err, AppError::Parse(_)));
         assert!(root.path().join("notes/work").is_dir());
+    }
+
+    #[test]
+    fn list_notes_in_conn_excludes_local_conflict_files() {
+        let root = TempDir::new().unwrap();
+        let conn = open_and_migrate(&root.path().join("index.sqlite")).unwrap();
+
+        conn.execute(
+            "INSERT INTO notes (id, path, title, summary, content_hash, word_count, front_matter_json, created_at, updated_at, indexed_at)
+             VALUES (?1, ?2, ?3, NULL, 'hash-1', 0, '{}', 'now', 'now', 'now')",
+            params!["note-1", "notes/visible.md", "Visible"],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO notes (id, path, title, summary, content_hash, word_count, front_matter_json, created_at, updated_at, indexed_at)
+             VALUES (?1, ?2, ?3, NULL, 'hash-2', 0, '{}', 'now', 'now', 'now')",
+            params!["note-2", "notes/visible.local-conflict.md", "Conflict"],
+        )
+        .unwrap();
+
+        let notes = list_notes_in_conn(&conn).unwrap();
+
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].path, "notes/visible.md");
+    }
+
+    #[test]
+    fn save_note_conflict_writes_backup_outside_notes_directory() {
+        let root = TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join("notes/work")).unwrap();
+
+        let note_rel = "notes/work/demo.md";
+        let original_content = "---\nid: demo\ntitle: Demo\n---\n\n# Demo\n";
+        std::fs::write(root.path().join(note_rel), original_content).unwrap();
+
+        let db_path = root.path().join("index.sqlite");
+        let conn = open_and_migrate(&db_path).unwrap();
+        let indexed = index_note_full(&conn, root.path(), note_rel, original_content).unwrap();
+
+        let stale_hash = "stale-hash";
+        let draft_content = "# local draft\n\nchanged";
+
+        let conflict_result = save_note_in_root(
+            &conn,
+            root.path(),
+            SaveNoteInput {
+                note_id: indexed.id.clone(),
+                content: draft_content.to_string(),
+                expected_hash: Some(stale_hash.to_string()),
+            },
+        )
+        .unwrap();
+
+        assert!(conflict_result.conflict);
+        assert_eq!(std::fs::read_to_string(root.path().join(note_rel)).unwrap(), original_content);
+        assert!(!root.path().join("notes/work/demo.local-conflict.md").exists());
+
+        let conflict_dir = root.path().join(".mynote/conflicts");
+        let entries = std::fs::read_dir(&conflict_dir)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(std::fs::read_to_string(entries[0].path()).unwrap(), draft_content);
     }
 
     #[test]

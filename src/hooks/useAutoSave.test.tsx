@@ -159,4 +159,36 @@ describe("useAutoSave", () => {
       expectedHash: "hash-before",
     });
   });
+
+  it("refreshes the expected hash when the current note hash changes without switching note ids", async () => {
+    vi.useFakeTimers();
+    const note = makeNote({ id: "note1", content_hash: "hash-before" });
+    const refreshedNote = makeNote({ id: "note1", content_hash: "hash-after-summary-save" });
+    const savedNote = makeNote({ id: "note1", content_hash: "hash-after-autosave" });
+    invokeMock.mockResolvedValueOnce(makeSaveNoteResult({ note: savedNote }));
+
+    setDirtyNote(note, "# Updated content after summary fallback");
+    renderHook(() => useAutoSave());
+
+    act(() => {
+      useEditorStore.setState({
+        currentNote: refreshedNote,
+        content: "# Updated content after summary fallback",
+        isDirty: true,
+        isSaving: false,
+        saveStatus: "unsaved",
+        saveError: null,
+      });
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(800);
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith("save_note", {
+      noteId: "note1",
+      content: "# Updated content after summary fallback",
+      expectedHash: "hash-after-summary-save",
+    });
+  });
 });

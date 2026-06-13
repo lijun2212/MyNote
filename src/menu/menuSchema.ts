@@ -10,6 +10,8 @@ export interface AppMenuSchemaOptions {
   editorMode: "editor" | "split";
   hasDefaultAiProfile: boolean;
   autoSummaryAgentEnabled: boolean;
+  projectionEnabled: boolean;
+  projectionFollowScroll: boolean;
 }
 
 export interface MenuSchemaItem {
@@ -41,6 +43,8 @@ export function buildAppMenuSchema(options: AppMenuSchemaOptions): MenuSchemaIte
     editorMode,
     hasDefaultAiProfile,
     autoSummaryAgentEnabled,
+    projectionEnabled,
+    projectionFollowScroll,
   } = options;
 
   return [
@@ -48,9 +52,9 @@ export function buildAppMenuSchema(options: AppMenuSchemaOptions): MenuSchemaIte
       id: APP_MENU_IDS[0],
       label: "文件",
       children: [
-        item("file.newNote", "新建笔记", false),
-        item("file.newNotebook", "新建笔记本", false),
-        item("file.importNote", "导入笔记", false),
+        item("file.newNote", "新建笔记", hasKnowledgeBase),
+        item("file.newNotebook", "新建笔记本", hasKnowledgeBase),
+        item("file.importNote", "导入笔记", hasKnowledgeBase),
         item("file.refreshTree", "刷新笔记仓库", hasKnowledgeBase),
       ],
     },
@@ -58,8 +62,8 @@ export function buildAppMenuSchema(options: AppMenuSchemaOptions): MenuSchemaIte
       id: APP_MENU_IDS[1],
       label: "编辑",
       children: [
-        item("edit.rename", "重命名", false),
-        item("edit.move", "移动", false),
+        item("edit.rename", "重命名", hasCurrentNote),
+        item("edit.move", "移动", hasCurrentNote),
         item("edit.copyLink", "复制链接", hasCurrentNote),
       ],
     },
@@ -72,8 +76,14 @@ export function buildAppMenuSchema(options: AppMenuSchemaOptions): MenuSchemaIte
         { id: "view.toggleRightSidebar", label: "显示右侧栏", enabled: true, checked: rightSidebarVisible },
         { id: "view.editorOnly", label: "仅编辑器", enabled: true, checked: editorMode === "editor" },
         { id: "view.split", label: "分栏编辑", enabled: true, checked: editorMode === "split" },
-        item("view.graph", "知识图谱", false),
-        item("view.revisions", "历史修订", false),
+        item("view.openProjection", "开启投影预览", hasKnowledgeBase && !projectionEnabled),
+        item("view.closeProjection", "关闭投影预览", projectionEnabled),
+        {
+          id: "view.projectionFollowScroll",
+          label: "投影窗口跟随滚动",
+          enabled: projectionEnabled,
+          checked: projectionFollowScroll,
+        },
       ],
     },
     {
@@ -81,11 +91,10 @@ export function buildAppMenuSchema(options: AppMenuSchemaOptions): MenuSchemaIte
       label: "笔记",
       children: [
         item("note.rename", "重命名", hasCurrentNote),
-        item("note.move", "移动", false),
+        item("note.move", "移动", hasCurrentNote),
         item("note.copyLink", "复制链接", hasCurrentNote),
         item("note.copyWikiLink", "复制 Wiki 链接", hasCurrentNote),
         item("note.delete", "删除笔记", hasCurrentNote),
-        item("note.relations", "关系", false),
       ],
     },
     {
@@ -106,8 +115,8 @@ export function buildAppMenuSchema(options: AppMenuSchemaOptions): MenuSchemaIte
       id: APP_MENU_IDS[5],
       label: "帮助",
       children: [
-        item("help.shortcuts", "快捷键", false),
-        item("help.about", "关于 MyNote", false),
+        item("help.shortcuts", "快捷键", true),
+        item("help.about", "关于 MyNote", true),
       ],
     },
   ];

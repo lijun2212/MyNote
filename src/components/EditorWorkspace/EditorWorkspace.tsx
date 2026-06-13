@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useEditorStore } from "../../store/useEditorStore";
+import { useProjectionStore } from "../../store/useProjectionStore";
 import { useSearchSessionStore } from "../../store/useSearchSessionStore";
 import { useOpenNote } from "../../hooks/useOpenNote";
+import { useProjectionSync } from "../../hooks/useProjectionSync";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { useAutoSave } from "../../hooks/useAutoSave";
@@ -9,6 +11,11 @@ import { useEditorSplitResize } from "../../hooks/useEditorSplitResize";
 import { useLookbackSummary } from "../../hooks/useLookbackSummary";
 import { SearchSessionBar } from "./SearchSessionBar";
 import { LookbackSummaryCard } from "./LookbackSummaryCard";
+import {
+  closeProjectionWindow,
+  getProjectionWindowCapabilities,
+  openProjectionWindow,
+} from "../../projection/windowApi";
 import type { SourceLineSyncSignal, SourceLineSyncSource } from "./sourceLineSync";
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -22,6 +29,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
 const LARGE_NOTE_PREVIEW_DEFER_THRESHOLD = 180_000;
 
 export function EditorWorkspace() {
+  const [isSummaryExpanded, setIsSummaryExpanded] = useState(false);
   const {
     currentNote,
     content,
@@ -38,6 +46,8 @@ export function EditorWorkspace() {
   const session = useSearchSessionStore((state) => state.session);
   const setCurrentIndex = useSearchSessionStore((state) => state.setCurrentIndex);
   const clearSession = useSearchSessionStore((state) => state.clearSession);
+  const projectionEnabled = useProjectionStore((state) => state.projectionEnabled);
+  const projectionLastError = useProjectionStore((state) => state.projectionLastError);
   const { openNote, beginOpenNote, isOpenNoteRequestCurrent } = useOpenNote();
   const activeSearchNavigationTarget = searchNavigationTarget
     && (searchNavigationTarget.revision > (tagNavigationTarget?.revision ?? -1))
@@ -47,10 +57,18 @@ export function EditorWorkspace() {
     && (tagNavigationTarget.revision >= (searchNavigationTarget?.revision ?? -1))
     ? tagNavigationTarget
     : null;
+  const { syncProjectionScroll } = useProjectionSync({
+    notePath: currentNote?.path ?? null,
+    noteTitle: currentNote?.title ?? null,
+    content,
+    searchNavigationTarget: activeSearchNavigationTarget,
+    tagNavigationTarget: activeTagNavigationTarget,
+  });
   useAutoSave();
   const [isSeparatorHovered, setIsSeparatorHovered] = useState(false);
   const [sourceLineSyncSignal, setSourceLineSyncSignal] = useState<SourceLineSyncSignal | null>(null);
   const [deferPreviewForLargeNote, setDeferPreviewForLargeNote] = useState(false);
+  const [projectionCapabilities] = useState(() => getProjectionWindowCapabilities());
   const pendingSourceLineSyncRef = useRef<{ source: SourceLineSyncSource; line: number } | null>(null);
   const sourceLineSyncFrameRef = useRef<number | null>(null);
   const navigationRevisionRef = useRef(0);
@@ -167,6 +185,24 @@ export function EditorWorkspace() {
     void navigateToSessionIndex(session.currentIndex + 1);
   }, [navigateToSessionIndex, session]);
 
+  const handleToggleProjection = useCallback(async () => {
+    if (useProjectionStore.getState().projectionEnabled) {
+      await closeProjectionWindow();
+      useProjectionStore.getState().markClosed();
+      return;
+    }
+
+    const store = useProjectionStore.getState();
+    store.beginSession();
+
+    try {
+      await openProjectionWindow();
+    } catch (error) {
+      store.markClosed();
+      store.setError(error instanceof Error ? error.message : "投影窗口启动失败");
+    }
+  }, []);
+
   const handleExitSearchSession = useCallback(() => {
     navigationRevisionRef.current += 1;
     clearSession();
@@ -233,6 +269,12 @@ export function EditorWorkspace() {
     return () => window.clearTimeout(timer);
   }, [content, currentNote?.path, showPreview]);
 
+  useEffect(() => {
+    if (!hasSummary) {
+      setIsSummaryExpanded(false);
+    }
+  }, [hasSummary, currentNote?.path]);
+
   const showOpeningMask = isOpeningNote && Boolean(openingNotePath) && openingNotePath !== currentNote?.path;
 
   if (!currentNote) {
@@ -266,26 +308,41 @@ export function EditorWorkspace() {
       }}>
         <span style={{ fontWeight: 500 }}>{currentNote.title}</span>
         {showOpeningMask && <span style={{ color: "#0969da", fontSize: 11 }}>正在加载笔记...</span>}
-        {error && <span style={{ color: "#b42318", fontSize: 11 }}>{error}</span>}
-        {!error && generationStatus && <span style={{ color: "#475467", fontSize: 11 }}>{generationStatus}</span>}
-        <div style={{ flex: 1 }} />
-        {hasSummary && (
-          <button
-            onClick={() => void clearSummary()}
-            disabled={isSaving || isGenerating}
-            style={{
-              fontSize: 12,
-              padding: "2px 8px",
-              cursor: isSaving || isGenerating ? "default" : "pointer",
-              borderRadius: 4,
-              border: "1px solid #d5c4c4",
-              color: "#7a1f1f",
-              background: "#fff",
-            }}
-          >
-            清除摘要
-          </button>
+        {projectionEnabled && !projectionCapabilities.supportsExternalMonitorPlacement && (
+          <span style={{ color: "#667085", fontSize: 11 }}>请将投影窗口手动拖到副屏后再全屏展示</span>
         )}
+        {projectionLastError && <span style={{ color: "#b42318", fontSize: 11 }}>{projectionLastError}</span>}
+        {!projectionLastError && error && <span style={{ color: "#b42318", fontSize: 11 }}>{error}</span>}
+        {!projectionLastError && !error && generationStatus && <span style={{ color: "#475467", fontSize: 11 }}>{generationStatus}</span>}
+        <div style={{ flex: 1 }} />
+        <button
+          onClick={() => {
+            if (isSummaryExpanded) {
+              setIsSummaryExpanded(false);
+              return;
+            }
+
+            setIsSummaryExpanded(true);
+          }}
+          disabled={isSaving || isGenerating}
+          style={{
+            fontSize: 12,
+            padding: "2px 8px",
+            cursor: isSaving || isGenerating ? "default" : "pointer",
+            borderRadius: 6,
+            border: isSummaryExpanded ? "1px solid #e7c3c3" : "1px solid #cbd5e1",
+            color: isSummaryExpanded ? "#8a2c2c" : "#334155",
+            background: isSummaryExpanded ? "#fff7f7" : "#ffffff",
+          }}
+        >
+          {isSummaryExpanded ? "隐藏摘要" : "展开摘要"}
+        </button>
+        <button
+          onClick={() => void handleToggleProjection()}
+          style={{ fontSize: 12, padding: "2px 8px", cursor: "pointer", borderRadius: 4, border: "1px solid #ccc" }}
+        >
+          {projectionEnabled ? "关闭投影" : "开启投影"}
+        </button>
         <button
           onClick={() => togglePreview()}
           style={{ fontSize: 12, padding: "2px 8px", cursor: "pointer", borderRadius: 4, border: "1px solid #ccc" }}
@@ -293,16 +350,22 @@ export function EditorWorkspace() {
           {showPreview ? "隐藏预览" : "显示预览"}
         </button>
       </div>
-      <LookbackSummaryCard
-        savedSummary={savedSummary}
-        candidate={candidate}
-        isGenerating={isGenerating}
-        isSaving={isSaving}
-        error={error}
-        onCandidateChange={setCandidate}
-        onGenerate={generateCandidate}
-        onSave={saveCandidate}
-      />
+      {isSummaryExpanded && (
+        <LookbackSummaryCard
+          savedSummary={savedSummary}
+          candidate={candidate}
+          isGenerating={isGenerating}
+          isSaving={isSaving}
+          error={error}
+          onCandidateChange={setCandidate}
+          onGenerate={generateCandidate}
+          onSave={saveCandidate}
+          onDeleteSummary={async () => {
+            await clearSummary();
+            setIsSummaryExpanded(false);
+          }}
+        />
+      )}
       <div
         ref={splitContainerRef}
         style={{
@@ -324,7 +387,10 @@ export function EditorWorkspace() {
             searchNavigationTarget={activeSearchNavigationTarget}
             tagNavigationTarget={activeTagNavigationTarget}
             sourceLineSyncSignal={sourceLineSyncSignal}
-            onTopVisibleLineChange={(line) => handleSourceLineSync("editor", line)}
+            onTopVisibleLineChange={(line) => {
+              handleSourceLineSync("editor", line);
+              syncProjectionScroll("main-editor", line);
+            }}
           />
         </div>
         {showPreview && (
@@ -376,7 +442,10 @@ export function EditorWorkspace() {
                   searchNavigationTarget={activeSearchNavigationTarget}
                   tagNavigationTarget={activeTagNavigationTarget}
                   sourceLineSyncSignal={sourceLineSyncSignal}
-                  onTopVisibleLineChange={(line) => handleSourceLineSync("preview", line)}
+                  onTopVisibleLineChange={(line) => {
+                    handleSourceLineSync("preview", line);
+                    syncProjectionScroll("main-preview", line);
+                  }}
                 />
               )}
             </div>

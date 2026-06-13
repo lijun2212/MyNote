@@ -346,6 +346,23 @@ describe("FileTreePanel", () => {
     await waitFor(() => expect(hookMocks.renameNote).toHaveBeenCalledWith("notes/法律/案例.md", "案例-改名"));
   });
 
+  it("keeps the caret at the end during note rename so Backspace edits the name incrementally", async () => {
+    const user = userEvent.setup();
+
+    render(<FileTreePanel />);
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("mynote:menu-rename-note", {
+        detail: { path: "notes/法律/案例.md", noteTitle: "案例" },
+      }));
+    });
+
+    const input = await screen.findByRole("textbox", { name: "重命名笔记 案例.md" });
+    await user.type(input, "{Backspace}");
+
+    expect(input).toHaveValue("案");
+  });
+
   it("keeps note rename draft and error inline when renameNote fails", async () => {
     const user = userEvent.setup();
     hookMocks.renameNote.mockRejectedValue(new Error("名称已存在"));
@@ -413,12 +430,12 @@ describe("FileTreePanel", () => {
         path: "notes/法律/案例.md",
         title: "案例",
         summary: null,
-        contentHash: "hash-1",
-        wordCount: 12,
-        createdAt: "2026-06-09T00:00:00Z",
-        updatedAt: "2026-06-09T00:00:00Z",
-        indexedAt: "2026-06-09T00:00:00Z",
-        deletedAt: null,
+        content_hash: "hash-1",
+        word_count: 12,
+        created_at: "2026-06-09T00:00:00Z",
+        updated_at: "2026-06-09T00:00:00Z",
+        indexed_at: "2026-06-09T00:00:00Z",
+        deleted_at: null,
       },
       content: "# 案例\n\n正文",
     });
@@ -446,7 +463,7 @@ describe("FileTreePanel", () => {
   it("shows a summary badge before note titles when the note has a summary", () => {
     render(<FileTreePanel />);
 
-    expect(screen.getByTestId("summary-badge:notes/法律/案例.md")).toHaveTextContent("摘要");
+    expect(screen.getByTestId("summary-badge:notes/法律/案例.md")).toHaveTextContent("S");
     expect(screen.queryByTestId("summary-badge:notes/我的笔记.md")).not.toBeInTheDocument();
   });
 
@@ -1314,7 +1331,7 @@ describe("FileTreePanel", () => {
     render(<FileTreePanel />);
 
     await waitFor(() => expect(apiMocks.listNotesByTag).toHaveBeenCalledWith(["tag-1"]));
-    expect(screen.getByTestId("summary-badge:notes/法律/案例.md")).toHaveTextContent("摘要");
+    expect(screen.getByTestId("summary-badge:notes/法律/案例.md")).toHaveTextContent("S");
     await user.click(screen.getByRole("button", { name: "新建笔记" }));
 
     const notebookSelect = screen.getByRole("combobox", { name: "目标笔记本" });

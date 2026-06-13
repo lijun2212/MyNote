@@ -9,6 +9,7 @@ export interface LookbackSummaryCardProps {
   onCandidateChange: (value: string) => void;
   onGenerate: () => void | Promise<void>;
   onSave: () => void | Promise<void>;
+  onDeleteSummary: () => void | Promise<void>;
 }
 
 const sectionLabelStyle = {
@@ -16,6 +17,25 @@ const sectionLabelStyle = {
   fontWeight: 600,
   color: "#5f6b7a",
   letterSpacing: 0.2,
+};
+
+const secondaryButtonStyle = {
+  fontSize: 12,
+  padding: "4px 10px",
+  borderRadius: 6,
+  border: "1px solid #cbd5e1",
+  background: "#ffffff",
+  color: "#334155",
+};
+
+const primaryButtonStyle = {
+  fontSize: 12,
+  padding: "4px 10px",
+  borderRadius: 6,
+  border: "1px solid #2563eb",
+  background: "#2563eb",
+  color: "#ffffff",
+  boxShadow: "0 1px 2px rgba(37, 99, 235, 0.18)",
 };
 
 export function LookbackSummaryCard({
@@ -27,11 +47,12 @@ export function LookbackSummaryCard({
   onCandidateChange,
   onGenerate,
   onSave,
+  onDeleteSummary,
 }: LookbackSummaryCardProps) {
   const hasSavedSummary = savedSummary !== null;
-  const [isExpanded, setIsExpanded] = useState(false);
   const [isEditing, setIsEditing] = useState(!hasSavedSummary);
   const canSave = !isSaving && (candidate.trim().length > 0 || hasSavedSummary);
+  const canDelete = hasSavedSummary || candidate.trim().length > 0;
 
   useEffect(() => {
     setIsEditing(!hasSavedSummary);
@@ -75,38 +96,33 @@ export function LookbackSummaryCard({
         <div>
           <div style={{ fontSize: 13, fontWeight: 600, color: "#243041" }}>回看摘要</div>
           <div style={{ fontSize: 11, color: "#6f7c8b", marginTop: 2 }}>
-            {isExpanded ? helperText : "按需展开生成、编辑或保存摘要内容"}
+            {helperText}
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
           <button
             type="button"
-            onClick={() => setIsExpanded((current) => !current)}
+            onClick={() => void onDeleteSummary()}
+            disabled={!canDelete || isSaving}
             style={{
-              fontSize: 12,
-              padding: "4px 10px",
-              cursor: "pointer",
-              borderRadius: 4,
-              border: "1px solid #c6cfdb",
-              background: "#ffffff",
-              color: "#243041",
+              ...secondaryButtonStyle,
+              cursor: canDelete && !isSaving ? "pointer" : "default",
+              border: canDelete ? "1px solid #e7c3c3" : "1px solid #fecaca",
+              background: canDelete ? "#fff7f7" : "#fff5f5",
+              color: canDelete ? "#8a2c2c" : "#d4a1a1",
+              opacity: canDelete ? 1 : 0.72,
             }}
           >
-            {isExpanded ? "隐藏摘要" : "展开摘要"}
+            删除摘要
           </button>
-          {isExpanded && hasSavedSummary && !isEditing ? (
+          {hasSavedSummary && !isEditing ? (
             <>
               <button
                 type="button"
                 onClick={handleEdit}
                 style={{
-                  fontSize: 12,
-                  padding: "4px 10px",
+                  ...secondaryButtonStyle,
                   cursor: "pointer",
-                  borderRadius: 4,
-                  border: "1px solid #c6cfdb",
-                  background: "#ffffff",
-                  color: "#243041",
                 }}
               >
                 编辑摘要
@@ -116,32 +132,24 @@ export function LookbackSummaryCard({
                 onClick={handleGenerate}
                 disabled={isGenerating}
                 style={{
-                  fontSize: 12,
-                  padding: "4px 10px",
+                  ...secondaryButtonStyle,
                   cursor: isGenerating ? "default" : "pointer",
-                  borderRadius: 4,
-                  border: "1px solid #c6cfdb",
-                  background: "#ffffff",
-                  color: "#243041",
+                  opacity: isGenerating ? 0.72 : 1,
                 }}
               >
                 {isGenerating ? "生成中..." : "重新生成"}
               </button>
             </>
-          ) : isExpanded ? (
+          ) : (
             <>
               <button
                 type="button"
                 onClick={handleGenerate}
                 disabled={isGenerating}
                 style={{
-                  fontSize: 12,
-                  padding: "4px 10px",
+                  ...secondaryButtonStyle,
                   cursor: isGenerating ? "default" : "pointer",
-                  borderRadius: 4,
-                  border: "1px solid #c6cfdb",
-                  background: "#ffffff",
-                  color: "#243041",
+                  opacity: isGenerating ? 0.72 : 1,
                 }}
               >
                 {isGenerating ? "生成中..." : hasSavedSummary ? "重新生成" : "生成摘要"}
@@ -151,23 +159,23 @@ export function LookbackSummaryCard({
                 onClick={() => void handleSave()}
                 disabled={!canSave}
                 style={{
-                  fontSize: 12,
-                  padding: "4px 10px",
+                  ...primaryButtonStyle,
                   cursor: canSave ? "pointer" : "default",
-                  borderRadius: 4,
-                  border: "1px solid #b7c3d4",
-                  background: canSave ? "#eef3f9" : "#f5f7fa",
-                  color: canSave ? "#243041" : "#8a95a3",
+                  border: canSave ? primaryButtonStyle.border : "1px solid #bfdbfe",
+                  background: canSave ? primaryButtonStyle.background : "#dbeafe",
+                  color: canSave ? primaryButtonStyle.color : "#eff6ff",
+                  boxShadow: canSave ? primaryButtonStyle.boxShadow : "none",
+                  opacity: canSave ? 1 : 0.72,
                 }}
               >
                 {isSaving ? "保存中..." : "保存摘要"}
               </button>
             </>
-          ) : null}
+          )}
         </div>
       </div>
 
-      {isExpanded && <div style={{ display: "grid", gridTemplateColumns: hasSavedSummary && isEditing ? "minmax(0, 1fr) minmax(0, 1fr)" : "minmax(0, 1fr)", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: hasSavedSummary && isEditing ? "minmax(0, 1fr) minmax(0, 1fr)" : "minmax(0, 1fr)", gap: 12 }}>
         {hasSavedSummary && (
           <div style={{ minWidth: 0 }}>
             <div style={sectionLabelStyle}>已保存</div>
@@ -216,9 +224,9 @@ export function LookbackSummaryCard({
             />
           </label>
         )}
-      </div>}
+      </div>
 
-      {isExpanded && error && (
+      {error && (
         <div role="alert" style={{ fontSize: 12, color: "#b42318" }}>
           {error}
         </div>

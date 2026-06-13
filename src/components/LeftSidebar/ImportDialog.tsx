@@ -100,7 +100,7 @@ export function ImportDialog({ sources, existingDirs, onClose, onDone }: Props) 
       setResult(nextResult);
 
       if (nextResult.imported.length > 0) {
-        const lastImported = nextResult.imported.at(-1)?.note;
+        const lastImported = nextResult.imported[nextResult.imported.length - 1]?.note;
         try {
           await onDone(lastImported);
         } catch (error) {

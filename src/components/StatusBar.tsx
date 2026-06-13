@@ -3,12 +3,18 @@ import { listen } from "@tauri-apps/api/event";
 import { useEditorStore } from "../store/useEditorStore";
 
 export function StatusBar() {
-  const { currentNote, saveStatus, content } = useEditorStore();
+  const { currentNote, saveStatus, content, statusNotice } = useEditorStore();
   const wordCount = content.split(/\s+/).filter(Boolean).length;
   const statusLabel =
     saveStatus === "saving" ? "保存中…" :
     saveStatus === "error" ? "保存失败" :
     saveStatus === "unsaved" ? "未保存" : "已保存";
+  const statusNoticeLabel = statusNotice ? `● ${statusNotice}` : null;
+  const statusTextStyle = statusNotice
+    ? {
+      color: "#0969da",
+    }
+    : undefined;
 
   const [indexing, setIndexing] = useState(false);
   const indexTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -38,7 +44,7 @@ export function StatusBar() {
         <>
           <span>{currentNote.path}</span>
           <span>{wordCount} 字</span>
-          <span>{statusLabel}</span>
+          <span style={statusTextStyle}>{statusNoticeLabel ?? statusLabel}</span>
         </>
       )}
       {indexing && <span style={{ color: "#0969da" }}>● 索引同步中</span>}

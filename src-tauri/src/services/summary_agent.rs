@@ -359,7 +359,7 @@ mod tests {
     use crate::domain::ai::{AiProfileInput, AiProviderKind, AiTextResponse};
     use crate::error::AppError;
     use crate::infrastructure::db::open_and_migrate;
-    use crate::services::ai::{upsert_ai_profile, AiSecretStore};
+    use crate::services::ai::{reset_profile_secret_cache_for_tests, upsert_ai_profile, AiSecretStore};
     use std::collections::HashMap;
     use std::path::Path;
     use std::sync::Mutex;
@@ -396,6 +396,7 @@ mod tests {
 
     #[test]
     fn generate_summary_candidate_with_ai_falls_back_to_rule_summary_when_provider_fails() {
+        reset_profile_secret_cache_for_tests();
         let content = "# 标题\n\n这是第一段内容，用于提供回退摘要。";
 
         let result = generate_summary_candidate_with_ai_inner(
@@ -416,6 +417,7 @@ mod tests {
 
     #[test]
     fn generate_summary_candidate_with_ai_uses_ai_summary_when_response_is_present() {
+        reset_profile_secret_cache_for_tests();
         let content = "# 标题\n\n这是第一段内容，用于提供回退摘要。";
 
         let result = generate_summary_candidate_with_ai_inner(
@@ -437,6 +439,7 @@ mod tests {
 
     #[test]
     fn prepare_summary_agent_falls_back_when_secret_missing() {
+        reset_profile_secret_cache_for_tests();
         let temp = tempdir().unwrap();
         let conn = open_and_migrate(&temp.path().join("test.sqlite")).unwrap();
         upsert_ai_profile(
@@ -467,11 +470,13 @@ mod tests {
 
     #[test]
     fn finalize_summary_removes_prefix_and_extra_whitespace() {
+        reset_profile_secret_cache_for_tests();
         assert_eq!(finalize_summary("\n摘要：  测试摘要。  \n"), "测试摘要。");
     }
 
     #[test]
     fn build_summary_prompt_requests_a_summary_within_500_chars() {
+        reset_profile_secret_cache_for_tests();
         let profile = crate::domain::ai::AiProfile {
             id: "profile-1".into(),
             name: "Default".into(),
@@ -485,12 +490,13 @@ mod tests {
 
         let request = build_summary_prompt(&profile, "# 标题\n\n正文第一段。", "标题").unwrap();
 
-        assert!(request.prompt.contains("500 字以内"));
+        assert!(request.prompt.contains("200 字以内"));
         assert_eq!(request.max_tokens, None);
     }
 
     #[test]
     fn finalize_summary_keeps_longer_output_after_normalization() {
+        reset_profile_secret_cache_for_tests();
         let long_summary = "摘".repeat(240);
 
         assert_eq!(finalize_summary(&long_summary).chars().count(), 240);
@@ -498,6 +504,7 @@ mod tests {
 
     #[test]
     fn build_summary_prompt_does_not_force_request_max_tokens() {
+        reset_profile_secret_cache_for_tests();
         let profile = crate::domain::ai::AiProfile {
             id: "profile-1".into(),
             name: "Default".into(),

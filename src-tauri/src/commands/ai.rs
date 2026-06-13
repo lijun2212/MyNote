@@ -790,6 +790,7 @@ mod tests {
 
     #[test]
     fn input_profile_test_uses_keychain_when_existing_profile_has_no_inline_key() {
+        reset_profile_secret_cache_for_tests();
         let temp = tempdir().unwrap();
         let conn = open_and_migrate(&temp.path().join("test.sqlite")).unwrap();
         let secret_store = MemorySecretStore::default();
@@ -831,6 +832,7 @@ mod tests {
 
     #[test]
     fn input_profile_test_reads_legacy_keychain_entry_when_stable_key_is_missing() {
+        reset_profile_secret_cache_for_tests();
         let temp = tempdir().unwrap();
         let conn = open_and_migrate(&temp.path().join("test.sqlite")).unwrap();
         let secret_store = MemorySecretStore::default();

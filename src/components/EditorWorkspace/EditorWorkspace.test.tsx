@@ -3,8 +3,19 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { EditorWorkspace } from "./EditorWorkspace";
 import { useEditorStore } from "../../store/useEditorStore";
+import { useProjectionStore } from "../../store/useProjectionStore";
 import { useSearchSessionStore } from "../../store/useSearchSessionStore";
 import { deferred, makeNote, makeSearchResult } from "../../test/testData";
+
+const projectionWindowApiMocks = vi.hoisted(() => ({
+  openProjectionWindow: vi.fn(),
+  closeProjectionWindow: vi.fn().mockResolvedValue(undefined),
+  emitProjectionState: vi.fn().mockResolvedValue(undefined),
+  getProjectionWindowCapabilities: vi.fn(() => ({
+    supportsExternalMonitorPlacement: false,
+    supportsFullscreenProjection: true,
+  })),
+}));
 
 const capturedProps = vi.hoisted(() => ({
   editor: null as Record<string, unknown> | null,
@@ -71,6 +82,13 @@ vi.mock("./MarkdownPreview", () => ({
   },
 }));
 
+vi.mock("../../projection/windowApi", () => ({
+  openProjectionWindow: projectionWindowApiMocks.openProjectionWindow,
+  closeProjectionWindow: projectionWindowApiMocks.closeProjectionWindow,
+  emitProjectionState: projectionWindowApiMocks.emitProjectionState,
+  getProjectionWindowCapabilities: projectionWindowApiMocks.getProjectionWindowCapabilities,
+}));
+
 describe("EditorWorkspace", () => {
   beforeEach(() => {
     capturedProps.editor = null;
@@ -90,6 +108,17 @@ describe("EditorWorkspace", () => {
     lookbackSummaryState.clearSummary.mockReset();
     lookbackSummaryState.setCandidate.mockReset();
     useSearchSessionStore.getState().resetForTest();
+    useProjectionStore.getState().resetForTest();
+    projectionWindowApiMocks.openProjectionWindow.mockReset();
+    projectionWindowApiMocks.closeProjectionWindow.mockReset();
+    projectionWindowApiMocks.closeProjectionWindow.mockResolvedValue(undefined);
+    projectionWindowApiMocks.emitProjectionState.mockReset();
+    projectionWindowApiMocks.emitProjectionState.mockResolvedValue(undefined);
+    projectionWindowApiMocks.getProjectionWindowCapabilities.mockReset();
+    projectionWindowApiMocks.getProjectionWindowCapabilities.mockReturnValue({
+      supportsExternalMonitorPlacement: false,
+      supportsFullscreenProjection: true,
+    });
     useEditorStore.setState({
       currentNote: makeNote({ path: "notes/demo.md", title: "Demo" }),
       content: "# Demo\n\nBody",
@@ -135,11 +164,114 @@ describe("EditorWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "展开摘要" }));
     await user.click(screen.getByRole("button", { name: "重新生成" }));
     await user.click(screen.getByRole("button", { name: "保存摘要" }));
-    await user.click(screen.getByRole("button", { name: "清除摘要" }));
+    await user.click(screen.getByRole("button", { name: "删除摘要" }));
 
     expect(lookbackSummaryState.generateCandidate).toHaveBeenCalledTimes(1);
     expect(lookbackSummaryState.saveCandidate).toHaveBeenCalledTimes(1);
     expect(lookbackSummaryState.clearSummary).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the summary region hidden by default and expands it from the top toolbar", async () => {
+    const user = userEvent.setup();
+    render(<EditorWorkspace />);
+
+    expect(screen.queryByLabelText("回看摘要")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "展开摘要" }));
+
+    expect(screen.getByLabelText("回看摘要")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "删除摘要" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "隐藏摘要" })).toBeInTheDocument();
+  });
+
+  it("hides the summary region again from the top toolbar", async () => {
+    const user = userEvent.setup();
+    render(<EditorWorkspace />);
+
+    await user.click(screen.getByRole("button", { name: "展开摘要" }));
+    await user.click(screen.getByRole("button", { name: "隐藏摘要" }));
+
+    expect(screen.queryByLabelText("回看摘要")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "展开摘要" })).toBeInTheDocument();
+  });
+
+  it("collapses the summary region after deleting a saved summary", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<EditorWorkspace />);
+
+    await user.click(screen.getByRole("button", { name: "展开摘要" }));
+    await user.click(screen.getByRole("button", { name: "删除摘要" }));
+
+    lookbackSummaryState.hasSummary = false;
+    lookbackSummaryState.savedSummary = null;
+
+    rerender(<EditorWorkspace />);
+
+    expect(screen.queryByLabelText("回看摘要")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "展开摘要" })).toBeInTheDocument();
+  });
+
+  it("shows an open-projection button and toggles to close when enabled", () => {
+    useProjectionStore.getState().resetForTest();
+    const { rerender } = render(<EditorWorkspace />);
+
+    expect(screen.getByRole("button", { name: "开启投影" })).toBeInTheDocument();
+
+    useProjectionStore.getState().beginSession();
+    rerender(<EditorWorkspace />);
+
+    expect(screen.getByRole("button", { name: "关闭投影" })).toBeInTheDocument();
+  });
+
+  it("opens and closes the projection window from the toolbar button", async () => {
+    const user = userEvent.setup();
+    render(<EditorWorkspace />);
+
+    await user.click(screen.getByRole("button", { name: "开启投影" }));
+
+    expect(projectionWindowApiMocks.openProjectionWindow).toHaveBeenCalledTimes(1);
+    expect(useProjectionStore.getState()).toMatchObject({
+      projectionSessionRequested: true,
+      projectionEnabled: true,
+      projectionWindowReady: false,
+    });
+
+    await user.click(screen.getByRole("button", { name: "关闭投影" }));
+
+    expect(projectionWindowApiMocks.closeProjectionWindow).toHaveBeenCalledTimes(1);
+    expect(useProjectionStore.getState()).toMatchObject({
+      projectionSessionRequested: false,
+      projectionEnabled: false,
+      projectionWindowReady: false,
+    });
+  });
+
+  it("shows a manual placement hint after enabling projection when automatic external monitor placement is unavailable", async () => {
+    const user = userEvent.setup();
+    render(<EditorWorkspace />);
+
+    await user.click(screen.getByRole("button", { name: "开启投影" }));
+
+    expect(screen.getByText("请将投影窗口手动拖到副屏后再全屏展示")).toBeInTheDocument();
+  });
+
+  it("rolls back projection state when opening the projection window fails", async () => {
+    const user = userEvent.setup();
+    projectionWindowApiMocks.openProjectionWindow.mockRejectedValue(new Error("窗口创建失败"));
+
+    render(<EditorWorkspace />);
+
+    await user.click(screen.getByRole("button", { name: "开启投影" }));
+
+    expect(projectionWindowApiMocks.openProjectionWindow).toHaveBeenCalledTimes(1);
+    expect(useProjectionStore.getState()).toMatchObject({
+      projectionSessionRequested: false,
+      projectionEnabled: false,
+      projectionWindowReady: false,
+      projectionLastError: "窗口创建失败",
+    });
+    expect(screen.getByRole("button", { name: "开启投影" })).toBeInTheDocument();
+    expect(screen.getByText("窗口创建失败")).toBeInTheDocument();
   });
 
   it("passes only the latest navigation target to editor and preview", () => {

@@ -10,6 +10,7 @@ function deriveEditorMode(showPreview: boolean): EditorMode {
 interface EditorState {
   currentNote: Note | null;
   content: string;
+  statusNotice: string | null;
   isOpeningNote: boolean;
   openingNotePath: string | null;
   isComposing: boolean;
@@ -34,11 +35,13 @@ interface EditorState {
   setSearchNavigationTarget: (target: SearchNavigationTarget | null) => void;
   setTagNavigationTarget: (target: TagNavigationTarget | null) => void;
   setNoteOpening: (opening: boolean, notePath?: string | null) => void;
+  setStatusNotice: (message: string | null) => void;
 }
 
 export const useEditorStore = create<EditorState>((set, get) => ({
   currentNote: null,
   content: "",
+  statusNotice: null,
   isOpeningNote: false,
   openingNotePath: null,
   isComposing: false,
@@ -73,4 +76,5 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     isOpeningNote: opening,
     openingNotePath: opening ? notePath ?? null : null,
   }),
+  setStatusNotice: (message) => set({ statusNotice: message }),
 }));
