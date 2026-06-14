@@ -14,16 +14,28 @@ export interface AppMenuSchemaOptions {
   projectionFollowScroll: boolean;
 }
 
+export interface MenuSchemaSeparator {
+  id: MenuSchemaId;
+  type: "separator";
+}
+
 export interface MenuSchemaItem {
   id: MenuSchemaId;
   label: string;
   enabled?: boolean;
   checked?: boolean;
-  children?: MenuSchemaItem[];
+  accelerator?: string;
+  children?: MenuSchemaNode[];
 }
 
-function item(id: MenuLeafId, label: string, enabled = true): MenuSchemaItem {
-  return { id, label, enabled };
+export type MenuSchemaNode = MenuSchemaItem | MenuSchemaSeparator;
+
+function item(id: MenuLeafId, label: string, enabled = true, accelerator?: string): MenuSchemaItem {
+  return { id, label, enabled, accelerator };
+}
+
+function separator(id: MenuSchemaId): MenuSchemaSeparator {
+  return { id, type: "separator" };
 }
 
 function isEnabled(handler: unknown) {
@@ -50,12 +62,28 @@ export function buildAppMenuSchema(options: AppMenuSchemaOptions): MenuSchemaIte
   return [
     {
       id: APP_MENU_IDS[0],
-      label: "文件",
+      label: "MyNote",
       children: [
         item("file.newNote", "新建笔记", hasKnowledgeBase),
         item("file.newNotebook", "新建笔记本", hasKnowledgeBase),
+        item("kb.open", "打开知识库", true),
+        item("kb.close", "关闭知识库", hasKnowledgeBase),
         item("file.importNote", "导入笔记", hasKnowledgeBase),
-        item("file.refreshTree", "刷新笔记仓库", hasKnowledgeBase),
+        separator("mynote.separator"),
+        {
+          id: "mynote.ai",
+          label: "AI 设置",
+          children: [
+            item("ai.settings", "打开 AI 设置", true),
+            item("ai.testConnection", "测试模型", hasDefaultAiProfile),
+            {
+              id: "ai.toggleAutoSummaryAgent",
+              label: "启用自动摘要",
+              enabled: hasDefaultAiProfile,
+              checked: autoSummaryAgentEnabled,
+            },
+          ],
+        },
       ],
     },
     {
@@ -64,7 +92,11 @@ export function buildAppMenuSchema(options: AppMenuSchemaOptions): MenuSchemaIte
       children: [
         item("edit.rename", "重命名", hasCurrentNote),
         item("edit.move", "移动", hasCurrentNote),
-        item("edit.copyLink", "复制链接", hasCurrentNote),
+        item("edit.copyLink", "复制链接", hasCurrentNote, "Cmd+L"),
+        item("note.copyWikiLink", "复制 Wiki 链接", hasCurrentNote, "Cmd+Shift+W"),
+        item("note.delete", "删除笔记", hasCurrentNote),
+        item("edit.undo", "撤销", true),
+        item("edit.redo", "重做", true),
       ],
     },
     {
@@ -88,34 +120,10 @@ export function buildAppMenuSchema(options: AppMenuSchemaOptions): MenuSchemaIte
     },
     {
       id: APP_MENU_IDS[3],
-      label: "笔记",
-      children: [
-        item("note.rename", "重命名", hasCurrentNote),
-        item("note.move", "移动", hasCurrentNote),
-        item("note.copyLink", "复制链接", hasCurrentNote),
-        item("note.copyWikiLink", "复制 Wiki 链接", hasCurrentNote),
-        item("note.delete", "删除笔记", hasCurrentNote),
-      ],
-    },
-    {
-      id: APP_MENU_IDS[4],
-      label: "AI",
-      children: [
-        item("ai.settings", "AI 设置", true),
-        item("ai.testConnection", "测试模型连通性", hasDefaultAiProfile),
-        {
-          id: "ai.toggleAutoSummaryAgent",
-          label: "启用自动摘要 Agent",
-          enabled: hasDefaultAiProfile,
-          checked: autoSummaryAgentEnabled,
-        },
-      ],
-    },
-    {
-      id: APP_MENU_IDS[5],
       label: "帮助",
       children: [
         item("help.shortcuts", "快捷键", true),
+        item("help.manual", "使用帮助", true),
         item("help.about", "关于 MyNote", true),
       ],
     },

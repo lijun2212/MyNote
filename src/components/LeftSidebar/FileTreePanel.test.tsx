@@ -625,9 +625,18 @@ describe("FileTreePanel", () => {
     expect(moveGroup).toContainElement(moveDownButton);
     expect(moveGroup).not.toContainElement(screen.getByRole("button", { name: "删除笔记本 项目" }));
     expect(moveGroup).toHaveStyle({ flexDirection: "column" });
+    expect(moveGroup).not.toHaveStyle({ border: "1px solid #d0d7de" });
+    expect(moveUpButton).toHaveStyle({ width: "22px", height: "16px" });
+    expect(moveDownButton).toHaveStyle({ width: "22px", height: "16px" });
     expect(moveUpButton).toHaveTextContent("▲");
     expect(moveDownButton).toHaveTextContent("▼");
-    expect(screen.getByRole("button", { name: "删除笔记本 项目" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "删除笔记本 项目" })).toHaveStyle({
+      width: "20px",
+      height: "20px",
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+    });
     expect(screen.getByRole("button", { name: "编辑笔记本颜色 项目" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "上移笔记本 子目录" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "删除笔记本 未归档" })).not.toBeInTheDocument();
@@ -635,14 +644,49 @@ describe("FileTreePanel", () => {
     expect(screen.queryByRole("button", { name: /更多操作/ })).not.toBeInTheDocument();
   });
 
-  it("hides notebook inline actions until the notebook row is hovered", async () => {
+  it("uses the same bright blue hover style for visible notebook inline actions", async () => {
     const user = userEvent.setup();
+
+    useAppStore.setState({
+      tree: [
+        {
+          id: null,
+          name: "notes",
+          path: "notes",
+          is_dir: true,
+          children: [
+            {
+              id: null,
+              name: "法律",
+              path: "notes/法律",
+              is_dir: true,
+              children: [],
+            },
+            {
+              id: null,
+              name: "产品",
+              path: "notes/产品",
+              is_dir: true,
+              children: [],
+            },
+            {
+              id: null,
+              name: "研发",
+              path: "notes/研发",
+              is_dir: true,
+              children: [],
+            },
+          ],
+        },
+      ],
+    });
 
     render(<FileTreePanel />);
 
-    const notebookTitle = screen.getByRole("button", { name: "法律" });
-    const moveGroup = screen.getByTestId("notebook-move-group:notes/法律");
-    const deleteButton = screen.getByRole("button", { name: "删除笔记本 法律" });
+    const notebookTitle = screen.getByRole("button", { name: "产品" });
+    const moveGroup = screen.getByTestId("notebook-move-group:notes/产品");
+    const moveDownButton = screen.getByRole("button", { name: "下移笔记本 产品" });
+    const deleteButton = screen.getByRole("button", { name: "删除笔记本 产品" });
 
     expect(moveGroup).not.toBeVisible();
     expect(deleteButton).not.toBeVisible();
@@ -651,6 +695,19 @@ describe("FileTreePanel", () => {
 
     expect(moveGroup).toBeVisible();
     expect(deleteButton).toBeVisible();
+
+    fireEvent.mouseEnter(moveDownButton);
+    expect(moveDownButton).toHaveStyle({
+      background: "#eff6ff",
+      color: "#0969da",
+    });
+
+    fireEvent.mouseEnter(deleteButton);
+    expect(deleteButton).toHaveStyle({
+      border: "1px solid #93c5fd",
+      background: "#eff6ff",
+      color: "#0969da",
+    });
 
     await user.unhover(notebookTitle);
 
@@ -868,6 +925,38 @@ describe("FileTreePanel", () => {
 
     expect(screen.getByRole("button", { name: "新建笔记本" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "新建笔记" })).toBeInTheDocument();
+  });
+
+  it("highlights toolbar icon buttons on hover and restores them on mouse leave", async () => {
+    const user = userEvent.setup();
+
+    render(<FileTreePanel />);
+
+    const importButton = screen.getByRole("button", { name: "导入笔记" });
+
+    expect(importButton).toHaveStyle({
+      width: "22px",
+      height: "22px",
+      background: "transparent",
+      border: "1px solid #dde3ea",
+      color: "#4b5563",
+    });
+
+    await user.hover(importButton);
+
+    expect(importButton).toHaveStyle({
+      background: "#eff6ff",
+      border: "1px solid #93c5fd",
+      color: "#0969da",
+    });
+
+    await user.unhover(importButton);
+
+    expect(importButton).toHaveStyle({
+      background: "transparent",
+      border: "1px solid #dde3ea",
+      color: "#4b5563",
+    });
   });
 
   it("blocks new note creation when there is no notebook and asks the user to create one first", async () => {

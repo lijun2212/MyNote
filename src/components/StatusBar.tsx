@@ -2,9 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useEditorStore } from "../store/useEditorStore";
 
+function countCharacters(text: string) {
+  return Array.from(text).filter((char) => !/\s/.test(char)).length;
+}
+
 export function StatusBar() {
   const { currentNote, saveStatus, content, statusNotice } = useEditorStore();
-  const wordCount = content.split(/\s+/).filter(Boolean).length;
+  const wordCount = countCharacters(content);
   const statusLabel =
     saveStatus === "saving" ? "保存中…" :
     saveStatus === "error" ? "保存失败" :

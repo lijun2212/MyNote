@@ -8,6 +8,7 @@ const tauriMocks = vi.hoisted(() => ({
   createWebviewWindow: vi.fn(),
   showWebviewWindow: vi.fn(),
   focusWebviewWindow: vi.fn(),
+  setWebviewWindowTitle: vi.fn(),
   getCurrentWebviewWindow: vi.fn(),
   getWebviewWindowByLabel: vi.fn(),
   closeWebviewWindow: vi.fn(),
@@ -68,6 +69,11 @@ vi.mock("@tauri-apps/api/webviewWindow", () => ({
       tauriMocks.focusWebviewWindow(this.label);
       return undefined;
     }
+
+    async setTitle(title: string) {
+      tauriMocks.setWebviewWindowTitle(this.label, title);
+      return undefined;
+    }
   },
   getCurrentWebviewWindow: tauriMocks.getCurrentWebviewWindow,
 }));
@@ -87,6 +93,7 @@ export function resetTauriMocks() {
   tauriMocks.createWebviewWindow.mockReset();
   tauriMocks.showWebviewWindow.mockReset();
   tauriMocks.focusWebviewWindow.mockReset();
+  tauriMocks.setWebviewWindowTitle.mockReset();
   tauriMocks.getCurrentWebviewWindow.mockReset();
   tauriMocks.getWebviewWindowByLabel.mockReset();
   tauriMocks.getCurrentWebviewWindow.mockReturnValue({

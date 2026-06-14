@@ -6,6 +6,8 @@ function createHandlers() {
   return {
     createNote: vi.fn().mockResolvedValue(undefined),
     createNotebook: vi.fn().mockResolvedValue(undefined),
+    openKnowledgeBase: vi.fn().mockResolvedValue(undefined),
+    closeKnowledgeBase: vi.fn().mockResolvedValue(undefined),
     importNote: vi.fn().mockResolvedValue(undefined),
     refreshFileTree: vi.fn().mockResolvedValue(undefined),
     openSearch: vi.fn().mockResolvedValue(undefined),
@@ -60,6 +62,7 @@ function createHandlers() {
     openRelationTarget: vi.fn().mockResolvedValue(undefined),
     deleteRelation: vi.fn().mockResolvedValue(undefined),
     openShortcuts: vi.fn().mockResolvedValue(undefined),
+    openManual: vi.fn().mockResolvedValue(undefined),
     openAbout: vi.fn().mockResolvedValue(undefined),
   };
 }
@@ -104,6 +107,30 @@ describe("menuActionRunner", () => {
       runner.run("note.delete", { type: "note", noteId: "n1", path: "notes/a.md" }),
     ).resolves.toBe(true);
     expect(handlers.deleteCurrentNote).toHaveBeenCalledOnce();
+  });
+
+  it("routes kb.open to the provided handler", async () => {
+    const handlers = createHandlers();
+    const runner = createMenuActionRunner(handlers);
+
+    await expect(runner.run("kb.open")).resolves.toBe(true);
+    expect(handlers.openKnowledgeBase).toHaveBeenCalledOnce();
+  });
+
+  it("routes kb.close to the provided handler", async () => {
+    const handlers = createHandlers();
+    const runner = createMenuActionRunner(handlers);
+
+    await expect(runner.run("kb.close")).resolves.toBe(true);
+    expect(handlers.closeKnowledgeBase).toHaveBeenCalledOnce();
+  });
+
+  it("routes help.manual to the provided handler", async () => {
+    const handlers = createHandlers();
+    const runner = createMenuActionRunner(handlers);
+
+    await expect(runner.run("help.manual")).resolves.toBe(true);
+    expect(handlers.openManual).toHaveBeenCalledOnce();
   });
 
   it("runs every declared action id", async () => {

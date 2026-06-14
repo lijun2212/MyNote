@@ -18,6 +18,32 @@ import {
 } from "../../projection/windowApi";
 import type { SourceLineSyncSignal, SourceLineSyncSource } from "./sourceLineSync";
 
+function buildToolbarButtonStyle(active = false, hovered = false): React.CSSProperties {
+  if (hovered) {
+    return {
+      fontSize: 12,
+      lineHeight: 1.2,
+      padding: "4px 10px",
+      cursor: "pointer",
+      borderRadius: 8,
+      border: "1px solid #93c5fd",
+      color: "#0969da",
+      background: "#eff6ff",
+    };
+  }
+
+  return {
+    fontSize: 12,
+    lineHeight: 1.2,
+    padding: "4px 10px",
+    cursor: "pointer",
+    borderRadius: 8,
+    border: active ? "1px solid #93c5fd" : "1px solid #d9e0e8",
+    color: active ? "#0969da" : "#475467",
+    background: active ? "#eff6ff" : "#f8fafc",
+  };
+}
+
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
     return false;
@@ -30,6 +56,7 @@ const LARGE_NOTE_PREVIEW_DEFER_THRESHOLD = 180_000;
 
 export function EditorWorkspace() {
   const [isSummaryExpanded, setIsSummaryExpanded] = useState(false);
+  const [hoveredToolbarAction, setHoveredToolbarAction] = useState<"summary" | "projection" | "preview" | null>(null);
   const {
     currentNote,
     content,
@@ -196,7 +223,7 @@ export function EditorWorkspace() {
     store.beginSession();
 
     try {
-      await openProjectionWindow();
+      await openProjectionWindow(currentNote?.title ?? null);
     } catch (error) {
       store.markClosed();
       store.setError(error instanceof Error ? error.message : "投影窗口启动失败");
@@ -325,27 +352,29 @@ export function EditorWorkspace() {
             setIsSummaryExpanded(true);
           }}
           disabled={isSaving || isGenerating}
+          onMouseEnter={() => setHoveredToolbarAction("summary")}
+          onMouseLeave={() => setHoveredToolbarAction((current) => (current === "summary" ? null : current))}
           style={{
-            fontSize: 12,
-            padding: "2px 8px",
+            ...buildToolbarButtonStyle(isSummaryExpanded, hoveredToolbarAction === "summary" && !(isSaving || isGenerating)),
             cursor: isSaving || isGenerating ? "default" : "pointer",
-            borderRadius: 6,
-            border: isSummaryExpanded ? "1px solid #e7c3c3" : "1px solid #cbd5e1",
-            color: isSummaryExpanded ? "#8a2c2c" : "#334155",
-            background: isSummaryExpanded ? "#fff7f7" : "#ffffff",
+            opacity: isSaving || isGenerating ? 0.6 : 1,
           }}
         >
           {isSummaryExpanded ? "隐藏摘要" : "展开摘要"}
         </button>
         <button
           onClick={() => void handleToggleProjection()}
-          style={{ fontSize: 12, padding: "2px 8px", cursor: "pointer", borderRadius: 4, border: "1px solid #ccc" }}
+          onMouseEnter={() => setHoveredToolbarAction("projection")}
+          onMouseLeave={() => setHoveredToolbarAction((current) => (current === "projection" ? null : current))}
+          style={buildToolbarButtonStyle(projectionEnabled, hoveredToolbarAction === "projection")}
         >
           {projectionEnabled ? "关闭投影" : "开启投影"}
         </button>
         <button
           onClick={() => togglePreview()}
-          style={{ fontSize: 12, padding: "2px 8px", cursor: "pointer", borderRadius: 4, border: "1px solid #ccc" }}
+          onMouseEnter={() => setHoveredToolbarAction("preview")}
+          onMouseLeave={() => setHoveredToolbarAction((current) => (current === "preview" ? null : current))}
+          style={buildToolbarButtonStyle(!showPreview, hoveredToolbarAction === "preview")}
         >
           {showPreview ? "隐藏预览" : "显示预览"}
         </button>

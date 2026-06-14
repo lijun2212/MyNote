@@ -11,7 +11,7 @@ import { useEditorStore } from "../../store/useEditorStore";
 import { ContextMenuHost } from "../ContextMenu/ContextMenuHost";
 import { ContextMenuProvider } from "../ContextMenu/useContextMenu";
 import { useAppStore } from "../../store/useAppStore";
-import { deferred, makeKnowledgeBase, makeNote, makeSearchResult } from "../../test/testData";
+import { makeKnowledgeBase, makeNote, makeSearchResult } from "../../test/testData";
 import { StatusBar } from "../StatusBar";
 
 vi.mock("@tauri-apps/api/event", () => ({

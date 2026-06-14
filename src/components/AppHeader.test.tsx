@@ -1,4 +1,5 @@
 import { act, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAppStore } from "../store/useAppStore";
 import { AppHeader } from "./AppHeader";
@@ -45,5 +46,32 @@ describe("AppHeader", () => {
     expect(screen.getByText("Search Overlay")).toBeInTheDocument();
 
     addEventListenerSpy.mockRestore();
+  });
+
+  it("uses the shared bright blue hover style for the search button", async () => {
+    const user = userEvent.setup();
+
+    render(<AppHeader />);
+
+    const searchButton = screen.getByTitle("搜索 (⌘K)");
+
+    expect(searchButton).toHaveStyle({
+      color: "#475467",
+    });
+
+    await user.hover(searchButton);
+
+    expect(searchButton).toHaveStyle({
+      color: "#0969da",
+    });
+  });
+
+  it("renders the search button with a linear svg icon", () => {
+    render(<AppHeader />);
+
+    const searchButton = screen.getByTitle("搜索 (⌘K)");
+
+    expect(searchButton.querySelector("svg")).not.toBeNull();
+    expect(searchButton).not.toHaveTextContent("🔍");
   });
 });

@@ -36,9 +36,10 @@ interface EditorState {
   setTagNavigationTarget: (target: TagNavigationTarget | null) => void;
   setNoteOpening: (opening: boolean, notePath?: string | null) => void;
   setStatusNotice: (message: string | null) => void;
+  resetSession: () => void;
 }
 
-export const useEditorStore = create<EditorState>((set, get) => ({
+const sessionResetState = {
   currentNote: null,
   content: "",
   statusNotice: null,
@@ -48,7 +49,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   isDirty: false,
   isSaving: false,
   saveError: null,
-  saveStatus: "saved",
+  saveStatus: "saved" as const,
+  searchNavigationTarget: null,
+  tagNavigationTarget: null,
+};
+
+export const useEditorStore = create<EditorState>((set, get) => ({
+  ...sessionResetState,
   showPreview: true,
   getEditorMode: () => deriveEditorMode(get().showPreview),
   searchNavigationTarget: null,
@@ -77,4 +84,5 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     openingNotePath: opening ? notePath ?? null : null,
   }),
   setStatusNotice: (message) => set({ statusNotice: message }),
+  resetSession: () => set(sessionResetState),
 }));

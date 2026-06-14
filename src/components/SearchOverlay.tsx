@@ -500,7 +500,7 @@ const styles: Record<string, React.CSSProperties> = {
   historyActionButton: {
     border: "none",
     background: "transparent",
-    color: "#2d5bce",
+    color: "#0969da",
     cursor: "pointer",
     fontSize: 12,
     padding: 0,
@@ -572,6 +572,7 @@ const styles: Record<string, React.CSSProperties> = {
   historyDeleteIconButtonHovered: {
     border: "1px solid #93c5fd",
     background: "#eff6ff",
+    color: "#0969da",
   },
   historyDeleteIconButtonFocused: {
     boxShadow: "0 0 0 3px rgba(37, 99, 235, 0.18)",
@@ -639,9 +640,9 @@ const styles: Record<string, React.CSSProperties> = {
   },
   resultTargetAction: {
     background: "#eff6ff",
-    border: "1px solid #bfdbfe",
+    border: "1px solid #93c5fd",
     borderRadius: 999,
-    color: "#1d4ed8",
+    color: "#0969da",
     cursor: "pointer",
     flexShrink: 0,
     fontSize: 11,

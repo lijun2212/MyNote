@@ -11,6 +11,7 @@ const projectionWindowApiMocks = vi.hoisted(() => ({
   openProjectionWindow: vi.fn(),
   closeProjectionWindow: vi.fn().mockResolvedValue(undefined),
   emitProjectionState: vi.fn().mockResolvedValue(undefined),
+  setProjectionWindowTitle: vi.fn().mockResolvedValue(undefined),
   getProjectionWindowCapabilities: vi.fn(() => ({
     supportsExternalMonitorPlacement: false,
     supportsFullscreenProjection: true,
@@ -86,6 +87,7 @@ vi.mock("../../projection/windowApi", () => ({
   openProjectionWindow: projectionWindowApiMocks.openProjectionWindow,
   closeProjectionWindow: projectionWindowApiMocks.closeProjectionWindow,
   emitProjectionState: projectionWindowApiMocks.emitProjectionState,
+  setProjectionWindowTitle: projectionWindowApiMocks.setProjectionWindowTitle,
   getProjectionWindowCapabilities: projectionWindowApiMocks.getProjectionWindowCapabilities,
 }));
 
@@ -114,6 +116,8 @@ describe("EditorWorkspace", () => {
     projectionWindowApiMocks.closeProjectionWindow.mockResolvedValue(undefined);
     projectionWindowApiMocks.emitProjectionState.mockReset();
     projectionWindowApiMocks.emitProjectionState.mockResolvedValue(undefined);
+    projectionWindowApiMocks.setProjectionWindowTitle.mockReset();
+    projectionWindowApiMocks.setProjectionWindowTitle.mockResolvedValue(undefined);
     projectionWindowApiMocks.getProjectionWindowCapabilities.mockReset();
     projectionWindowApiMocks.getProjectionWindowCapabilities.mockReturnValue({
       supportsExternalMonitorPlacement: false,
@@ -203,7 +207,7 @@ describe("EditorWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "删除摘要" }));
 
     lookbackSummaryState.hasSummary = false;
-    lookbackSummaryState.savedSummary = null;
+    lookbackSummaryState.savedSummary = "";
 
     rerender(<EditorWorkspace />);
 
@@ -229,7 +233,13 @@ describe("EditorWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "开启投影" }));
 
-    expect(projectionWindowApiMocks.openProjectionWindow).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "关闭投影" })).toHaveStyle({
+      background: "#eff6ff",
+      border: "1px solid #93c5fd",
+      color: "#0969da",
+    });
+
+    expect(projectionWindowApiMocks.openProjectionWindow).toHaveBeenCalledWith("Demo");
     expect(useProjectionStore.getState()).toMatchObject({
       projectionSessionRequested: true,
       projectionEnabled: true,
@@ -243,6 +253,35 @@ describe("EditorWorkspace", () => {
       projectionSessionRequested: false,
       projectionEnabled: false,
       projectionWindowReady: false,
+    });
+  });
+
+  it("highlights toolbar buttons on hover and restores them on mouse leave", async () => {
+    const user = userEvent.setup();
+    render(<EditorWorkspace />);
+
+    const projectionButton = screen.getByRole("button", { name: "开启投影" });
+
+    expect(projectionButton).toHaveStyle({
+      background: "#f8fafc",
+      border: "1px solid #d9e0e8",
+      color: "#475467",
+    });
+
+    await user.hover(projectionButton);
+
+    expect(projectionButton).toHaveStyle({
+      background: "#eff6ff",
+      border: "1px solid #93c5fd",
+      color: "#0969da",
+    });
+
+    await user.unhover(projectionButton);
+
+    expect(projectionButton).toHaveStyle({
+      background: "#f8fafc",
+      border: "1px solid #d9e0e8",
+      color: "#475467",
     });
   });
 

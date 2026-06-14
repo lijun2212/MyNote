@@ -119,7 +119,7 @@ describe("ProjectionPreviewShell", () => {
       content: "# Hello Projection",
       lastRevision: 1,
     });
-    expect(screen.getByRole("heading", { name: "演示稿" })).toBeInTheDocument();
+    expect(screen.getByTestId("projection-markdown-preview")).toBeInTheDocument();
 
     await act(async () => {
       scrollHandler?.({
@@ -335,11 +335,7 @@ describe("ProjectionPreviewShell", () => {
       tagNavigationTarget: null,
     }));
 
-    tauriMocks.emitTo.mockImplementation(async (label: string, eventName: string, payload: unknown) => {
-      if (label === "projection-preview" && eventName === projectionEvents.PROJECTION_STATE_SYNC_EVENT) {
-        return undefined;
-      }
-
+    tauriMocks.emitTo.mockImplementation(async (label: string, eventName: string, _payload: unknown) => {
       if (label === "main" && eventName === projectionEvents.PROJECTION_STATE_REQUEST_EVENT) {
         syncHandler?.({
           payload: {
@@ -357,18 +353,6 @@ describe("ProjectionPreviewShell", () => {
       return undefined;
     });
 
-    await waitFor(() => {
-      expect(tauriMocks.emitTo).toHaveBeenCalledWith(
-        "projection-preview",
-        projectionEvents.PROJECTION_STATE_SYNC_EVENT,
-        expect.objectContaining({
-          sessionId: 1,
-          noteTitle: "延迟挂载",
-          content: "# Late mount snapshot",
-        }),
-      );
-    });
-
     render(
       <ContextMenuProvider>
         <ProjectionPreviewShell />
@@ -380,7 +364,14 @@ describe("ProjectionPreviewShell", () => {
       expect(syncHandler).toBeTypeOf("function");
     });
 
-    expect(screen.getByRole("heading", { name: "延迟挂载" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(tauriMocks.emitTo).toHaveBeenCalledWith(
+        "main",
+        projectionEvents.PROJECTION_STATE_REQUEST_EVENT,
+        null,
+      );
+    });
+
     expect(screen.getByTestId("projection-markdown-preview")).toHaveAttribute("data-content", "# Late mount snapshot");
   });
 });

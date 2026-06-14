@@ -150,7 +150,7 @@ describe("SearchOverlay", () => {
       borderRadius: "999px",
       border: "1px solid #93c5fd",
       background: "#eff6ff",
-      color: "#334155",
+      color: "#0969da",
     });
 
     await user.unhover(queryHistoryButton);
@@ -267,6 +267,59 @@ describe("SearchOverlay", () => {
     expect(useSearchSessionStore.getState().recentHits).toEqual([]);
 
     confirmSpy.mockRestore();
+  });
+
+  it("uses the shared bright blue style for clear actions and target actions", async () => {
+    const user = userEvent.setup();
+    setSearchResults([
+      makeSearchResult({
+        note_id: "note-1",
+        title: "Demo",
+        path: "notes/demo.md",
+        source: "link",
+        line_start: 4,
+        line_end: 4,
+        occurrence_order: 1,
+        snippet: "See <mark>target</mark>",
+        link_target_path: "notes/target.md",
+        link_target_title: "Target Note",
+      }),
+    ]);
+    useSearchSessionStore.setState({
+      recentQueries: ["alpha"],
+      recentHits: [
+        {
+          query: "project",
+          note_id: "note-project",
+          note_title: "Project Plan",
+          note_path: "notes/project.md",
+          line_start: 7,
+          line_end: 7,
+          occurrence_order: 1,
+          snippet: "Plan <mark>project</mark>",
+          source: "body",
+        },
+      ],
+    });
+
+    renderSearchOverlay();
+
+    const clearRecentQueriesButton = screen.getByRole("button", { name: "清空最近搜索" });
+    const clearRecentHitsButton = screen.getByRole("button", { name: "清空最近查看命中" });
+
+    expect(clearRecentQueriesButton).toHaveStyle({ color: "#0969da" });
+    expect(clearRecentHitsButton).toHaveStyle({ color: "#0969da" });
+
+    const input = screen.getByPlaceholderText("输入关键词搜索笔记");
+    await user.type(input, "target");
+
+    const targetActionButton = await screen.findByRole("button", { name: "打开目标笔记 Target Note" });
+
+    expect(targetActionButton).toHaveStyle({
+      border: "1px solid #93c5fd",
+      background: "#eff6ff",
+      color: "#0969da",
+    });
   });
 
   it("confirms before clearing recent queries", async () => {

@@ -11,10 +11,14 @@ import { tauriMocks } from "../test/setup";
 
 const projectionWindowApiMocks = vi.hoisted(() => ({
   emitProjectionState: vi.fn().mockResolvedValue(undefined),
+  hasProjectionWindow: vi.fn().mockResolvedValue(true),
+  setProjectionWindowTitle: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../projection/windowApi", () => ({
   emitProjectionState: projectionWindowApiMocks.emitProjectionState,
+  hasProjectionWindow: projectionWindowApiMocks.hasProjectionWindow,
+  setProjectionWindowTitle: projectionWindowApiMocks.setProjectionWindowTitle,
 }));
 
 function makeSearchNavigationTarget() {
@@ -55,6 +59,10 @@ describe("useProjectionSync", () => {
     useProjectionStore.getState().resetForTest();
     projectionWindowApiMocks.emitProjectionState.mockReset();
     projectionWindowApiMocks.emitProjectionState.mockResolvedValue(undefined);
+    projectionWindowApiMocks.hasProjectionWindow.mockReset();
+    projectionWindowApiMocks.hasProjectionWindow.mockResolvedValue(true);
+    projectionWindowApiMocks.setProjectionWindowTitle.mockReset();
+    projectionWindowApiMocks.setProjectionWindowTitle.mockResolvedValue(undefined);
     tauriMocks.listen.mockReset();
     tauriMocks.listen.mockResolvedValue(() => undefined);
   });
@@ -83,6 +91,33 @@ describe("useProjectionSync", () => {
         }),
       );
     });
+
+    expect(projectionWindowApiMocks.setProjectionWindowTitle).toHaveBeenCalledWith("Demo");
+  });
+
+  it("updates the projection window title when the active note title changes", async () => {
+    useProjectionStore.getState().beginSession();
+    useProjectionStore.getState().setReady(true);
+
+    const { rerender } = renderHook(({ noteTitle }) => useProjectionSync({
+      notePath: "notes/demo.md",
+      noteTitle,
+      content: "# Demo",
+      searchNavigationTarget: null,
+      tagNavigationTarget: null,
+    }), {
+      initialProps: { noteTitle: "First Note" },
+    });
+
+    await waitFor(() => {
+      expect(projectionWindowApiMocks.setProjectionWindowTitle).toHaveBeenCalledWith("First Note");
+    });
+
+    rerender({ noteTitle: "Second Note" });
+
+    await waitFor(() => {
+      expect(projectionWindowApiMocks.setProjectionWindowTitle).toHaveBeenLastCalledWith("Second Note");
+    });
   });
 
   it("does not emit a projection state snapshot when no projection session is active", async () => {
@@ -101,7 +136,7 @@ describe("useProjectionSync", () => {
     expect(projectionWindowApiMocks.emitProjectionState).not.toHaveBeenCalled();
   });
 
-  it("emits the initial projection state snapshot for a newly requested session before ready", async () => {
+  it("does not eagerly emit a projection state snapshot before the projection window is ready", async () => {
     useProjectionStore.getState().beginSession();
 
     renderHook(() => useProjectionSync({
@@ -112,18 +147,12 @@ describe("useProjectionSync", () => {
       tagNavigationTarget: null,
     }));
 
-    await waitFor(() => {
-      expect(projectionWindowApiMocks.emitProjectionState).toHaveBeenCalledWith(
-        PROJECTION_STATE_SYNC_EVENT,
-        expect.objectContaining({
-          sessionId: 1,
-          revision: 1,
-          notePath: "notes/demo.md",
-          noteTitle: "Demo",
-          content: "# Demo",
-        }),
-      );
+    await act(async () => {
+      await Promise.resolve();
     });
+
+    expect(projectionWindowApiMocks.emitProjectionState).not.toHaveBeenCalled();
+    expect(projectionWindowApiMocks.setProjectionWindowTitle).not.toHaveBeenCalled();
   });
 
   it("emits scroll sync only when follow-scroll remains enabled", async () => {
@@ -185,6 +214,58 @@ describe("useProjectionSync", () => {
     });
   });
 
+  it("does not surface a sync error when only the projection window title update fails", async () => {
+    projectionWindowApiMocks.setProjectionWindowTitle.mockRejectedValueOnce(new Error("set title failed"));
+    useProjectionStore.getState().beginSession();
+    useProjectionStore.getState().setReady(true);
+
+    renderHook(() => useProjectionSync({
+      notePath: "notes/demo.md",
+      noteTitle: "Demo",
+      content: "# Demo",
+      searchNavigationTarget: null,
+      tagNavigationTarget: null,
+    }));
+
+    await waitFor(() => {
+      expect(projectionWindowApiMocks.emitProjectionState).toHaveBeenCalledWith(
+        PROJECTION_STATE_SYNC_EVENT,
+        expect.objectContaining({
+          sessionId: 1,
+          revision: 1,
+          noteTitle: "Demo",
+          content: "# Demo",
+        }),
+      );
+    });
+
+    expect(useProjectionStore.getState().projectionLastError).toBeNull();
+  });
+
+  it("marks projection closed instead of surfacing an error when the projection window no longer exists", async () => {
+    projectionWindowApiMocks.emitProjectionState.mockRejectedValueOnce(new Error("window not found"));
+    projectionWindowApiMocks.hasProjectionWindow.mockResolvedValue(false);
+    useProjectionStore.getState().beginSession();
+    useProjectionStore.getState().setReady(true);
+
+    renderHook(() => useProjectionSync({
+      notePath: "notes/demo.md",
+      noteTitle: "Demo",
+      content: "# Demo",
+      searchNavigationTarget: null,
+      tagNavigationTarget: null,
+    }));
+
+    await waitFor(() => {
+      expect(useProjectionStore.getState()).toMatchObject({
+        projectionSessionRequested: false,
+        projectionEnabled: false,
+        projectionWindowReady: false,
+        projectionLastError: null,
+      });
+    });
+  });
+
   it("replays the current projection state when the projection window requests it after mount", async () => {
     useProjectionStore.getState().beginSession();
 
@@ -206,16 +287,7 @@ describe("useProjectionSync", () => {
     }));
 
     await waitFor(() => {
-      expect(projectionWindowApiMocks.emitProjectionState).toHaveBeenCalledWith(
-        PROJECTION_STATE_SYNC_EVENT,
-        expect.objectContaining({
-          sessionId: 1,
-          revision: 1,
-          notePath: "notes/demo.md",
-          noteTitle: "Demo",
-          content: "# Demo",
-        }),
-      );
+      expect(requestHandler).toBeTypeOf("function");
     });
 
     await act(async () => {
@@ -226,7 +298,7 @@ describe("useProjectionSync", () => {
       PROJECTION_STATE_SYNC_EVENT,
       expect.objectContaining({
         sessionId: 1,
-        revision: 2,
+        revision: 1,
         notePath: "notes/demo.md",
         noteTitle: "Demo",
         content: "# Demo",

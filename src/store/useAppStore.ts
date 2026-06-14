@@ -24,6 +24,7 @@ interface AppState {
   setError: (error: string | null) => void;
   refreshTree: () => Promise<void>;
   setSelectedTagIds: (ids: string[]) => void;
+  clearKnowledgeBaseSession: () => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -47,6 +48,14 @@ export const useAppStore = create<AppState>((set) => ({
   toggleRightSidebar: () => set((state) => ({ rightSidebarVisible: !state.rightSidebarVisible })),
   setError: (error) => set({ error }),
   setSelectedTagIds: (ids) => set({ selectedTagIds: ids }),
+  clearKnowledgeBaseSession: () => set({
+    kb: null,
+    tree: [],
+    selectedNodePath: null,
+    activeTagContext: null,
+    error: null,
+    selectedTagIds: [],
+  }),
 
   refreshTree: async () => {
     try {

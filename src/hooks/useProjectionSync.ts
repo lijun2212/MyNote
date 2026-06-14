@@ -5,7 +5,7 @@ import {
   PROJECTION_STATE_REQUEST_EVENT,
   PROJECTION_STATE_SYNC_EVENT,
 } from "../projection/events";
-import { emitProjectionState } from "../projection/windowApi";
+import { emitProjectionState, hasProjectionWindow, setProjectionWindowTitle } from "../projection/windowApi";
 import { useProjectionStore } from "../store/useProjectionStore";
 import type { SearchNavigationTarget, TagNavigationTarget } from "../types";
 
@@ -25,6 +25,25 @@ function toErrorMessage(error: unknown) {
   }
 
   return "投影同步失败";
+}
+
+async function recoverIfProjectionWindowClosed(error: unknown) {
+  const store = useProjectionStore.getState();
+
+  if (!(await hasProjectionWindow())) {
+    store.markClosed();
+    return;
+  }
+
+  store.setError(toErrorMessage(error));
+}
+
+async function recoverClosedWindowOnly() {
+  const store = useProjectionStore.getState();
+
+  if (!(await hasProjectionWindow())) {
+    store.markClosed();
+  }
 }
 
 export function useProjectionSync({
@@ -49,6 +68,11 @@ export function useProjectionSync({
 
     revisionRef.current += 1;
 
+    void setProjectionWindowTitle(noteTitle).catch((error) => {
+      void error;
+      void recoverClosedWindowOnly();
+    });
+
     void emitProjectionState(PROJECTION_STATE_SYNC_EVENT, {
       sessionId: store.projectionSessionId,
       revision: revisionRef.current,
@@ -58,12 +82,12 @@ export function useProjectionSync({
       searchNavigationTarget,
       tagNavigationTarget,
     }).catch((error) => {
-      store.setError(toErrorMessage(error));
+      void recoverIfProjectionWindowClosed(error);
     });
   }, [content, notePath, noteTitle, searchNavigationTarget, tagNavigationTarget]);
 
   useEffect(() => {
-    if (!projectionEnabled || (!projectionWindowReady && !projectionSessionRequested)) {
+    if (!projectionEnabled || !projectionWindowReady) {
       return;
     }
 
@@ -119,7 +143,7 @@ export function useProjectionSync({
       source,
       topVisibleLine,
     }).catch((error) => {
-      store.setError(toErrorMessage(error));
+      void recoverIfProjectionWindowClosed(error);
     });
   }, []);
 

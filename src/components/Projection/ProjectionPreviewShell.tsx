@@ -17,7 +17,6 @@ const MAIN_WINDOW_LABEL = "main";
 
 export function ProjectionPreviewShell() {
   const projectionSessionId = useProjectionStore((state) => state.projectionSessionId);
-  const noteTitle = useProjectionStore((state) => state.noteTitle);
   const content = useProjectionStore((state) => state.content);
   const searchNavigationTarget = useProjectionStore((state) => state.searchNavigationTarget);
   const tagNavigationTarget = useProjectionStore((state) => state.tagNavigationTarget);
@@ -115,13 +114,7 @@ export function ProjectionPreviewShell() {
 
   return (
     <main data-testid="projection-preview-shell" style={{ minHeight: "100vh", background: "#fff" }}>
-      <div style={{ padding: "24px 32px" }}>
-        <h1 style={{ margin: 0, fontSize: "1.5rem" }}>{noteTitle ?? "投影预览"}</h1>
-        <p style={{ margin: "12px 0 0", color: "#5b6472", lineHeight: 1.6 }}>
-          当前窗口处于只读投影预览模式。
-        </p>
-      </div>
-      <div style={{ height: "calc(100vh - 110px)", padding: "0 32px 32px" }}>
+      <div style={{ minHeight: "100vh", padding: "32px" }}>
         <MarkdownPreview
           content={content}
           searchNavigationTarget={searchNavigationTarget}

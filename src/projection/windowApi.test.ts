@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { tauriMocks } from "../test/setup";
 import {
   closeProjectionWindow,
@@ -9,12 +9,12 @@ import {
 
 describe("projection windowApi", () => {
   it("creates and focuses the projection preview window with the expected label and role", async () => {
-    await openProjectionWindow();
+    await openProjectionWindow("技术方案");
 
     expect(tauriMocks.createWebviewWindow).toHaveBeenCalledWith(
       "projection-preview",
       expect.objectContaining({
-        title: "Projection Preview",
+        title: "技术方案",
         url: "/?windowRole=projection-preview",
         visible: true,
         focus: true,
@@ -23,6 +23,17 @@ describe("projection windowApi", () => {
     );
     expect(tauriMocks.showWebviewWindow).toHaveBeenCalledWith("projection-preview");
     expect(tauriMocks.focusWebviewWindow).toHaveBeenCalledWith("projection-preview");
+  });
+
+  it("falls back to a generic title when no note title is available", async () => {
+    await openProjectionWindow(null);
+
+    expect(tauriMocks.createWebviewWindow).toHaveBeenCalledWith(
+      "projection-preview",
+      expect.objectContaining({
+        title: "投影预览",
+      }),
+    );
   });
 
   it("closes the current projection window", async () => {

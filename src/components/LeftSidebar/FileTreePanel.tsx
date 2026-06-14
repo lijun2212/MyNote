@@ -49,6 +49,68 @@ const FALLBACK_NOTEBOOK_ICON = "folder";
 const DEFAULT_NOTEBOOK_ICON = "book";
 const DEFAULT_NOTEBOOK_COLOR = "blue";
 
+const toolbarIconButtonStyle: CSSProperties = {
+  width: 22,
+  height: 22,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 0,
+  background: "transparent",
+  border: "1px solid #dde3ea",
+  borderRadius: 6,
+  cursor: "pointer",
+  color: "#4b5563",
+};
+
+const toolbarIconButtonHoverStyle: CSSProperties = {
+  background: "#eff6ff",
+  border: "1px solid #93c5fd",
+  color: "#0969da",
+};
+
+const toolbarIconStyle: CSSProperties = {
+  width: 13,
+  height: 13,
+  display: "block",
+  stroke: "currentColor",
+  strokeWidth: 1.8,
+  fill: "none",
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+};
+
+function ImportNoteIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 16 16" style={toolbarIconStyle}>
+      <path d="M8 2.5v6" />
+      <path d="m5.5 6.5 2.5 2.5 2.5-2.5" />
+      <path d="M3 10.5h10v2a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" />
+    </svg>
+  );
+}
+
+function NewNotebookIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 16 16" style={toolbarIconStyle}>
+      <path d="M2.5 4.5h4l1 1h6v6.5a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z" />
+      <path d="M11.5 7.25v3.5" />
+      <path d="M9.75 9h3.5" />
+    </svg>
+  );
+}
+
+function NewNoteIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 16 16" style={toolbarIconStyle}>
+      <path d="M4 2.5h5l3 3v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-10a1 1 0 0 1 1-1z" />
+      <path d="M9 2.5v3h3" />
+      <path d="M8 8v3" />
+      <path d="M6.5 9.5h3" />
+    </svg>
+  );
+}
+
 function logNoteDrag(event: string, details: Record<string, unknown>) {
   console.info(DRAG_DEBUG_PREFIX, event, details);
 }
@@ -134,8 +196,20 @@ export function FileTreePanel() {
   const knownDirectoryPathsRef = useRef<Set<string>>(new Set());
   const [importSourcePickerOpen, setImportSourcePickerOpen] = useState(false);
   const [importSources, setImportSources] = useState<MarkdownImportSource[] | null>(null);
+  const [hoveredToolbarAction, setHoveredToolbarAction] = useState<"import" | "new-notebook" | "new-note" | null>(null);
   const treeView = selectedTagIds.length > 0 ? tree : buildNotebookTreeView(tree);
   const notebookSourceTree = selectedTagIds.length > 0 ? fullTreeRef.current : tree;
+
+  function getToolbarIconButtonStyle(action: "import" | "new-notebook" | "new-note"): CSSProperties {
+    if (hoveredToolbarAction !== action) {
+      return toolbarIconButtonStyle;
+    }
+
+    return {
+      ...toolbarIconButtonStyle,
+      ...toolbarIconButtonHoverStyle,
+    };
+  }
 
   function collectNotebookRoots(nodes: NoteTreeNode[]) {
     const notesRoot = nodes.find((node) => node.is_dir && node.path === "notes");
@@ -1071,10 +1145,12 @@ function getNoteTitleFromPath(notePath: string): string {
             <button
               onClick={handleImport}
               aria-label="导入笔记"
-              style={{ fontSize: 14, background: "none", border: "none", cursor: "pointer", lineHeight: 1, color: "#555", padding: "2px 4px" }}
+              onMouseEnter={() => setHoveredToolbarAction("import")}
+              onMouseLeave={() => setHoveredToolbarAction((current) => (current === "import" ? null : current))}
+              style={getToolbarIconButtonStyle("import")}
               title="导入笔记"
             >
-              ↓
+              <ImportNoteIcon />
             </button>
             {importSourcePickerOpen && (
               <div
@@ -1082,7 +1158,6 @@ function getNoteTitleFromPath(notePath: string): string {
                 aria-label="导入来源"
                 style={{
                   position: "absolute",
-                  left: "auto",
                   right: 0,
                   top: "calc(100% + 6px)",
                   minWidth: 188,
@@ -1142,18 +1217,22 @@ function getNoteTitleFromPath(notePath: string): string {
           <button
             onClick={handleNewNotebook}
             aria-label="新建笔记本"
-            style={{ fontSize: 14, background: "none", border: "none", cursor: "pointer", lineHeight: 1, color: "#555", padding: "2px 4px" }}
+            onMouseEnter={() => setHoveredToolbarAction("new-notebook")}
+            onMouseLeave={() => setHoveredToolbarAction((current) => (current === "new-notebook" ? null : current))}
+            style={getToolbarIconButtonStyle("new-notebook")}
             title="新建笔记本"
           >
-            ▣
+            <NewNotebookIcon />
           </button>
           <button
             onClick={() => void handleNewNote()}
             aria-label="新建笔记"
-            style={{ fontSize: 18, background: "none", border: "none", cursor: "pointer", lineHeight: 1, color: "#555", padding: "0 2px" }}
+            onMouseEnter={() => setHoveredToolbarAction("new-note")}
+            onMouseLeave={() => setHoveredToolbarAction((current) => (current === "new-note" ? null : current))}
+            style={getToolbarIconButtonStyle("new-note")}
             title="新建笔记"
           >
-            +
+            <NewNoteIcon />
           </button>
         </div>
       </div>

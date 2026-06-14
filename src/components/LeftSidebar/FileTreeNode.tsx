@@ -2,6 +2,10 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { NoteTreeNode } from "../../types";
 import { getDropDirectoryPath } from "./fileTreeDrag";
 
+const ACTION_HIGHLIGHT_BACKGROUND = "#eff6ff";
+const ACTION_HIGHLIGHT_BORDER = "#93c5fd";
+const ACTION_HIGHLIGHT_TEXT = "#0969da";
+
 const NOTEBOOK_COLOR_STYLES: Record<string, { background: string; color: string }> = {
   blue: { background: "#dbeafe", color: "#1d4ed8" },
   cyan: { background: "#cffafe", color: "#0f766e" },
@@ -36,6 +40,27 @@ function countNotes(node: NoteTreeNode): number {
   }
 
   return node.children.reduce((total, child) => total + countNotes(child), 0);
+}
+
+function DeleteNotebookIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      style={{
+        width: 10,
+        height: 10,
+        display: "block",
+        stroke: "currentColor",
+        strokeWidth: 1.8,
+        fill: "none",
+        strokeLinecap: "round",
+      }}
+    >
+      <path d="M4.5 4.5 11.5 11.5" />
+      <path d="M11.5 4.5 4.5 11.5" />
+    </svg>
+  );
 }
 
 interface Props {
@@ -129,6 +154,7 @@ export function FileTreeNode({
   const [shouldRenderChildren, setShouldRenderChildren] = useState(true);
   const [contentHeight, setContentHeight] = useState(0);
   const [isNotebookRowHovered, setIsNotebookRowHovered] = useState(false);
+  const [hoveredNotebookAction, setHoveredNotebookAction] = useState<"move-up" | "move-down" | "delete" | null>(null);
   const [isToggleFocusVisible, setIsToggleFocusVisible] = useState(false);
   const [isTitleFocusVisible, setIsTitleFocusVisible] = useState(false);
   const [focusVisibleAction, setFocusVisibleAction] = useState<"color" | "move-up" | "move-down" | "delete" | null>(null);
@@ -559,10 +585,8 @@ export function FileTreeNode({
                     flexDirection: "column",
                     alignItems: "center",
                     gap: 0,
-                    borderRadius: 8,
-                    overflow: "hidden",
-                    border: "1px solid #d0d7de",
-                    background: disableMoveUp || disableMoveDown || isRenamingNotebook ? "#f8fafc" : "#fff",
+                    border: "none",
+                    background: "transparent",
                   }}
                 >
                   <button
@@ -576,23 +600,31 @@ export function FileTreeNode({
                     onFocus={(event) => handleActionFocus("move-up", event)}
                     onBlur={() => clearActionFocus("move-up")}
                     style={{
-                      width: 24,
-                      height: 18,
+                      width: 22,
+                      height: 16,
                       border: "none",
                       borderBottom: "1px solid #d0d7de",
                       outline: "none",
                       background: disableMoveUp || isRenamingNotebook
                         ? "#f8fafc"
+                        : hoveredNotebookAction === "move-up"
+                          ? ACTION_HIGHLIGHT_BACKGROUND
                         : isMoveUpFocusVisible
-                          ? "#eff6ff"
+                          ? ACTION_HIGHLIGHT_BACKGROUND
                           : "#fff",
-                      color: disableMoveUp || isRenamingNotebook ? "#98a2b3" : "#334155",
-                      fontSize: 10,
+                      color: disableMoveUp || isRenamingNotebook
+                        ? "#98a2b3"
+                        : hoveredNotebookAction === "move-up" || isMoveUpFocusVisible
+                          ? ACTION_HIGHLIGHT_TEXT
+                          : "#334155",
+                      fontSize: 9,
                       lineHeight: 1,
                       cursor: disableMoveUp || isRenamingNotebook ? "not-allowed" : "pointer",
-                      boxShadow: isMoveUpFocusVisible ? "inset 0 0 0 1px #93c5fd" : "none",
+                      boxShadow: isMoveUpFocusVisible ? `inset 0 0 0 1px ${ACTION_HIGHLIGHT_BORDER}` : "none",
                       transition: "box-shadow 180ms ease, background 180ms ease",
                     }}
+                    onMouseEnter={() => setHoveredNotebookAction("move-up")}
+                    onMouseLeave={() => setHoveredNotebookAction((current) => (current === "move-up" ? null : current))}
                   >
                     ▲
                   </button>
@@ -607,22 +639,30 @@ export function FileTreeNode({
                     onFocus={(event) => handleActionFocus("move-down", event)}
                     onBlur={() => clearActionFocus("move-down")}
                     style={{
-                      width: 24,
-                      height: 18,
+                        width: 22,
+                        height: 16,
                       border: "none",
                       outline: "none",
                       background: disableMoveDown || isRenamingNotebook
                         ? "#f8fafc"
+                        : hoveredNotebookAction === "move-down"
+                          ? ACTION_HIGHLIGHT_BACKGROUND
                         : isMoveDownFocusVisible
-                          ? "#eff6ff"
+                          ? ACTION_HIGHLIGHT_BACKGROUND
                           : "#fff",
-                      color: disableMoveDown || isRenamingNotebook ? "#98a2b3" : "#334155",
-                      fontSize: 10,
+                      color: disableMoveDown || isRenamingNotebook
+                        ? "#98a2b3"
+                        : hoveredNotebookAction === "move-down" || isMoveDownFocusVisible
+                          ? ACTION_HIGHLIGHT_TEXT
+                          : "#334155",
+                      fontSize: 9,
                       lineHeight: 1,
                       cursor: disableMoveDown || isRenamingNotebook ? "not-allowed" : "pointer",
-                      boxShadow: isMoveDownFocusVisible ? "inset 0 0 0 1px #93c5fd" : "none",
+                      boxShadow: isMoveDownFocusVisible ? `inset 0 0 0 1px ${ACTION_HIGHLIGHT_BORDER}` : "none",
                       transition: "box-shadow 180ms ease, background 180ms ease",
                     }}
+                    onMouseEnter={() => setHoveredNotebookAction("move-down")}
+                    onMouseLeave={() => setHoveredNotebookAction((current) => (current === "move-down" ? null : current))}
                   >
                     ▼
                   </button>
@@ -639,25 +679,43 @@ export function FileTreeNode({
                   onFocus={(event) => handleActionFocus("delete", event)}
                   onBlur={() => clearActionFocus("delete")}
                   style={{
-                    width: 22,
-                    height: 22,
+                    width: 20,
+                    height: 20,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
                     borderRadius: 999,
-                    border: isDeleteFocusVisible
-                      ? "1px solid #93c5fd"
+                    border: isDeleteFocusVisible || hoveredNotebookAction === "delete"
+                      ? `1px solid ${ACTION_HIGHLIGHT_BORDER}`
                       : isConfirmingNotebookDelete
                         ? "1px solid #fecaca"
                         : "1px solid #d0d7de",
                     outline: "none",
-                    background: isRenamingNotebook ? "#f8fafc" : isConfirmingNotebookDelete ? "#fef2f2" : "#fff",
-                    color: isRenamingNotebook ? "#98a2b3" : isConfirmingNotebookDelete ? "#b91c1c" : "#334155",
-                    fontSize: 12,
+                    background: isRenamingNotebook
+                      ? "#f8fafc"
+                      : isConfirmingNotebookDelete
+                        ? "#fef2f2"
+                        : hoveredNotebookAction === "delete" || isDeleteFocusVisible
+                          ? ACTION_HIGHLIGHT_BACKGROUND
+                          : "#fff",
+                    color: isRenamingNotebook
+                      ? "#98a2b3"
+                      : isConfirmingNotebookDelete
+                        ? "#b91c1c"
+                        : hoveredNotebookAction === "delete" || isDeleteFocusVisible
+                          ? ACTION_HIGHLIGHT_TEXT
+                          : "#334155",
+                    fontSize: 11,
                     lineHeight: 1,
+                    padding: 0,
                     cursor: isRenamingNotebook ? "not-allowed" : "pointer",
                     boxShadow: isDeleteFocusVisible ? "0 0 0 3px rgba(37, 99, 235, 0.18)" : "none",
                     transition: "border-color 180ms ease, box-shadow 180ms ease, background 180ms ease",
                   }}
+                  onMouseEnter={() => setHoveredNotebookAction("delete")}
+                  onMouseLeave={() => setHoveredNotebookAction((current) => (current === "delete" ? null : current))}
                 >
-                  ×
+                  <DeleteNotebookIcon />
                 </button>
               </div>
             )}

@@ -22,6 +22,8 @@ type MaybePromise = Promise<void> | void;
 export interface MenuActionRunnerHandlers {
   createNote?: () => MaybePromise;
   createNotebook?: () => MaybePromise;
+  openKnowledgeBase?: () => MaybePromise;
+  closeKnowledgeBase?: () => MaybePromise;
   importNote?: () => MaybePromise;
   refreshFileTree?: () => MaybePromise;
   openSearch?: () => MaybePromise;
@@ -76,6 +78,7 @@ export interface MenuActionRunnerHandlers {
   openRelationTarget?: (payload: RelationItemContextMenuPayload) => MaybePromise;
   deleteRelation?: (payload: RelationItemContextMenuPayload) => MaybePromise;
   openShortcuts?: () => MaybePromise;
+  openManual?: () => MaybePromise;
   openAbout?: () => MaybePromise;
 }
 
@@ -220,11 +223,15 @@ export function createMenuActionRunner(handlers: MenuActionRunnerHandlers) {
   const actionExecutors: Record<MenuActionId, (payload?: ContextMenuPayload) => MaybePromise> = {
     "file.newNote": () => requireHandler(handlers, "file.newNote", "createNote")(),
     "file.newNotebook": () => requireHandler(handlers, "file.newNotebook", "createNotebook")(),
+    "kb.open": () => requireHandler(handlers, "kb.open", "openKnowledgeBase")(),
+    "kb.close": () => requireHandler(handlers, "kb.close", "closeKnowledgeBase")(),
     "file.importNote": () => requireHandler(handlers, "file.importNote", "importNote")(),
     "file.refreshTree": () => requireHandler(handlers, "file.refreshTree", "refreshFileTree")(),
     "edit.rename": (payload) => requireHandler(handlers, "edit.rename", "renameCurrentNote")(assertNotePayload(payload)),
     "edit.move": (payload) => requireHandler(handlers, "edit.move", "moveCurrentNote")(assertNotePayload(payload)),
     "edit.copyLink": (payload) => requireHandler(handlers, "edit.copyLink", "copyCurrentNoteLink")(assertNotePayload(payload)),
+    "edit.undo": () => undefined,
+    "edit.redo": () => undefined,
     "view.search": () => requireHandler(handlers, "view.search", "openSearch")(),
     "view.toggleLeftSidebar": () => requireHandler(handlers, "view.toggleLeftSidebar", "toggleLeftSidebar")(),
     "view.toggleRightSidebar": () => requireHandler(handlers, "view.toggleRightSidebar", "toggleRightSidebar")(),
@@ -242,6 +249,7 @@ export function createMenuActionRunner(handlers: MenuActionRunnerHandlers) {
     "note.copyWikiLink": (payload) => requireHandler(handlers, "note.copyWikiLink", "copyCurrentNoteWikiLink")(assertNotePayload(payload)),
     "note.delete": (payload) => requireHandler(handlers, "note.delete", "deleteCurrentNote")(assertNotePayload(payload)),
     "help.shortcuts": () => requireHandler(handlers, "help.shortcuts", "openShortcuts")(),
+    "help.manual": () => requireHandler(handlers, "help.manual", "openManual")(),
     "help.about": () => requireHandler(handlers, "help.about", "openAbout")(),
     "notebook.createNote": (payload) => requireHandler(handlers, "notebook.createNote", "createNoteInNotebook")(assertNotebookPayload(payload)),
     "notebook.rename": (payload) => requireHandler(handlers, "notebook.rename", "renameNotebook")(assertNotebookPayload(payload)),

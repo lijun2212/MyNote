@@ -3,7 +3,8 @@ import { StatusBar } from "./StatusBar";
 import { LeftSidebar } from "./LeftSidebar/LeftSidebar";
 import { EditorWorkspace } from "./EditorWorkspace/EditorWorkspace";
 import { RightSidebar } from "./RightSidebar/RightSidebar";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import type { MenuActionId } from "../menu/menuIds";
 import { buildAppMenuSchema } from "../menu/menuSchema";
 import { createMenuActionRunner } from "../menu/menuActionRunner";
@@ -16,6 +17,9 @@ import { useProjectionStore } from "../store/useProjectionStore";
 import { ContextMenuHost } from "./ContextMenu/ContextMenuHost";
 import { ContextMenuProvider } from "./ContextMenu/useContextMenu";
 import { AiSettingsDialog } from "./Settings/AiSettingsDialog";
+import { ShortcutsDialog } from "./Help/ShortcutsDialog";
+import { AboutDialog } from "./Help/AboutDialog";
+import { UsageHelpDialog } from "./Help/UsageHelpDialog";
 import { useRefreshNoteTree } from "../hooks/useRefreshNoteTree";
 import { useProjectionLifecycle } from "../hooks/useProjectionLifecycle";
 import { closeProjectionWindow, openProjectionWindow } from "../projection/windowApi";
@@ -28,9 +32,6 @@ const REQUEST_CREATE_NOTEBOOK_EVENT = "mynote:menu-create-notebook";
 const REQUEST_IMPORT_NOTE_EVENT = "mynote:menu-import-note";
 const REQUEST_RENAME_NOTE_EVENT = "mynote:menu-rename-note";
 const REQUEST_MOVE_NOTE_EVENT = "mynote:menu-move-note";
-const REQUEST_SHORTCUTS_EVENT = "mynote:menu-open-shortcuts";
-const REQUEST_ABOUT_EVENT = "mynote:menu-open-about";
-
 function dispatchWindowEvent(event: Event) {
   window.dispatchEvent(event);
 }
@@ -51,8 +52,11 @@ function toProjectionErrorMessage(error: unknown) {
   return error instanceof Error && error.message ? error.message : "投影窗口启动失败";
 }
 
+const COPY_NOTICE_DURATION_MS = 1600;
+
 export function AppShell() {
   useProjectionLifecycle();
+  const copyNoticeTimerRef = useRef<number | null>(null);
 
   const kb = useAppStore((s) => s.kb);
   const leftSidebarVisible = useAppStore((s) => s.leftSidebarVisible);
@@ -61,9 +65,14 @@ export function AppShell() {
   const setRightSidebarVisible = useAppStore((s) => s.setRightSidebarVisible);
   const toggleLeftSidebar = useAppStore((s) => s.toggleLeftSidebar);
   const toggleRightSidebar = useAppStore((s) => s.toggleRightSidebar);
+  const setKb = useAppStore((s) => s.setKb);
+  const setError = useAppStore((s) => s.setError);
+  const clearKnowledgeBaseSession = useAppStore((s) => s.clearKnowledgeBaseSession);
   const currentNote = useEditorStore((s) => s.currentNote);
   const editorMode = useEditorStore((s) => s.getEditorMode());
   const setEditorMode = useEditorStore((s) => s.setEditorMode);
+  const setStatusNotice = useEditorStore((s) => s.setStatusNotice);
+  const resetEditorSession = useEditorStore((s) => s.resetSession);
   const refreshNoteTree = useRefreshNoteTree();
   const aiSettings = useAiSettingsStore((s) => s.settings);
   const defaultAiProfile = useAiSettingsStore((s) => s.defaultProfile);
@@ -73,6 +82,29 @@ export function AppShell() {
   const toggleAutoSummaryAgent = useAiSettingsStore((s) => s.toggleAutoSummaryAgent);
   const projectionEnabled = useProjectionStore((s) => s.projectionEnabled);
   const projectionFollowScroll = useProjectionStore((s) => s.projectionFollowScroll);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [usageHelpOpen, setUsageHelpOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
+
+  useEffect(() => () => {
+    if (copyNoticeTimerRef.current !== null) {
+      window.clearTimeout(copyNoticeTimerRef.current);
+    }
+  }, []);
+
+  const showTransientStatusNotice = (message: string) => {
+    setStatusNotice(message);
+    if (copyNoticeTimerRef.current !== null) {
+      window.clearTimeout(copyNoticeTimerRef.current);
+    }
+
+    copyNoticeTimerRef.current = window.setTimeout(() => {
+      if (useEditorStore.getState().statusNotice === message) {
+        setStatusNotice(null);
+      }
+      copyNoticeTimerRef.current = null;
+    }, COPY_NOTICE_DURATION_MS);
+  };
 
   useEffect(() => {
     void loadAiSettings().catch(() => undefined);
@@ -122,6 +154,28 @@ export function AppShell() {
   const menuRunner = useMemo(() => createMenuActionRunner({
     createNote: () => dispatchWindowEvent(new Event(REQUEST_CREATE_NOTE_EVENT)),
     createNotebook: () => dispatchWindowEvent(new Event(REQUEST_CREATE_NOTEBOOK_EVENT)),
+    openKnowledgeBase: async () => {
+      try {
+        const selected = await open({ directory: true, multiple: false });
+        if (!selected || Array.isArray(selected)) {
+          return;
+        }
+
+        setError(null);
+        const nextKb = await api.openKnowledgeBase(selected);
+        setKb(nextKb);
+        await refreshNoteTree();
+      } catch (error) {
+        setError(String(error));
+      }
+    },
+    closeKnowledgeBase: () => {
+      clearKnowledgeBaseSession();
+      resetEditorSession();
+      setShortcutsOpen(false);
+      setUsageHelpOpen(false);
+      setAboutOpen(false);
+    },
     importNote: () => dispatchWindowEvent(new Event(REQUEST_IMPORT_NOTE_EVENT)),
     refreshFileTree: async () => {
       await refreshNoteTree();
@@ -137,7 +191,7 @@ export function AppShell() {
       store.beginSession();
 
       try {
-        await openProjectionWindow();
+        await openProjectionWindow(currentNote?.title ?? null);
       } catch (error) {
         store.markClosed();
         store.setError(toProjectionErrorMessage(error));
@@ -172,13 +226,25 @@ export function AppShell() {
       if (!currentNote) {
         return;
       }
-      await writeClipboardText(currentNote.path);
+
+      try {
+        await writeClipboardText(currentNote.path);
+        showTransientStatusNotice("已复制笔记链接");
+      } catch {
+        showTransientStatusNotice("复制笔记链接失败");
+      }
     },
     copyCurrentNoteWikiLink: async () => {
       if (!currentNote) {
         return;
       }
-      await writeClipboardText(`[[${currentNote.title}]]`);
+
+      try {
+        await writeClipboardText(`[[${currentNote.title}]]`);
+        showTransientStatusNotice("已复制 Wiki 链接");
+      } catch {
+        showTransientStatusNotice("复制 Wiki 链接失败");
+      }
     },
     createNoteInNotebook: () => undefined,
     renameNotebook: () => undefined,
@@ -192,14 +258,23 @@ export function AppShell() {
       await refreshNoteTree();
     },
     showLeftSidebar: () => setLeftSidebarVisible(true),
-    openShortcuts: () => dispatchWindowEvent(new Event(REQUEST_SHORTCUTS_EVENT)),
-    openAbout: () => dispatchWindowEvent(new Event(REQUEST_ABOUT_EVENT)),
+    openShortcuts: () => setShortcutsOpen(true),
+    openManual: () => setUsageHelpOpen(true),
+    openAbout: () => setAboutOpen(true),
   }), [
+    clearKnowledgeBaseSession,
     currentNote,
     openAiSettings,
     refreshNoteTree,
+    resetEditorSession,
+    setError,
     setEditorMode,
+    setKb,
     setLeftSidebarVisible,
+    setAboutOpen,
+    setShortcutsOpen,
+    setUsageHelpOpen,
+    showTransientStatusNotice,
     testAiConnection,
     toggleAutoSummaryAgent,
     toggleLeftSidebar,
@@ -281,6 +356,9 @@ export function AppShell() {
         </div>
         <StatusBar />
         <AiSettingsDialog />
+        <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+        <UsageHelpDialog open={usageHelpOpen} onClose={() => setUsageHelpOpen(false)} />
+        <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
         <ContextMenuHost />
       </div>
     </ContextMenuProvider>

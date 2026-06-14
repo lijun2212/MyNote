@@ -1,17 +1,23 @@
 import { emitTo } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 
-const PROJECTION_WINDOW_LABEL = "projection-preview";
+export const PROJECTION_WINDOW_LABEL = "projection-preview";
 const PROJECTION_WINDOW_ROLE = "projection-preview";
+const DEFAULT_PROJECTION_WINDOW_TITLE = "投影预览";
+
+function resolveProjectionWindowTitle(noteTitle?: string | null) {
+  const normalizedTitle = noteTitle?.trim();
+  return normalizedTitle && normalizedTitle.length > 0 ? normalizedTitle : DEFAULT_PROJECTION_WINDOW_TITLE;
+}
 
 export interface ProjectionWindowCapabilities {
   supportsExternalMonitorPlacement: boolean;
   supportsFullscreenProjection: boolean;
 }
 
-export async function openProjectionWindow() {
+export async function openProjectionWindow(noteTitle?: string | null) {
   const projectionWindow = new WebviewWindow(PROJECTION_WINDOW_LABEL, {
-    title: "Projection Preview",
+    title: resolveProjectionWindowTitle(noteTitle),
     url: `/?windowRole=${PROJECTION_WINDOW_ROLE}`,
     visible: true,
     focus: true,
@@ -58,6 +64,20 @@ export async function closeProjectionWindow() {
 
 export async function emitProjectionState<T>(event: string, payload: T) {
   await emitTo(PROJECTION_WINDOW_LABEL, event, payload);
+}
+
+export async function hasProjectionWindow() {
+  return (await WebviewWindow.getByLabel(PROJECTION_WINDOW_LABEL)) !== null;
+}
+
+export async function setProjectionWindowTitle(noteTitle?: string | null) {
+  const projectionWindow = await WebviewWindow.getByLabel(PROJECTION_WINDOW_LABEL);
+
+  if (!projectionWindow) {
+    return;
+  }
+
+  await projectionWindow.setTitle(resolveProjectionWindowTitle(noteTitle));
 }
 
 export function getProjectionWindowCapabilities(): ProjectionWindowCapabilities {

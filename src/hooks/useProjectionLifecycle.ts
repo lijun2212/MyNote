@@ -7,7 +7,10 @@ import {
   PROJECTION_ERROR_EVENT,
   PROJECTION_READY_EVENT,
 } from "../projection/events";
+import { PROJECTION_WINDOW_LABEL } from "../projection/windowApi";
 import { useProjectionStore } from "../store/useProjectionStore";
+
+const WINDOW_DESTROYED_EVENT = "tauri://destroyed";
 
 function matchesProjectionSession(expectedSessionId: number, payload: unknown): payload is ProjectionLifecyclePayload {
   return typeof payload === "object"
@@ -54,6 +57,31 @@ export function useProjectionLifecycle() {
         closedUnlisten();
       } else {
         pendingUnlisten.push(closedUnlisten);
+      }
+
+      const destroyedUnlisten = await listen(
+        WINDOW_DESTROYED_EVENT,
+        () => {
+          const store = useProjectionStore.getState();
+
+          if (!store.projectionSessionRequested) {
+            return;
+          }
+
+          store.markClosed();
+        },
+        {
+          target: {
+            kind: "WebviewWindow",
+            label: PROJECTION_WINDOW_LABEL,
+          },
+        },
+      );
+
+      if (disposed) {
+        destroyedUnlisten();
+      } else {
+        pendingUnlisten.push(destroyedUnlisten);
       }
 
       const errorUnlisten = await listen(PROJECTION_ERROR_EVENT, (event) => {

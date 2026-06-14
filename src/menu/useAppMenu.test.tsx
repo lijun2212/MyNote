@@ -29,6 +29,12 @@ const menuMocks = vi.hoisted(() => {
     }
   }
 
+  class MockPredefinedMenuItem extends MockMenuItem {
+    static async new(options: Record<string, unknown>) {
+      return new MockPredefinedMenuItem(options);
+    }
+  }
+
   type MenuInstance = {
     options: Record<string, unknown>;
     setAsAppMenu: ReturnType<typeof vi.fn>;
@@ -49,6 +55,7 @@ const menuMocks = vi.hoisted(() => {
     MenuItem: MockMenuItem,
     CheckMenuItem: MockCheckMenuItem,
     Submenu: MockSubmenu,
+    PredefinedMenuItem: MockPredefinedMenuItem,
   };
 });
 
@@ -57,6 +64,7 @@ vi.mock("@tauri-apps/api/menu", () => ({
   MenuItem: menuMocks.MenuItem,
   CheckMenuItem: menuMocks.CheckMenuItem,
   Submenu: menuMocks.Submenu,
+  PredefinedMenuItem: menuMocks.PredefinedMenuItem,
 }));
 
 describe("useAppMenu", () => {
@@ -197,5 +205,133 @@ describe("useAppMenu", () => {
     expect(childItems[0]?.options.enabled).toBe(false);
     expect(childItems[0]?.options.action).toBeUndefined();
     expect(run).not.toHaveBeenCalled();
+  });
+
+  it("passes accelerators through to custom menu items", async () => {
+    const run = vi.fn(async () => true);
+
+    renderHook(() =>
+      useAppMenu({
+        items: [
+          {
+            id: "edit",
+            label: "编辑",
+            children: [
+              { id: "edit.copyLink", label: "复制链接", enabled: true, accelerator: "Cmd+L" },
+              { id: "note.copyWikiLink", label: "复制 Wiki 链接", enabled: true, accelerator: "Cmd+Shift+W" },
+            ],
+          },
+        ],
+        run,
+      }),
+    );
+
+    await vi.waitFor(() => {
+      expect(menuMocks.createdMenus[menuMocks.createdMenus.length - 1]?.setAsAppMenu).toHaveBeenCalledTimes(1);
+    });
+
+    const lastCall = menuMocks.Menu.new.mock.calls[menuMocks.Menu.new.mock.calls.length - 1];
+    const [rootMenuArg] = lastCall ?? [];
+    const submenus = (rootMenuArg?.items ?? []) as Array<{ options: { items?: Array<{ options: Record<string, unknown> }> } }>;
+    const childItems = submenus[0]?.options.items ?? [];
+
+    expect(childItems[0]?.options.accelerator).toBe("Cmd+L");
+    expect(childItems[1]?.options.accelerator).toBe("Cmd+Shift+W");
+  });
+
+  it("renders nested submenus and explicit separators from the schema", async () => {
+    const run = vi.fn(async () => true);
+
+    renderHook(() =>
+      useAppMenu({
+        items: [
+          {
+            id: "mynote",
+            label: "MyNote",
+            children: [
+              { id: "file.newNote", label: "新建笔记", enabled: true },
+              { id: "mynote.separator", type: "separator" },
+              {
+                id: "mynote.ai",
+                label: "AI 设置",
+                children: [
+                  { id: "ai.settings", label: "打开 AI 设置", enabled: true },
+                  { id: "ai.toggleAutoSummaryAgent", label: "启用自动摘要", enabled: true, checked: true },
+                ],
+              },
+            ],
+          },
+        ],
+        run,
+      }),
+    );
+
+    await vi.waitFor(() => {
+      expect(menuMocks.createdMenus[menuMocks.createdMenus.length - 1]?.setAsAppMenu).toHaveBeenCalledTimes(1);
+    });
+
+    const lastCall = menuMocks.Menu.new.mock.calls[menuMocks.Menu.new.mock.calls.length - 1];
+    const [rootMenuArg] = lastCall ?? [];
+    const submenus = (rootMenuArg?.items ?? []) as Array<{ options: { items?: Array<{ options: Record<string, unknown> }> } }>;
+    const childItems = submenus[0]?.options.items ?? [];
+
+    expect(childItems).toHaveLength(3);
+    expect(childItems[0]).toBeInstanceOf(menuMocks.MenuItem);
+    expect(childItems[1]).toBeInstanceOf(menuMocks.PredefinedMenuItem);
+    expect(childItems[1]?.options.item).toBe("Separator");
+    expect(childItems[2]).toBeInstanceOf(menuMocks.Submenu);
+    expect(childItems[2]?.options.text).toBe("AI 设置");
+
+    const nestedItems = (childItems[2]?.options.items ?? []) as Array<{ options: Record<string, unknown> }>;
+    expect(nestedItems.map((item) => item.options.id)).toEqual([
+      "ai.settings",
+      "ai.toggleAutoSummaryAgent",
+    ]);
+    expect(nestedItems[1]).toBeInstanceOf(menuMocks.CheckMenuItem);
+    expect(nestedItems[1]?.options.checked).toBe(true);
+  });
+
+  it("renders native undo and redo while keeping custom edit actions", async () => {
+    const run = vi.fn(async () => true);
+
+    renderHook(() =>
+      useAppMenu({
+        items: [
+          {
+            id: "edit",
+            label: "编辑",
+            children: [
+              { id: "edit.rename", label: "重命名", enabled: true },
+              { id: "edit.move", label: "移动", enabled: true },
+              { id: "edit.copyLink", label: "复制链接", enabled: true },
+              { id: "edit.undo", label: "撤销", enabled: true },
+              { id: "edit.redo", label: "重做", enabled: true },
+            ],
+          },
+        ],
+        run,
+      }),
+    );
+
+    await vi.waitFor(() => {
+      expect(menuMocks.createdMenus[menuMocks.createdMenus.length - 1]?.setAsAppMenu).toHaveBeenCalledTimes(1);
+    });
+
+    const lastCall = menuMocks.Menu.new.mock.calls[menuMocks.Menu.new.mock.calls.length - 1];
+    const [rootMenuArg] = lastCall ?? [];
+    const submenus = (rootMenuArg?.items ?? []) as Array<{ options: { items?: Array<{ options: Record<string, unknown> }> } }>;
+    const childItems = submenus[0]?.options.items ?? [];
+
+    expect(childItems).toHaveLength(5);
+    expect(childItems[0]).toBeInstanceOf(menuMocks.MenuItem);
+    expect(childItems[0]?.options.id).toBe("edit.rename");
+    expect(childItems[1]).toBeInstanceOf(menuMocks.MenuItem);
+    expect(childItems[1]?.options.id).toBe("edit.move");
+    expect(childItems[2]).toBeInstanceOf(menuMocks.MenuItem);
+    expect(childItems[2]?.options.id).toBe("edit.copyLink");
+    expect(childItems[3]).toBeInstanceOf(menuMocks.PredefinedMenuItem);
+    expect(childItems[3]?.options.item).toBe("Undo");
+    expect(childItems[4]).toBeInstanceOf(menuMocks.PredefinedMenuItem);
+    expect(childItems[4]?.options.item).toBe("Redo");
   });
 });

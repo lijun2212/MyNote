@@ -1,4 +1,4 @@
-export const APP_MENU_IDS = ["file", "edit", "view", "note", "ai", "help"] as const;
+export const APP_MENU_IDS = ["mynote", "edit", "view", "help"] as const;
 
 export const CONTEXT_MENU_TARGET_TYPES = [
 	"notebook",
@@ -20,11 +20,15 @@ export const CONTEXT_MENU_TARGET_TYPES = [
 export const MENU_ACTION_IDS = [
 	"file.newNote",
 	"file.newNotebook",
+	"kb.open",
+	"kb.close",
 	"file.importNote",
 	"file.refreshTree",
 	"edit.rename",
 	"edit.move",
 	"edit.copyLink",
+	"edit.undo",
+	"edit.redo",
 	"view.search",
 	"view.toggleLeftSidebar",
 	"view.toggleRightSidebar",
@@ -42,6 +46,7 @@ export const MENU_ACTION_IDS = [
 	"note.copyWikiLink",
 	"note.delete",
 	"help.shortcuts",
+	"help.manual",
 	"help.about",
 	"notebook.createNote",
 	"notebook.rename",
@@ -81,11 +86,17 @@ export const MENU_ACTION_IDS = [
 	"relationItem.delete",
 ] as const;
 
+export const MENU_SUBMENU_IDS = ["mynote.ai"] as const;
+
+export const MENU_SEPARATOR_IDS = ["mynote.separator"] as const;
+
 export const MENU_PLACEHOLDER_IDS = ["view.graph", "view.revisions", "note.relations", "tag.open", "tag.rename", "selection.relation", "blank.newNote"] as const;
 
 export type AppMenuId = (typeof APP_MENU_IDS)[number];
 export type ContextMenuTargetType = (typeof CONTEXT_MENU_TARGET_TYPES)[number];
 export type MenuActionId = (typeof MENU_ACTION_IDS)[number];
 export type MenuPlaceholderId = (typeof MENU_PLACEHOLDER_IDS)[number];
+export type MenuSubmenuId = (typeof MENU_SUBMENU_IDS)[number];
+export type MenuSeparatorId = (typeof MENU_SEPARATOR_IDS)[number];
 export type MenuLeafId = MenuActionId | MenuPlaceholderId;
-export type MenuSchemaId = AppMenuId | MenuLeafId;
+export type MenuSchemaId = AppMenuId | MenuLeafId | MenuSubmenuId | MenuSeparatorId;
