@@ -1,6 +1,7 @@
 import "./WelcomeScreen.css";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "../api/commands";
+import { saveLastKnowledgeBaseRootPath } from "../persistence/lastKnowledgeBase";
 import { useAppStore } from "../store/useAppStore";
 
 const valuePoints = [
@@ -29,6 +30,7 @@ export function WelcomeScreen() {
       setError(null);
       const name = getDefaultKnowledgeBaseName(selected);
       const kb = await api.createKnowledgeBase(selected, name);
+      saveLastKnowledgeBaseRootPath(kb.root_path);
       setKb(kb);
       await refreshTree();
     } catch (e) {
@@ -43,6 +45,7 @@ export function WelcomeScreen() {
 
       setError(null);
       const kb = await api.openKnowledgeBase(selected);
+      saveLastKnowledgeBaseRootPath(kb.root_path);
       setKb(kb);
       await refreshTree();
     } catch (e) {

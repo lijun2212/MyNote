@@ -6,6 +6,8 @@ import { tauriMocks } from "../test/setup";
 import { useAppStore } from "../store/useAppStore";
 import type { KnowledgeBase } from "../types";
 
+const LAST_KB_STORAGE_KEY = "mynote:lastKnowledgeBaseRootPath";
+
 const createKb: KnowledgeBase = {
   id: "kb-create",
   name: "Workspace",
@@ -24,6 +26,7 @@ const openKb: KnowledgeBase = {
 
 describe("WelcomeScreen", () => {
   beforeEach(() => {
+    window.localStorage.clear();
     useAppStore.setState({
       kb: null,
       error: "existing error",
@@ -88,6 +91,7 @@ describe("WelcomeScreen", () => {
       expect(refreshTree).toHaveBeenCalledTimes(1);
       expect(useAppStore.getState().kb).toEqual(createKb);
       expect(useAppStore.getState().error).toBeNull();
+      expect(window.localStorage.getItem(LAST_KB_STORAGE_KEY)).toBe(createKb.root_path);
     });
   });
 
@@ -157,6 +161,7 @@ describe("WelcomeScreen", () => {
       expect(refreshTree).toHaveBeenCalledTimes(1);
       expect(useAppStore.getState().kb).toEqual(openKb);
       expect(useAppStore.getState().error).toBeNull();
+      expect(window.localStorage.getItem(LAST_KB_STORAGE_KEY)).toBe(openKb.root_path);
     });
   });
 });
