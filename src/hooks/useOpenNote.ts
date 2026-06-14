@@ -11,6 +11,7 @@ export function useOpenNote() {
   const setSelectedNodePath = useAppStore((s) => s.setSelectedNodePath);
   const setCurrentNote = useEditorStore((s) => s.setCurrentNote);
   const setContent = useEditorStore((s) => s.setContent);
+  const setViewMode = useEditorStore((s) => s.setViewMode);
   const setNoteOpening = useEditorStore((s) => s.setNoteOpening);
   const recordLookbackOpen = useLookbackSummaryStore((s) => s.recordOpen);
 
@@ -34,6 +35,7 @@ export function useOpenNote() {
     try {
       const detail = await api.getNoteByPath(path);
       if (requestId !== latestOpenRequestId) return;
+      setViewMode("split");
       setCurrentNote(detail.note);
       setContent(detail.content);
       recordLookbackOpen(detail.note.path);
@@ -45,7 +47,7 @@ export function useOpenNote() {
         setNoteOpening(false);
       }
     }
-  }, [beginOpenNote, recordLookbackOpen, setSelectedNodePath, setCurrentNote, setContent, setNoteOpening]);
+  }, [beginOpenNote, recordLookbackOpen, setSelectedNodePath, setCurrentNote, setContent, setNoteOpening, setViewMode]);
 
   return { openNote, beginOpenNote, isOpenNoteRequestCurrent };
 }

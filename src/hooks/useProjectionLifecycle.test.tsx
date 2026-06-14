@@ -83,6 +83,7 @@ describe("useProjectionLifecycle", () => {
 
   it("marks projection closed after the projection window is destroyed", async () => {
     const listeners = mockProjectionListeners();
+    tauriMocks.getWebviewWindowByLabel.mockResolvedValue(null);
 
     renderHook(() => useProjectionLifecycle());
 
@@ -240,6 +241,68 @@ describe("useProjectionLifecycle", () => {
       projectionEnabled: true,
       projectionWindowReady: false,
       projectionLastError: null,
+    });
+  });
+
+  it("ignores a previous session destroyed event after a new projection session starts", async () => {
+    const listeners = mockProjectionListeners();
+    tauriMocks.getWebviewWindowByLabel.mockResolvedValue({ close: vi.fn() });
+
+    renderHook(() => useProjectionLifecycle());
+
+    await flushListenerRegistration();
+
+    useProjectionStore.getState().beginSession();
+    act(() => {
+      useProjectionStore.getState().markClosed();
+    });
+
+    const secondSessionId = useProjectionStore.getState().beginSession();
+    const destroyedListener = listeners.get("tauri://destroyed");
+    expect(destroyedListener).toBeTypeOf("function");
+
+    await act(async () => {
+      await destroyedListener?.({ event: "tauri://destroyed", id: -1, payload: null });
+    });
+
+    expect(useProjectionStore.getState()).toMatchObject({
+      projectionSessionId: secondSessionId,
+      projectionSessionRequested: true,
+      projectionEnabled: true,
+      projectionWindowReady: false,
+    });
+  });
+
+  it("ignores a previous session destroyed event even after the new session is ready", async () => {
+    const listeners = mockProjectionListeners();
+    tauriMocks.getWebviewWindowByLabel.mockResolvedValue({ close: vi.fn() });
+
+    renderHook(() => useProjectionLifecycle());
+
+    await flushListenerRegistration();
+
+    useProjectionStore.getState().beginSession();
+    act(() => {
+      useProjectionStore.getState().markClosed();
+    });
+
+    const secondSessionId = useProjectionStore.getState().beginSession();
+    act(() => {
+      useProjectionStore.getState().setReady(true);
+    });
+
+    const destroyedListener = listeners.get("tauri://destroyed");
+    expect(destroyedListener).toBeTypeOf("function");
+
+    await act(async () => {
+      await destroyedListener?.({ event: "tauri://destroyed", id: -1, payload: null });
+    });
+
+    expect(useProjectionStore.getState()).toMatchObject({
+      projectionSessionId: secondSessionId,
+      projectionSessionRequested: true,
+      projectionEnabled: true,
+      projectionWindowReady: true,
     });
   });
 

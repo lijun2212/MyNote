@@ -7,6 +7,11 @@ import { useLookbackSummaryStore } from "../store/useLookbackSummaryStore";
 import { deferred, makeNoteDetail, makeNoteWithSummary } from "../test/testData";
 import type { NoteDetail } from "../types";
 
+const editorStoreActions = {
+  setEditorMode: useEditorStore.getState().setEditorMode,
+  setViewMode: useEditorStore.getState().setViewMode,
+};
+
 const apiMocks = vi.hoisted(() => ({
   getNoteByPath: vi.fn(),
 }));
@@ -30,9 +35,12 @@ describe("useOpenNote", () => {
       isSaving: false,
       saveError: null,
       saveStatus: "saved",
+      viewMode: "split",
       showPreview: true,
       searchNavigationTarget: null,
       tagNavigationTarget: null,
+      setEditorMode: editorStoreActions.setEditorMode,
+      setViewMode: editorStoreActions.setViewMode,
     });
   });
 
@@ -54,6 +62,64 @@ describe("useOpenNote", () => {
     expect(useEditorStore.getState().content).toBe(detail.content);
     expect(useEditorStore.getState().isOpeningNote).toBe(false);
     expect(useLookbackSummaryStore.getState().getRecentOpenCount("notes/demo.md")).toBe(1);
+  });
+
+  it("restores split view mode when opening a note from preview", async () => {
+    const detail = makeNoteDetail({
+      note: makeNoteWithSummary("摘要", { path: "notes/demo.md" }),
+      content: "# Demo\n\nBody",
+    });
+    apiMocks.getNoteByPath.mockResolvedValue(detail);
+    useEditorStore.setState({ viewMode: "preview", showPreview: true });
+
+    const { result } = renderHook(() => useOpenNote());
+
+    await act(async () => {
+      await result.current.openNote("notes/demo.md");
+    });
+
+    expect(useEditorStore.getState().viewMode).toBe("split");
+    expect(useEditorStore.getState().showPreview).toBe(true);
+  });
+
+  it("restores split view mode when opening a note from editor", async () => {
+    const detail = makeNoteDetail({
+      note: makeNoteWithSummary("摘要", { path: "notes/demo.md" }),
+      content: "# Demo\n\nBody",
+    });
+    apiMocks.getNoteByPath.mockResolvedValue(detail);
+    useEditorStore.setState({ viewMode: "editor", showPreview: false });
+
+    const { result } = renderHook(() => useOpenNote());
+
+    await act(async () => {
+      await result.current.openNote("notes/demo.md");
+    });
+
+    expect(useEditorStore.getState().viewMode).toBe("split");
+    expect(useEditorStore.getState().showPreview).toBe(true);
+  });
+
+  it("restores split through the viewMode model after a successful open", async () => {
+    const detail = makeNoteDetail({
+      note: makeNoteWithSummary("摘要", { path: "notes/demo.md" }),
+      content: "# Demo\n\nBody",
+    });
+    apiMocks.getNoteByPath.mockResolvedValue(detail);
+    useEditorStore.setState({
+      viewMode: "editor",
+      showPreview: false,
+      setEditorMode: vi.fn(),
+    });
+
+    const { result } = renderHook(() => useOpenNote());
+
+    await act(async () => {
+      await result.current.openNote("notes/demo.md");
+    });
+
+    expect(useEditorStore.getState().viewMode).toBe("split");
+    expect(useEditorStore.getState().showPreview).toBe(true);
   });
 
   it("sets opening note status while loading and clears it afterwards", async () => {
@@ -112,6 +178,7 @@ describe("useOpenNote", () => {
   it("does not record a recent view when opening a note fails", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     apiMocks.getNoteByPath.mockRejectedValueOnce(new Error("open failed"));
+    useEditorStore.setState({ viewMode: "preview", showPreview: true });
 
     const { result } = renderHook(() => useOpenNote());
 
@@ -121,6 +188,8 @@ describe("useOpenNote", () => {
 
     expect(useAppStore.getState().selectedNodePath).toBe("notes/fail.md");
     expect(useEditorStore.getState().currentNote).toBeNull();
+    expect(useEditorStore.getState().viewMode).toBe("preview");
+    expect(useEditorStore.getState().showPreview).toBe(true);
     expect(useLookbackSummaryStore.getState().getRecentOpenCount("notes/fail.md")).toBe(0);
     expect(consoleError).toHaveBeenCalled();
   });

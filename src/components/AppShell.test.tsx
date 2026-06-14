@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "./AppShell";
 import { useProjectionStore } from "../store/useProjectionStore";
@@ -156,6 +156,26 @@ describe("AppShell", () => {
     expect(projectionWindowApiMocks.openProjectionWindow).toHaveBeenCalledWith("Current");
   });
 
+  it("rolls back projection session state when closing projection from the app menu fails", async () => {
+    useProjectionStore.getState().beginSession();
+    useProjectionStore.getState().setReady(true);
+    projectionWindowApiMocks.closeProjectionWindow.mockRejectedValue(new Error("关闭投影失败"));
+
+    render(<AppShell />);
+
+    const useAppMenuCall = capturedUseAppMenu.mock.calls[capturedUseAppMenu.mock.calls.length - 1]?.[0] as { run: (actionId: string) => boolean | Promise<boolean> };
+    await act(async () => {
+      await useAppMenuCall.run("view.closeProjection");
+    });
+
+    expect(useProjectionStore.getState()).toMatchObject({
+      projectionSessionRequested: false,
+      projectionEnabled: false,
+      projectionWindowReady: false,
+      projectionLastError: "关闭投影失败",
+    });
+  });
+
   it("opens a knowledge base from the MyNote menu action", async () => {
     tauriMocks.openDialog.mockResolvedValue("/Users/lijun/Archive");
     tauriMocks.invoke.mockResolvedValue(openKb);
@@ -175,6 +195,9 @@ describe("AppShell", () => {
   });
 
   it("closes the current knowledge base and clears note-scoped state", async () => {
+    useProjectionStore.getState().beginSession();
+    useProjectionStore.getState().setReady(true);
+
     render(<AppShell />);
 
     const useAppMenuCall = capturedUseAppMenu.mock.calls[capturedUseAppMenu.mock.calls.length - 1]?.[0] as { run: (actionId: string) => boolean | Promise<boolean> };
@@ -201,6 +224,43 @@ describe("AppShell", () => {
       openingNotePath: null,
       isOpeningNote: false,
       statusNotice: null,
+    });
+    expect(projectionWindowApiMocks.closeProjectionWindow).toHaveBeenCalledTimes(1);
+    expect(useProjectionStore.getState()).toMatchObject({
+      projectionSessionRequested: false,
+      projectionEnabled: false,
+      projectionWindowReady: false,
+    });
+  });
+
+  it("still closes the knowledge base when closing projection window fails", async () => {
+    useProjectionStore.getState().beginSession();
+    useProjectionStore.getState().setReady(true);
+    projectionWindowApiMocks.closeProjectionWindow.mockRejectedValue(new Error("关闭投影失败"));
+
+    render(<AppShell />);
+
+    const useAppMenuCall = capturedUseAppMenu.mock.calls[capturedUseAppMenu.mock.calls.length - 1]?.[0] as { run: (actionId: string) => boolean | Promise<boolean> };
+    await act(async () => {
+      await useAppMenuCall.run("kb.close");
+    });
+
+    expect(useAppStore.getState()).toMatchObject({
+      kb: null,
+      tree: [],
+      selectedNodePath: null,
+    });
+    expect(useEditorStore.getState()).toMatchObject({
+      currentNote: null,
+      content: "",
+      isDirty: false,
+      statusNotice: null,
+    });
+    expect(useProjectionStore.getState()).toMatchObject({
+      projectionSessionRequested: false,
+      projectionEnabled: false,
+      projectionWindowReady: false,
+      projectionLastError: "关闭投影失败",
     });
   });
 
@@ -249,6 +309,37 @@ describe("AppShell", () => {
     await waitFor(() => {
       expect(screen.getByRole("dialog", { name: "关于 MyNote" })).toBeInTheDocument();
     });
+  });
+
+  it("applies the shared blue hover state to both sidebar toggle buttons", () => {
+    render(<AppShell />);
+
+    const leftToggle = screen.getByTitle("收起左侧栏");
+    const rightToggle = screen.getByTitle("展开右侧栏");
+
+    expect(leftToggle.className).not.toContain("is-hovered");
+    expect(rightToggle.className).not.toContain("is-hovered");
+
+    act(() => {
+      fireEvent.mouseEnter(leftToggle);
+    });
+    expect(leftToggle.className).toContain("is-hovered");
+    expect(rightToggle.className).not.toContain("is-hovered");
+
+    act(() => {
+      fireEvent.mouseLeave(leftToggle);
+    });
+    expect(leftToggle.className).not.toContain("is-hovered");
+
+    act(() => {
+      fireEvent.mouseEnter(rightToggle);
+    });
+    expect(rightToggle.className).toContain("is-hovered");
+
+    act(() => {
+      fireEvent.mouseLeave(rightToggle);
+    });
+    expect(rightToggle.className).not.toContain("is-hovered");
   });
 
   it("shows a status notice after copying the current note path from the Edit menu", async () => {

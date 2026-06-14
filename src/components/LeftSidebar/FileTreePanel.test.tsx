@@ -18,6 +18,10 @@ function renderWithContextMenu() {
   );
 }
 
+async function expandToolbar(_user?: ReturnType<typeof userEvent.setup>) {
+  fireEvent.mouseEnter(screen.getByTestId("file-tree-toolbar-header"));
+}
+
 const hookMocks = vi.hoisted(() => ({
   createNote: vi.fn(),
   createNotebook: vi.fn(),
@@ -325,6 +329,41 @@ describe("FileTreePanel", () => {
       window.dispatchEvent(new Event("mynote:menu-import-note"));
     });
     expect(await screen.findByRole("menu", { name: "导入来源" })).toBeInTheDocument();
+  });
+
+  it("registers app menu event listeners only once across rerenders and cleans them up on unmount", async () => {
+    const addEventListenerSpy = vi.spyOn(window, "addEventListener");
+    const removeEventListenerSpy = vi.spyOn(window, "removeEventListener");
+    const trackedEvents = [
+      "mynote:menu-create-note",
+      "mynote:menu-create-notebook",
+      "mynote:menu-import-note",
+      "mynote:menu-rename-note",
+      "mynote:menu-move-note",
+    ];
+
+    const { unmount } = render(<FileTreePanel />);
+
+    const initialTrackedAdds = addEventListenerSpy.mock.calls.filter(([type]) => trackedEvents.includes(String(type))).length;
+    expect(initialTrackedAdds).toBe(5);
+
+    act(() => {
+      window.dispatchEvent(new Event("mynote:menu-create-note"));
+    });
+    expect(await screen.findByPlaceholderText("笔记标题…")).toBeInTheDocument();
+
+    const trackedAddsAfterRerender = addEventListenerSpy.mock.calls.filter(([type]) => trackedEvents.includes(String(type))).length;
+    const trackedRemovesBeforeUnmount = removeEventListenerSpy.mock.calls.filter(([type]) => trackedEvents.includes(String(type))).length;
+    expect(trackedAddsAfterRerender).toBe(5);
+    expect(trackedRemovesBeforeUnmount).toBe(0);
+
+    unmount();
+
+    const trackedRemovesAfterUnmount = removeEventListenerSpy.mock.calls.filter(([type]) => trackedEvents.includes(String(type))).length;
+    expect(trackedRemovesAfterUnmount).toBe(5);
+
+    addEventListenerSpy.mockRestore();
+    removeEventListenerSpy.mockRestore();
   });
 
   it("responds to app menu rename event for notes", async () => {
@@ -927,11 +966,43 @@ describe("FileTreePanel", () => {
     expect(screen.getByRole("button", { name: "新建笔记" })).toBeInTheDocument();
   });
 
+  it("keeps the file toolbar collapsed until the header is hovered", async () => {
+    const user = userEvent.setup();
+
+    render(<FileTreePanel />);
+
+    const toolbarHeader = screen.getByTestId("file-tree-toolbar-header");
+    const fileLabel = screen.getByText("文件");
+    const importButton = screen.getByRole("button", { name: "导入笔记" });
+    const newNotebookButton = screen.getByRole("button", { name: "新建笔记本" });
+    const newNoteButton = screen.getByRole("button", { name: "新建笔记" });
+
+    expect(fileLabel).not.toBeVisible();
+    expect(importButton).not.toBeVisible();
+    expect(newNotebookButton).not.toBeVisible();
+    expect(newNoteButton).not.toBeVisible();
+
+    await user.hover(toolbarHeader);
+
+    expect(fileLabel).toBeVisible();
+    expect(importButton).toBeVisible();
+    expect(newNotebookButton).toBeVisible();
+    expect(newNoteButton).toBeVisible();
+
+    await user.unhover(toolbarHeader);
+
+    expect(fileLabel).not.toBeVisible();
+    expect(importButton).not.toBeVisible();
+    expect(newNotebookButton).not.toBeVisible();
+    expect(newNoteButton).not.toBeVisible();
+  });
+
   it("highlights toolbar icon buttons on hover and restores them on mouse leave", async () => {
     const user = userEvent.setup();
 
     render(<FileTreePanel />);
 
+    await expandToolbar(user);
     const importButton = screen.getByRole("button", { name: "导入笔记" });
 
     expect(importButton).toHaveStyle({
@@ -942,7 +1013,7 @@ describe("FileTreePanel", () => {
       color: "#4b5563",
     });
 
-    await user.hover(importButton);
+    fireEvent.mouseEnter(importButton);
 
     expect(importButton).toHaveStyle({
       background: "#eff6ff",
@@ -950,7 +1021,7 @@ describe("FileTreePanel", () => {
       color: "#0969da",
     });
 
-    await user.unhover(importButton);
+    fireEvent.mouseLeave(importButton);
 
     expect(importButton).toHaveStyle({
       background: "transparent",
@@ -975,21 +1046,23 @@ describe("FileTreePanel", () => {
 
     render(<FileTreePanel />);
 
+  await expandToolbar(user);
     await user.click(screen.getByRole("button", { name: "新建笔记" }));
 
     expect(screen.getByText("请先创建笔记本")).toBeInTheDocument();
     expect(hookMocks.createNote).not.toHaveBeenCalled();
   });
 
-  it("opens the notebook creation panel with default icon and color selected", async () => {
+  it("opens the notebook creation panel with only the default color selected", async () => {
     const user = userEvent.setup();
 
     render(<FileTreePanel />);
 
+  await expandToolbar(user);
     await user.click(screen.getByRole("button", { name: "新建笔记本" }));
 
     expect(screen.getByRole("textbox", { name: "笔记本名称" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "图标 书本" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: /图标 / })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "颜色 蓝色" })).toHaveAttribute("aria-pressed", "true");
   });
 
@@ -999,6 +1072,7 @@ describe("FileTreePanel", () => {
 
     render(<FileTreePanel />);
 
+  await expandToolbar(user);
     await user.click(screen.getByRole("button", { name: "新建笔记本" }));
     const input = screen.getByRole("textbox", { name: "笔记本名称" });
     await user.type(input, "法律");
@@ -1008,19 +1082,19 @@ describe("FileTreePanel", () => {
     await waitFor(() => expect(screen.queryByRole("textbox", { name: "笔记本名称" })).not.toBeInTheDocument());
   });
 
-  it("creates a notebook with the user-selected icon and color", async () => {
+  it("creates a notebook with the default icon and user-selected color", async () => {
     const user = userEvent.setup();
     hookMocks.createNotebook.mockResolvedValue(undefined);
 
     render(<FileTreePanel />);
 
+  await expandToolbar(user);
     await user.click(screen.getByRole("button", { name: "新建笔记本" }));
     await user.type(screen.getByRole("textbox", { name: "笔记本名称" }), "项目");
-    await user.click(screen.getByRole("button", { name: "图标 代码" }));
     await user.click(screen.getByRole("button", { name: "颜色 橙色" }));
     await user.click(screen.getByRole("button", { name: "创建笔记本" }));
 
-    await waitFor(() => expect(hookMocks.createNotebook).toHaveBeenCalledWith("项目", "code", "orange"));
+    await waitFor(() => expect(hookMocks.createNotebook).toHaveBeenCalledWith("项目", "book", "orange"));
   });
 
   it("cancels notebook creation, closes the panel, and discards draft input", async () => {
@@ -1028,6 +1102,7 @@ describe("FileTreePanel", () => {
 
     render(<FileTreePanel />);
 
+  await expandToolbar(user);
     await user.click(screen.getByRole("button", { name: "新建笔记本" }));
     await user.type(screen.getByRole("textbox", { name: "笔记本名称" }), "临时草稿");
     await user.click(screen.getByRole("button", { name: "取消创建笔记本" }));
@@ -1035,6 +1110,7 @@ describe("FileTreePanel", () => {
     expect(hookMocks.createNotebook).not.toHaveBeenCalled();
     expect(screen.queryByRole("textbox", { name: "笔记本名称" })).not.toBeInTheDocument();
 
+    await expandToolbar(user);
     await user.click(screen.getByRole("button", { name: "新建笔记本" }));
     expect(screen.getByRole("textbox", { name: "笔记本名称" })).toHaveValue("");
   });
@@ -1044,6 +1120,7 @@ describe("FileTreePanel", () => {
 
     render(<FileTreePanel />);
 
+  await expandToolbar(user);
     await user.click(screen.getByRole("button", { name: "新建笔记本" }));
     await user.type(screen.getByRole("textbox", { name: "笔记本名称" }), "临时草稿");
     await user.keyboard("{Escape}");
@@ -1086,6 +1163,7 @@ describe("FileTreePanel", () => {
 
     render(<FileTreePanel />);
 
+  await expandToolbar(user);
     await user.click(screen.getByRole("button", { name: "新建笔记" }));
     const notebookSelect = screen.getByRole("combobox", { name: "目标笔记本" });
     await user.selectOptions(notebookSelect, "notes/法律");
@@ -1102,6 +1180,7 @@ describe("FileTreePanel", () => {
 
     render(<FileTreePanel />);
 
+  await expandToolbar(user);
     await user.click(screen.getByRole("button", { name: "新建笔记" }));
 
     const notebookSelect = screen.getByRole("combobox", { name: "目标笔记本" });
@@ -1138,6 +1217,7 @@ describe("FileTreePanel", () => {
 
     render(<FileTreePanel />);
 
+  await expandToolbar(user);
     await user.click(screen.getByRole("button", { name: "导入笔记" }));
     await user.click(screen.getByRole("menuitem", { name: "导入文件夹" }));
 
@@ -1158,6 +1238,7 @@ describe("FileTreePanel", () => {
 
     render(<FileTreePanel />);
 
+  await expandToolbar(user);
     await user.click(screen.getByRole("button", { name: "导入笔记" }));
 
     const menu = screen.getByRole("menu", { name: "导入来源" });
@@ -1237,6 +1318,7 @@ describe("FileTreePanel", () => {
 
     render(<FileTreePanel />);
 
+  await expandToolbar(user);
     await user.click(screen.getByRole("button", { name: "导入笔记" }));
     await user.click(screen.getByRole("menuitem", { name: "导入 Markdown 文件" }));
     await user.click(await screen.findByRole("button", { name: "确认导入" }));
@@ -1278,6 +1360,7 @@ describe("FileTreePanel", () => {
 
     render(<FileTreePanel />);
 
+  await expandToolbar(user);
     await user.click(screen.getByRole("button", { name: "导入笔记" }));
     await user.click(screen.getByRole("menuitem", { name: "导入 Markdown 文件" }));
     await user.click(await screen.findByRole("button", { name: "确认导入" }));
@@ -1321,6 +1404,7 @@ describe("FileTreePanel", () => {
 
     render(<FileTreePanel />);
 
+  await expandToolbar(user);
     await user.click(screen.getByRole("button", { name: "导入笔记" }));
     await user.click(screen.getByRole("menuitem", { name: "导入 Markdown 文件" }));
     await user.click(await screen.findByRole("button", { name: "确认导入" }));
@@ -1363,6 +1447,7 @@ describe("FileTreePanel", () => {
 
     render(<FileTreePanel />);
 
+  await expandToolbar(user);
     await user.click(screen.getByRole("button", { name: "导入笔记" }));
     await user.click(screen.getByRole("menuitem", { name: "导入 Markdown 文件" }));
     await user.click(await screen.findByRole("button", { name: "确认导入" }));
@@ -1388,6 +1473,7 @@ describe("FileTreePanel", () => {
 
     render(<FileTreePanel />);
 
+  await expandToolbar(user);
     await user.click(screen.getByRole("button", { name: "导入笔记" }));
     await user.click(screen.getByRole("menuitem", { name: "导入 Markdown 文件" }));
     await user.click(await screen.findByRole("button", { name: "新目录…" }));
@@ -1421,6 +1507,7 @@ describe("FileTreePanel", () => {
 
     await waitFor(() => expect(apiMocks.listNotesByTag).toHaveBeenCalledWith(["tag-1"]));
     expect(screen.getByTestId("summary-badge:notes/法律/案例.md")).toHaveTextContent("S");
+  await expandToolbar(user);
     await user.click(screen.getByRole("button", { name: "新建笔记" }));
 
     const notebookSelect = screen.getByRole("combobox", { name: "目标笔记本" });
@@ -1479,6 +1566,7 @@ describe("FileTreePanel", () => {
 
     render(<FileTreePanel />);
 
+  await expandToolbar(user);
     await user.click(screen.getByRole("button", { name: "新建笔记" }));
 
     await waitFor(() => expect(apiMocks.getNoteTree).toHaveBeenCalled());
@@ -1493,6 +1581,7 @@ describe("FileTreePanel", () => {
 
     render(<FileTreePanel />);
 
+  await expandToolbar(user);
     await user.click(screen.getByRole("button", { name: "新建笔记" }));
 
     const notebookSelect = screen.getByRole("combobox", { name: "目标笔记本" });
@@ -1505,15 +1594,15 @@ describe("FileTreePanel", () => {
 
     render(<FileTreePanel />);
 
+  await expandToolbar(user);
     await user.click(screen.getByRole("button", { name: "新建笔记本" }));
     await user.type(screen.getByRole("textbox", { name: "笔记本名称" }), "失败草稿");
-    await user.click(screen.getByRole("button", { name: "图标 代码" }));
     await user.click(screen.getByRole("button", { name: "颜色 橙色" }));
     await user.click(screen.getByRole("button", { name: "创建笔记本" }));
 
-    expect(hookMocks.createNotebook).toHaveBeenCalledWith("失败草稿", "code", "orange");
+    expect(hookMocks.createNotebook).toHaveBeenCalledWith("失败草稿", "book", "orange");
     expect(screen.getByRole("textbox", { name: "笔记本名称" })).toHaveValue("失败草稿");
-    expect(screen.getByRole("button", { name: "图标 代码" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: /图标 / })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "颜色 橙色" })).toHaveAttribute("aria-pressed", "true");
   });
 

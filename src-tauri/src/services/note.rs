@@ -147,14 +147,19 @@ pub fn create_notebook_service(state: &State<AppState>, input: CreateNotebookInp
     create_notebook_in_root(root, &input.name, &input.icon, &input.color)
 }
 
-pub fn create_note_service(state: &State<AppState>, input: CreateNoteInput) -> AppResult<Note> {
-    let root_guard = state.kb_root_guard();
-    let root = root_guard.as_ref().ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?;
-    let mut db_guard = state.db_guard();
-    let conn = db_guard.as_mut().ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
-
+fn create_note_in_root(
+    conn: &rusqlite::Connection,
+    root: &Path,
+    input: CreateNoteInput,
+) -> AppResult<Note> {
     let safe_title = safe_filename(&input.title);
     let dir = normalize_kb_relative_path(if input.directory.is_empty() { "notes" } else { &input.directory })?;
+    if dir != "notes" && !dir.starts_with("notes/") {
+        return Err(AppError::InvalidInput(
+            "Note directory must be under notes".into(),
+        ));
+    }
+
     let rel_path = format!("{}/{}.md", dir, safe_title);
     let abs = resolve_kb_path(root, &rel_path)?;
 
@@ -176,8 +181,16 @@ pub fn create_note_service(state: &State<AppState>, input: CreateNoteInput) -> A
 
     atomic_write(&abs, &content)?;
 
-    let note = index_note_full(conn, root, &rel_path, &content)?;
-    Ok(note)
+    index_note_full(conn, root, &rel_path, &content)
+}
+
+pub fn create_note_service(state: &State<AppState>, input: CreateNoteInput) -> AppResult<Note> {
+    let root_guard = state.kb_root_guard();
+    let root = root_guard.as_ref().ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?;
+    let mut db_guard = state.db_guard();
+    let conn = db_guard.as_mut().ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
+
+    create_note_in_root(conn, root, input)
 }
 
 pub fn get_note_by_path_service(state: &State<AppState>, rel_path: &str) -> AppResult<NoteDetail> {
@@ -803,12 +816,41 @@ pub fn delete_note_in_root(
 
     std::fs::remove_file(&note_abs_path)?;
     for asset_path in asset_paths {
-        if asset_path.is_file() {
+        if asset_path.is_file() && !is_asset_path_referenced_by_other_notes(conn, root, &note_rel_path, &asset_path)? {
             std::fs::remove_file(asset_path)?;
         }
     }
 
     mark_note_deleted_by_path(conn, &note_rel_path)
+}
+
+fn is_asset_path_referenced_by_other_notes(
+    conn: &rusqlite::Connection,
+    root: &Path,
+    deleted_note_rel_path: &str,
+    asset_path: &Path,
+) -> AppResult<bool> {
+    let mut statement = conn.prepare(
+        "SELECT path FROM notes WHERE deleted_at IS NULL AND path != ?1",
+    )?;
+    let note_paths = statement
+        .query_map(params![deleted_note_rel_path], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    for note_path in note_paths {
+        let note_abs_path = resolve_kb_path(root, &note_path)?;
+        if !note_abs_path.is_file() {
+            continue;
+        }
+
+        let other_content = std::fs::read_to_string(&note_abs_path)?;
+        let referenced_assets = collect_note_asset_paths(root, &note_path, &other_content)?;
+        if referenced_assets.iter().any(|path| path == asset_path) {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
 }
 
 fn collect_note_asset_paths(root: &Path, note_rel_path: &str, content: &str) -> AppResult<Vec<PathBuf>> {
@@ -1148,12 +1190,27 @@ fn build_tree_with_directories(notes: &[Note], directory_paths: &[String]) -> Ve
     root_nodes
 }
 
+fn prune_directory_nodes_missing_from_scan(nodes: &mut Vec<NoteTreeNode>, directory_paths: &[String]) {
+    let existing_dirs = directory_paths.iter().cloned().collect::<HashSet<_>>();
+
+    fn visit(nodes: &mut Vec<NoteTreeNode>, existing_dirs: &HashSet<String>) {
+        nodes.retain(|node| !node.is_dir || node.path == "notes" || existing_dirs.contains(&node.path));
+
+        for node in nodes.iter_mut().filter(|node| node.is_dir) {
+            visit(&mut node.children, existing_dirs);
+        }
+    }
+
+    visit(nodes, &existing_dirs);
+}
+
 fn build_tree_with_visuals(
     notes: &[Note],
     directory_paths: &[String],
     visuals: &NotebookVisualMap,
 ) -> Vec<NoteTreeNode> {
     let mut root_nodes = build_tree_with_directories(notes, directory_paths);
+    prune_directory_nodes_missing_from_scan(&mut root_nodes, directory_paths);
     apply_notebook_visuals(&mut root_nodes, visuals);
     sort_note_tree_nodes(&mut root_nodes, None, visuals);
     root_nodes
@@ -2052,7 +2109,7 @@ pub fn import_note_service(
 mod tests {
     use super::{
         build_imported_image_filename, build_markdown_asset_path_for_note, build_tree,
-        build_tree_with_directories, build_tree_with_visuals, create_notebook_in_root,
+        build_tree_with_directories, build_tree_with_visuals, create_note_in_root, create_notebook_in_root,
         convert_pasted_html_to_text,
         delete_note_in_root, delete_notebook_in_root, get_note_outline_in_root,
         import_markdown_sources_in_root, import_single_markdown_file_in_root,
@@ -2063,9 +2120,10 @@ mod tests {
         supported_image_extension, supported_image_extension_from_mime_type,
         update_notebook_visual_in_root,
     };
-    use crate::domain::note::{InsertImageResult, MarkdownImportRequest, MarkdownImportSource, Note, SaveNoteInput};
+    use crate::domain::note::{CreateNoteInput, InsertImageResult, MarkdownImportRequest, MarkdownImportSource, Note, SaveNoteInput};
     use crate::error::AppError;
     use crate::infrastructure::db::open_and_migrate;
+    use crate::services::notebook_visual::NotebookVisualMap;
     use mockito::Server;
     use rusqlite::params;
     use crate::services::index::index_note_full;
@@ -2099,7 +2157,7 @@ mod tests {
 
     #[test]
     fn image_insert_rejects_unsupported_extensions() {
-        let err = supported_image_extension(Path::new("/tmp/demo.svg")).unwrap_err();
+        let err = supported_image_extension(Path::new("/tmp/demo.bmp")).unwrap_err();
 
         assert!(matches!(err, AppError::InvalidInput(_)));
         assert!(err.to_string().contains("Unsupported image type"));
@@ -2312,6 +2370,30 @@ mod tests {
     }
 
     #[test]
+    fn delete_note_in_root_keeps_assets_still_referenced_by_other_notes() {
+        let root = TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join("notes/work")).unwrap();
+        std::fs::create_dir_all(root.path().join("notes/other")).unwrap();
+        std::fs::create_dir_all(root.path().join("assets")).unwrap();
+        std::fs::write(root.path().join("assets/shared.png"), b"image-bytes").unwrap();
+
+        let db_path = root.path().join("index.sqlite");
+        let conn = open_and_migrate(&db_path).unwrap();
+        let demo_content = "# Demo\n\n![img](../../assets/shared.png)\n";
+        let other_content = "# Other\n\n![img](../../assets/shared.png)\n";
+        std::fs::write(root.path().join("notes/work/demo.md"), demo_content).unwrap();
+        std::fs::write(root.path().join("notes/other/keep.md"), other_content).unwrap();
+        index_note_full(&conn, root.path(), "notes/work/demo.md", demo_content).unwrap();
+        index_note_full(&conn, root.path(), "notes/other/keep.md", other_content).unwrap();
+
+        delete_note_in_root(&conn, root.path(), "notes/work/demo.md").unwrap();
+
+        assert!(!root.path().join("notes/work/demo.md").exists());
+        assert!(root.path().join("notes/other/keep.md").exists());
+        assert!(root.path().join("assets/shared.png").exists());
+    }
+
+    #[test]
     fn delete_note_in_root_returns_not_found_when_note_file_missing() {
         let root = TempDir::new().unwrap();
         std::fs::create_dir_all(root.path().join("notes/work")).unwrap();
@@ -2359,6 +2441,29 @@ mod tests {
         let legal_visual = visuals.get("notes/法律").expect("expected visual metadata");
         assert_eq!(legal_visual.icon, "book");
         assert_eq!(legal_visual.color, "blue");
+    }
+
+    #[test]
+    fn create_note_service_rejects_directories_outside_notes_root() {
+        let root = TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join("notes")).unwrap();
+        std::fs::create_dir_all(root.path().join("assets")).unwrap();
+
+        let db_path = root.path().join("index.sqlite");
+        let conn = open_and_migrate(&db_path).unwrap();
+
+        let err = create_note_in_root(
+            &conn,
+            root.path(),
+            CreateNoteInput {
+                title: "Demo".into(),
+                directory: "assets".into(),
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, AppError::InvalidInput(_)));
+        assert!(!root.path().join("assets/Demo.md").exists());
     }
 
     #[test]
@@ -2509,6 +2614,27 @@ mod tests {
         assert!(notes_root.is_dir);
         assert!(notes_root.children.iter().any(|node| node.path == "notes/法律" && node.is_dir));
         assert!(notes_root.children.iter().any(|node| node.path == "notes/产品" && node.is_dir));
+    }
+
+    #[test]
+    fn build_tree_excludes_notebook_subtrees_missing_from_directory_scan() {
+        let tree = build_tree_with_visuals(
+            &[
+                make_note("notes/学习笔记/正常笔记.md"),
+                make_note("notes/学习笔记_backup_2026/残留笔记.md"),
+            ],
+            &["notes/学习笔记".to_string()],
+            &NotebookVisualMap::new(),
+        );
+
+        let notes_root = tree.iter().find(|node| node.path == "notes").unwrap();
+        let child_paths = notes_root
+            .children
+            .iter()
+            .map(|node| node.path.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(child_paths, vec!["notes/学习笔记"]);
     }
 
     #[test]

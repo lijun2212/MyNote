@@ -7,7 +7,7 @@ import {
   PROJECTION_ERROR_EVENT,
   PROJECTION_READY_EVENT,
 } from "../projection/events";
-import { PROJECTION_WINDOW_LABEL } from "../projection/windowApi";
+import { hasProjectionWindow, PROJECTION_WINDOW_LABEL } from "../projection/windowApi";
 import { useProjectionStore } from "../store/useProjectionStore";
 
 const WINDOW_DESTROYED_EVENT = "tauri://destroyed";
@@ -61,10 +61,14 @@ export function useProjectionLifecycle() {
 
       const destroyedUnlisten = await listen(
         WINDOW_DESTROYED_EVENT,
-        () => {
+        async () => {
           const store = useProjectionStore.getState();
 
-          if (!store.projectionSessionRequested) {
+          if (!store.projectionSessionRequested || !store.projectionWindowReady) {
+            return;
+          }
+
+          if (await hasProjectionWindow()) {
             return;
           }
 

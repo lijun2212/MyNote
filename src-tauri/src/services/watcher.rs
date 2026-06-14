@@ -13,6 +13,22 @@ fn is_local_conflict_path(path: &std::path::Path) -> bool {
         .is_some_and(|name| name.ends_with(".local-conflict.md"))
 }
 
+fn should_watch_event_path(path: &std::path::Path) -> bool {
+    if is_local_conflict_path(path) {
+        return false;
+    }
+
+    if path.extension().is_some_and(|extension| extension == "md") {
+        return true;
+    }
+
+    path.extension().is_none()
+}
+
+fn should_reindex_watch_path(path: &std::path::Path) -> bool {
+    path.extension().is_some_and(|extension| extension == "md")
+}
+
 pub struct WatcherHandle {
     _watcher: RecommendedWatcher,
 }
@@ -44,8 +60,7 @@ pub fn start_watching(root: PathBuf, app_handle: AppHandle) -> Result<WatcherHan
                     let paths: Vec<PathBuf> = event
                         .paths
                         .into_iter()
-                        .filter(|p| p.extension().map(|e| e == "md").unwrap_or(false))
-                        .filter(|p| !is_local_conflict_path(p))
+                        .filter(|p| should_watch_event_path(p))
                         .collect();
                     if paths.is_empty() || !should_process {
                         continue;
@@ -81,10 +96,14 @@ pub fn start_watching(root: PathBuf, app_handle: AppHandle) -> Result<WatcherHan
                     let state = app_clone.state::<AppState>();
                     let db_guard = state.db.lock().unwrap();
                     if let Some(conn) = db_guard.as_ref() {
-                        let result = if abs_path.exists() {
-                            reindex_from_path(conn, &root_clone, &rel_str).map(|_| ())
+                        let result = if should_reindex_watch_path(&abs_path) {
+                            if abs_path.exists() {
+                                reindex_from_path(conn, &root_clone, &rel_str).map(|_| ())
+                            } else {
+                                mark_note_deleted_by_path(conn, &rel_str)
+                            }
                         } else {
-                            mark_note_deleted_by_path(conn, &rel_str)
+                            Ok(())
                         };
                         match result {
                             Ok(_) => {
@@ -105,4 +124,29 @@ pub fn start_watching(root: PathBuf, app_handle: AppHandle) -> Result<WatcherHan
         .map_err(|e| e.to_string())?;
 
     Ok(WatcherHandle { _watcher: watcher })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{should_reindex_watch_path, should_watch_event_path};
+    use std::path::Path;
+
+    #[test]
+    fn watch_event_paths_include_markdown_and_notebook_directories() {
+        assert!(should_watch_event_path(Path::new("notes/legal/demo.md")));
+        assert!(should_watch_event_path(Path::new("notes/legal")));
+        assert!(should_watch_event_path(Path::new("notes/new-notebook")));
+    }
+
+    #[test]
+    fn watch_event_paths_exclude_local_conflicts_and_non_markdown_files() {
+        assert!(!should_watch_event_path(Path::new("notes/legal/demo.local-conflict.md")));
+        assert!(!should_watch_event_path(Path::new("notes/legal/image.png")));
+    }
+
+    #[test]
+    fn only_markdown_watch_paths_trigger_reindex() {
+        assert!(should_reindex_watch_path(Path::new("notes/legal/demo.md")));
+        assert!(!should_reindex_watch_path(Path::new("notes/legal")));
+    }
 }

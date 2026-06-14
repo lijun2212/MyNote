@@ -2,9 +2,14 @@ import { create } from "zustand";
 import type { Note, SearchNavigationTarget, TagNavigationTarget } from "../types";
 
 export type EditorMode = "editor" | "split";
+export type EditorViewMode = "split" | "preview" | "editor";
 
-function deriveEditorMode(showPreview: boolean): EditorMode {
-  return showPreview ? "split" : "editor";
+function deriveShowPreview(viewMode: EditorViewMode): boolean {
+  return viewMode !== "editor";
+}
+
+function deriveEditorMode(viewMode: EditorViewMode): EditorMode {
+  return viewMode === "editor" ? "editor" : "split";
 }
 
 interface EditorState {
@@ -18,6 +23,7 @@ interface EditorState {
   isSaving: boolean;
   saveError: string | null;
   saveStatus: "saved" | "saving" | "unsaved" | "error";
+  viewMode: EditorViewMode;
   showPreview: boolean;
   getEditorMode: () => EditorMode;
   searchNavigationTarget: SearchNavigationTarget | null;
@@ -31,6 +37,7 @@ interface EditorState {
   setSaving: (saving: boolean) => void;
   setSaveError: (error: string | null) => void;
   togglePreview: () => void;
+  setViewMode: (mode: EditorViewMode) => void;
   setEditorMode: (mode: EditorMode) => void;
   setSearchNavigationTarget: (target: SearchNavigationTarget | null) => void;
   setTagNavigationTarget: (target: TagNavigationTarget | null) => void;
@@ -50,14 +57,15 @@ const sessionResetState = {
   isSaving: false,
   saveError: null,
   saveStatus: "saved" as const,
+  viewMode: "split" as const,
+  showPreview: true,
   searchNavigationTarget: null,
   tagNavigationTarget: null,
 };
 
 export const useEditorStore = create<EditorState>((set, get) => ({
   ...sessionResetState,
-  showPreview: true,
-  getEditorMode: () => deriveEditorMode(get().showPreview),
+  getEditorMode: () => deriveEditorMode(get().viewMode),
   searchNavigationTarget: null,
   tagNavigationTarget: null,
 
@@ -75,8 +83,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     })),
   setSaveError: (error) =>
     set({ saveError: error, isSaving: false, saveStatus: "error" }),
-  togglePreview: () => set((s) => ({ showPreview: !s.showPreview })),
-  setEditorMode: (mode) => set({ showPreview: mode === "split" }),
+  togglePreview: () => set((s) => {
+    const viewMode = s.viewMode === "editor" ? "split" : "editor";
+    return { viewMode, showPreview: deriveShowPreview(viewMode) };
+  }),
+  setViewMode: (mode) => set({ viewMode: mode, showPreview: deriveShowPreview(mode) }),
+  setEditorMode: (mode) => {
+    const viewMode = mode === "split" ? "split" : "editor";
+    set({ viewMode, showPreview: deriveShowPreview(viewMode) });
+  },
   setSearchNavigationTarget: (target) => set({ searchNavigationTarget: target }),
   setTagNavigationTarget: (target) => set({ tagNavigationTarget: target }),
   setNoteOpening: (opening, notePath = null) => set({
@@ -86,3 +101,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setStatusNotice: (message) => set({ statusNotice: message }),
   resetSession: () => set(sessionResetState),
 }));
+
+useEditorStore.subscribe((state) => {
+  const nextShowPreview = deriveShowPreview(state.viewMode);
+  if (state.showPreview !== nextShowPreview) {
+    useEditorStore.setState({ showPreview: nextShowPreview });
+  }
+});

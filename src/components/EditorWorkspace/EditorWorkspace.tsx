@@ -44,6 +44,15 @@ function buildToolbarButtonStyle(active = false, hovered = false): React.CSSProp
   };
 }
 
+function SplitViewIcon() {
+  return (
+    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <rect x="1.5" y="2" width="4.5" height="10" rx="1" stroke="currentColor" strokeWidth="1.2" />
+      <rect x="8" y="2" width="4.5" height="10" rx="1" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  );
+}
+
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
     return false;
@@ -56,7 +65,7 @@ const LARGE_NOTE_PREVIEW_DEFER_THRESHOLD = 180_000;
 
 export function EditorWorkspace() {
   const [isSummaryExpanded, setIsSummaryExpanded] = useState(false);
-  const [hoveredToolbarAction, setHoveredToolbarAction] = useState<"summary" | "projection" | "preview" | null>(null);
+  const [hoveredToolbarAction, setHoveredToolbarAction] = useState<"summary" | "projection" | "preview" | "split" | null>(null);
   const {
     currentNote,
     content,
@@ -64,8 +73,9 @@ export function EditorWorkspace() {
     openingNotePath,
     setContent,
     markDirty,
+    viewMode,
     showPreview,
-    togglePreview,
+    setViewMode,
     searchNavigationTarget,
     tagNavigationTarget,
     setSearchNavigationTarget,
@@ -303,6 +313,14 @@ export function EditorWorkspace() {
   }, [hasSummary, currentNote?.path]);
 
   const showOpeningMask = isOpeningNote && Boolean(openingNotePath) && openingNotePath !== currentNote?.path;
+  const isSplitView = viewMode === "split";
+  const showEditorPane = viewMode !== "preview";
+  const showPreviewPane = viewMode !== "editor";
+  const previewToggleLabel = viewMode === "preview" ? "写作模式" : "阅读模式";
+
+  const handleCycleViewMode = () => {
+    setViewMode(viewMode === "preview" ? "editor" : "preview");
+  };
 
   if (!currentNote) {
     if (isOpeningNote) {
@@ -321,7 +339,7 @@ export function EditorWorkspace() {
   }
 
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", height: "100%" }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", height: "100%", minWidth: 0 }}>
       <div style={{
         height: 36,
         borderBottom: "1px solid #e0e2e7",
@@ -332,8 +350,18 @@ export function EditorWorkspace() {
         fontSize: 12,
         background: "#fafbfc",
         flexShrink: 0,
+        minWidth: 0,
       }}>
-        <span style={{ fontWeight: 500 }}>{currentNote.title}</span>
+        <span style={{
+          fontWeight: 500,
+          minWidth: 0,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          flexShrink: 1,
+        }}>
+          {currentNote.title}
+        </span>
         {showOpeningMask && <span style={{ color: "#0969da", fontSize: 11 }}>正在加载笔记...</span>}
         {projectionEnabled && !projectionCapabilities.supportsExternalMonitorPlacement && (
           <span style={{ color: "#667085", fontSize: 11 }}>请将投影窗口手动拖到副屏后再全屏展示</span>
@@ -371,13 +399,26 @@ export function EditorWorkspace() {
           {projectionEnabled ? "关闭投影" : "开启投影"}
         </button>
         <button
-          onClick={() => togglePreview()}
+          onClick={handleCycleViewMode}
           onMouseEnter={() => setHoveredToolbarAction("preview")}
           onMouseLeave={() => setHoveredToolbarAction((current) => (current === "preview" ? null : current))}
-          style={buildToolbarButtonStyle(!showPreview, hoveredToolbarAction === "preview")}
+          style={buildToolbarButtonStyle(viewMode !== "split", hoveredToolbarAction === "preview")}
         >
-          {showPreview ? "隐藏预览" : "显示预览"}
+          {previewToggleLabel}
         </button>
+        {!isSplitView && (
+          <button
+            type="button"
+            aria-label="返回双列模式"
+            title="返回双列模式"
+            onClick={() => setViewMode("split")}
+            onMouseEnter={() => setHoveredToolbarAction("split")}
+            onMouseLeave={() => setHoveredToolbarAction((current) => (current === "split" ? null : current))}
+            style={buildToolbarButtonStyle(false, hoveredToolbarAction === "split")}
+          >
+            <SplitViewIcon />
+          </button>
+        )}
       </div>
       {isSummaryExpanded && (
         <LookbackSummaryCard
@@ -404,25 +445,27 @@ export function EditorWorkspace() {
           userSelect: isResizing ? "none" : undefined,
         }}
       >
-        <div style={{
-          width: showPreview ? `${editorRatio}%` : "100%",
-          minWidth: 0,
-          height: "100%",
-          overflow: "hidden",
-        }}>
-          <MarkdownEditor
-            initialContent={content}
-            onChange={handleChange}
-            searchNavigationTarget={activeSearchNavigationTarget}
-            tagNavigationTarget={activeTagNavigationTarget}
-            sourceLineSyncSignal={sourceLineSyncSignal}
-            onTopVisibleLineChange={(line) => {
-              handleSourceLineSync("editor", line);
-              syncProjectionScroll("main-editor", line);
-            }}
-          />
-        </div>
-        {showPreview && (
+        {showEditorPane && (
+          <div style={{
+            width: isSplitView ? `${editorRatio}%` : "100%",
+            minWidth: 0,
+            height: "100%",
+            overflow: "hidden",
+          }}>
+            <MarkdownEditor
+              initialContent={content}
+              onChange={handleChange}
+              searchNavigationTarget={activeSearchNavigationTarget}
+              tagNavigationTarget={activeTagNavigationTarget}
+              sourceLineSyncSignal={sourceLineSyncSignal}
+              onTopVisibleLineChange={(line) => {
+                handleSourceLineSync("editor", line);
+                syncProjectionScroll("main-editor", line);
+              }}
+            />
+          </div>
+        )}
+        {isSplitView && (
           <>
             <div
               role="separator"
@@ -446,39 +489,41 @@ export function EditorWorkspace() {
                 borderRight: "1px solid #e0e2e7",
               }}
             />
-            <div style={{
-              width: `${100 - editorRatio}%`,
-              minWidth: 0,
-              height: "100%",
-              overflow: "hidden",
-              borderLeft: "1px solid #e0e2e7",
-            }}>
-              {deferPreviewForLargeNote ? (
-                <div style={{
-                  height: "100%",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "#667085",
-                  fontSize: 13,
-                  background: "#fcfcfd",
-                }}>
-                  正在加载预览...
-                </div>
-              ) : (
-                <MarkdownPreview
-                  content={content}
-                  searchNavigationTarget={activeSearchNavigationTarget}
-                  tagNavigationTarget={activeTagNavigationTarget}
-                  sourceLineSyncSignal={sourceLineSyncSignal}
-                  onTopVisibleLineChange={(line) => {
-                    handleSourceLineSync("preview", line);
-                    syncProjectionScroll("main-preview", line);
-                  }}
-                />
-              )}
-            </div>
           </>
+        )}
+        {showPreviewPane && (
+          <div style={{
+            width: isSplitView ? `${100 - editorRatio}%` : "100%",
+            minWidth: 0,
+            height: "100%",
+            overflow: "hidden",
+            borderLeft: isSplitView ? "1px solid #e0e2e7" : undefined,
+          }}>
+            {deferPreviewForLargeNote ? (
+              <div style={{
+                height: "100%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#667085",
+                fontSize: 13,
+                background: "#fcfcfd",
+              }}>
+                正在加载预览...
+              </div>
+            ) : (
+              <MarkdownPreview
+                content={content}
+                searchNavigationTarget={activeSearchNavigationTarget}
+                tagNavigationTarget={activeTagNavigationTarget}
+                sourceLineSyncSignal={sourceLineSyncSignal}
+                onTopVisibleLineChange={(line) => {
+                  handleSourceLineSync("preview", line);
+                  syncProjectionScroll("main-preview", line);
+                }}
+              />
+            )}
+          </div>
         )}
       </div>
       {session?.active && (

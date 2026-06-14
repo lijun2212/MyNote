@@ -23,17 +23,6 @@ const REQUEST_IMPORT_NOTE_EVENT = "mynote:menu-import-note";
 const REQUEST_RENAME_NOTE_EVENT = "mynote:menu-rename-note";
 const REQUEST_MOVE_NOTE_EVENT = "mynote:menu-move-note";
 
-const NOTEBOOK_ICON_PRESETS = [
-  { value: "folder", label: "文件夹", glyph: "F" },
-  { value: "book", label: "书本", glyph: "B" },
-  { value: "idea", label: "灵感", glyph: "I" },
-  { value: "code", label: "代码", glyph: "C" },
-  { value: "list", label: "清单", glyph: "L" },
-  { value: "archive", label: "归档", glyph: "A" },
-  { value: "star", label: "星标", glyph: "S" },
-  { value: "tag", label: "标签", glyph: "T" },
-] as const;
-
 const NOTEBOOK_COLOR_PRESETS = [
   { value: "blue", label: "蓝色", swatch: "#2563eb", background: "#dbeafe" },
   { value: "cyan", label: "青色", swatch: "#0891b2", background: "#cffafe" },
@@ -177,7 +166,6 @@ export function FileTreePanel() {
   const [targetNotebookPath, setTargetNotebookPath] = useState("");
   const [notebookInputVisible, setNotebookInputVisible] = useState(false);
   const [notebookName, setNotebookName] = useState("");
-  const [notebookIcon, setNotebookIcon] = useState<string>(DEFAULT_NOTEBOOK_ICON);
   const [notebookColor, setNotebookColor] = useState<string>(DEFAULT_NOTEBOOK_COLOR);
   const [creationHint, setCreationHint] = useState<string | null>(null);
   const [dragOverPath, setDragOverPath] = useState<string | null>(null);
@@ -197,8 +185,29 @@ export function FileTreePanel() {
   const [importSourcePickerOpen, setImportSourcePickerOpen] = useState(false);
   const [importSources, setImportSources] = useState<MarkdownImportSource[] | null>(null);
   const [hoveredToolbarAction, setHoveredToolbarAction] = useState<"import" | "new-notebook" | "new-note" | null>(null);
+  const [isToolbarHovered, setIsToolbarHovered] = useState(false);
   const treeView = selectedTagIds.length > 0 ? tree : buildNotebookTreeView(tree);
   const notebookSourceTree = selectedTagIds.length > 0 ? fullTreeRef.current : tree;
+  const isToolbarExpanded = isToolbarHovered || importSourcePickerOpen;
+  const latestMenuRequestStateRef = useRef({
+    treeView,
+    renameNote,
+    handleNewNote,
+    handleNewNotebook,
+    handleImport,
+    handleMoveNote,
+    beginNoteRename,
+  });
+
+  latestMenuRequestStateRef.current = {
+    treeView,
+    renameNote,
+    handleNewNote,
+    handleNewNotebook,
+    handleImport,
+    handleMoveNote,
+    beginNoteRename,
+  };
 
   function getToolbarIconButtonStyle(action: "import" | "new-notebook" | "new-note"): CSSProperties {
     if (hoveredToolbarAction !== action) {
@@ -500,13 +509,13 @@ function getNoteTitleFromPath(notePath: string): string {
 
   useEffect(() => {
     const handleCreateNoteRequest = () => {
-      void handleNewNote();
+      void latestMenuRequestStateRef.current.handleNewNote();
     };
     const handleCreateNotebookRequest = () => {
-      handleNewNotebook();
+      latestMenuRequestStateRef.current.handleNewNotebook();
     };
     const handleImportNoteRequest = () => {
-      void handleImport();
+      void latestMenuRequestStateRef.current.handleImport();
     };
     const handleRenameNoteRequest = (event: Event) => {
       const detail = (event as CustomEvent<{ path?: string; noteTitle?: string }>).detail;
@@ -514,9 +523,9 @@ function getNoteTitleFromPath(notePath: string): string {
       if (!targetPath) {
         return;
       }
-      const visibleNode = findNoteNodeByPath(treeView, targetPath);
+      const visibleNode = findNoteNodeByPath(latestMenuRequestStateRef.current.treeView, targetPath);
       if (visibleNode) {
-        beginNoteRename(visibleNode);
+        latestMenuRequestStateRef.current.beginNoteRename(visibleNode);
         return;
       }
 
@@ -526,7 +535,7 @@ function getNoteTitleFromPath(notePath: string): string {
         return;
       }
 
-      void renameNote(targetPath, nextName).catch((error) => {
+      void latestMenuRequestStateRef.current.renameNote(targetPath, nextName).catch((error) => {
         window.alert(error instanceof Error ? error.message : String(error));
       });
     };
@@ -536,7 +545,7 @@ function getNoteTitleFromPath(notePath: string): string {
       if (!targetPath) {
         return;
       }
-      void handleMoveNote(targetPath);
+      void latestMenuRequestStateRef.current.handleMoveNote(targetPath);
     };
 
     window.addEventListener(REQUEST_CREATE_NOTE_EVENT, handleCreateNoteRequest);
@@ -552,7 +561,7 @@ function getNoteTitleFromPath(notePath: string): string {
       window.removeEventListener(REQUEST_RENAME_NOTE_EVENT, handleRenameNoteRequest as EventListener);
       window.removeEventListener(REQUEST_MOVE_NOTE_EVENT, handleMoveNoteRequest as EventListener);
     };
-  });
+  }, []);
 
   const importDirectorySourceTree = selectedTagIds.length > 0 ? fullTreeRef.current : tree;
   const uniqueDirs = collectImportDirectories(importDirectorySourceTree);
@@ -600,7 +609,6 @@ function getNoteTitleFromPath(notePath: string): string {
   function handleNewNotebook() {
     setCreationHint(null);
     setNotebookName("");
-    setNotebookIcon(DEFAULT_NOTEBOOK_ICON);
     setNotebookColor(DEFAULT_NOTEBOOK_COLOR);
     setNotebookInputVisible(true);
   }
@@ -608,7 +616,6 @@ function getNoteTitleFromPath(notePath: string): string {
   function closeNotebookCreationPanel() {
     setNotebookInputVisible(false);
     setNotebookName("");
-    setNotebookIcon(DEFAULT_NOTEBOOK_ICON);
     setNotebookColor(DEFAULT_NOTEBOOK_COLOR);
   }
 
@@ -625,7 +632,7 @@ function getNoteTitleFromPath(notePath: string): string {
     if (!name) {
       return;
     }
-    const created = await createNotebook(name, notebookIcon, notebookColor);
+    const created = await createNotebook(name, DEFAULT_NOTEBOOK_ICON, notebookColor);
     if (created === false) {
       return;
     }
@@ -1130,17 +1137,42 @@ function getNoteTitleFromPath(notePath: string): string {
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      <div style={{
-        padding: "8px 12px",
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-        borderBottom: "1px solid #e0e2e7",
-      }}>
-        <span style={{ fontSize: 11, fontWeight: 600, color: "#6e7681", textTransform: "uppercase" }}>
+      <div
+        data-testid="file-tree-toolbar-header"
+        onMouseEnter={() => setIsToolbarHovered(true)}
+        onMouseLeave={() => setIsToolbarHovered(false)}
+        style={{
+          minHeight: isToolbarExpanded ? 39 : 10,
+          padding: isToolbarExpanded ? "8px 12px" : "2px 12px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          borderBottom: "1px solid #e0e2e7",
+          overflow: "hidden",
+          transition: "min-height 180ms ease, padding 180ms ease, background 180ms ease",
+          background: isToolbarExpanded ? "rgba(248, 250, 252, 0.92)" : "rgba(248, 250, 252, 0.32)",
+        }}
+      >
+        <span style={{
+          fontSize: 11,
+          fontWeight: 600,
+          color: "#6e7681",
+          textTransform: "uppercase",
+          opacity: isToolbarExpanded ? 1 : 0,
+          transform: isToolbarExpanded ? "translateY(0)" : "translateY(-6px)",
+          transition: "opacity 140ms ease, transform 180ms ease",
+        }}>
           文件
         </span>
-        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+        <div style={{
+          display: "flex",
+          gap: 4,
+          alignItems: "center",
+          opacity: isToolbarExpanded ? 1 : 0,
+          transform: isToolbarExpanded ? "translateY(0)" : "translateY(-6px)",
+          pointerEvents: isToolbarExpanded ? "auto" : "none",
+          transition: "opacity 140ms ease, transform 180ms ease",
+        }}>
           <div style={{ position: "relative" }}>
             <button
               onClick={handleImport}
@@ -1269,43 +1301,6 @@ function getNoteTitleFromPath(notePath: string): string {
               background: "#fff",
             }}
           />
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span style={{ fontSize: 11, fontWeight: 600, color: "#6e7681", textTransform: "uppercase" }}>
-              图标
-            </span>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 6 }}>
-              {NOTEBOOK_ICON_PRESETS.map((preset) => {
-                const selected = notebookIcon === preset.value;
-                return (
-                  <button
-                    key={preset.value}
-                    type="button"
-                    aria-label={`图标 ${preset.label}`}
-                    aria-pressed={selected}
-                    onClick={() => setNotebookIcon(preset.value)}
-                    style={{
-                      border: selected ? "1px solid #0969da" : "1px solid #d0d7de",
-                      background: selected ? "#eff6ff" : "#fff",
-                      color: selected ? "#1d4ed8" : "#4b5563",
-                      borderRadius: 6,
-                      minHeight: 32,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: 6,
-                      cursor: "pointer",
-                      fontSize: 12,
-                      fontWeight: 600,
-                      padding: "0 6px",
-                    }}
-                  >
-                    <span aria-hidden="true">{preset.glyph}</span>
-                    <span>{preset.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <span style={{ fontSize: 11, fontWeight: 600, color: "#6e7681", textTransform: "uppercase" }}>
               颜色

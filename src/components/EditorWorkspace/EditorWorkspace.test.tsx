@@ -40,6 +40,15 @@ const lookbackSummaryState = vi.hoisted(() => ({
 const openNoteMock = vi.hoisted(() => vi.fn<(...args: unknown[]) => Promise<void>>());
 const beginOpenNoteMock = vi.hoisted(() => vi.fn(() => 301));
 const isOpenNoteRequestCurrentMock = vi.hoisted(() => vi.fn<(requestId?: unknown) => boolean>(() => true));
+const splitResizeState = vi.hoisted(() => ({
+  editorRatio: 50,
+  isResizing: false,
+  minRatio: 20,
+  maxRatio: 80,
+  startResize: vi.fn(),
+  resize: vi.fn(),
+  stopResize: vi.fn(),
+}));
 
 vi.mock("../../hooks/useAutoSave", () => ({
   useAutoSave: () => undefined,
@@ -47,13 +56,13 @@ vi.mock("../../hooks/useAutoSave", () => ({
 
 vi.mock("../../hooks/useEditorSplitResize", () => ({
   useEditorSplitResize: () => ({
-    editorRatio: 50,
-    isResizing: false,
-    minRatio: 20,
-    maxRatio: 80,
-    startResize: vi.fn(),
-    resize: vi.fn(),
-    stopResize: vi.fn(),
+    editorRatio: splitResizeState.editorRatio,
+    isResizing: splitResizeState.isResizing,
+    minRatio: splitResizeState.minRatio,
+    maxRatio: splitResizeState.maxRatio,
+    startResize: splitResizeState.startResize,
+    resize: splitResizeState.resize,
+    stopResize: splitResizeState.stopResize,
   }),
 }));
 
@@ -98,6 +107,13 @@ describe("EditorWorkspace", () => {
     openNoteMock.mockReset();
     beginOpenNoteMock.mockClear();
     isOpenNoteRequestCurrentMock.mockClear();
+    splitResizeState.editorRatio = 50;
+    splitResizeState.isResizing = false;
+    splitResizeState.minRatio = 20;
+    splitResizeState.maxRatio = 80;
+    splitResizeState.startResize.mockReset();
+    splitResizeState.resize.mockReset();
+    splitResizeState.stopResize.mockReset();
     lookbackSummaryState.hasSummary = true;
     lookbackSummaryState.candidate = "候选摘要";
     lookbackSummaryState.savedSummary = "已保存摘要";
@@ -133,6 +149,7 @@ describe("EditorWorkspace", () => {
       isSaving: false,
       saveError: null,
       saveStatus: "saved",
+      viewMode: "split",
       showPreview: true,
       searchNavigationTarget: null,
       tagNavigationTarget: null,
@@ -146,6 +163,108 @@ describe("EditorWorkspace", () => {
     const editor = screen.getByTestId("mock-editor");
 
     expect(title.compareDocumentPosition(editor) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("renders split mode with editor, preview, separator, and the read-mode button", () => {
+    useEditorStore.getState().setViewMode("split");
+
+    render(<EditorWorkspace />);
+
+    expect(screen.getByTestId("mock-editor")).toBeInTheDocument();
+    expect(screen.getByTestId("mock-preview")).toBeInTheDocument();
+    expect(screen.getByRole("separator")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "阅读模式" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "返回双列模式" })).not.toBeInTheDocument();
+  });
+
+  it("renders preview mode with only preview and a return-to-split icon button", () => {
+    useEditorStore.getState().setViewMode("preview");
+
+    render(<EditorWorkspace />);
+
+    expect(screen.queryByTestId("mock-editor")).not.toBeInTheDocument();
+    expect(screen.getByTestId("mock-preview")).toBeInTheDocument();
+    expect(screen.queryByRole("separator")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "写作模式" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "返回双列模式" })).toBeInTheDocument();
+  });
+
+  it("renders editor mode with only editor and a return-to-split icon button", () => {
+    useEditorStore.getState().setViewMode("editor");
+
+    render(<EditorWorkspace />);
+
+    expect(screen.getByTestId("mock-editor")).toBeInTheDocument();
+    expect(screen.queryByTestId("mock-preview")).not.toBeInTheDocument();
+    expect(screen.queryByRole("separator")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "阅读模式" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "返回双列模式" })).toBeInTheDocument();
+  });
+
+  it("cycles the primary mode button from split to preview and preview to editor", async () => {
+    const user = userEvent.setup();
+    render(<EditorWorkspace />);
+
+    await user.click(screen.getByRole("button", { name: "阅读模式" }));
+
+    expect(useEditorStore.getState().viewMode).toBe("preview");
+    expect(screen.getByRole("button", { name: "写作模式" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "写作模式" }));
+
+    expect(useEditorStore.getState().viewMode).toBe("editor");
+    expect(screen.getByRole("button", { name: "阅读模式" })).toBeInTheDocument();
+  });
+
+  it("returns to split mode from the icon button", async () => {
+    const user = userEvent.setup();
+    useEditorStore.getState().setViewMode("preview");
+
+    render(<EditorWorkspace />);
+
+    await user.click(screen.getByRole("button", { name: "返回双列模式" }));
+
+    expect(useEditorStore.getState().viewMode).toBe("split");
+    expect(screen.getByTestId("mock-editor")).toBeInTheDocument();
+    expect(screen.getByTestId("mock-preview")).toBeInTheDocument();
+    expect(screen.getByRole("separator")).toBeInTheDocument();
+  });
+
+  it("restores the existing split ratio after switching through single-column modes", async () => {
+    const user = userEvent.setup();
+    splitResizeState.editorRatio = 37;
+    render(<EditorWorkspace />);
+
+    expect(screen.getByTestId("mock-editor").parentElement).toHaveStyle({ width: "37%" });
+    expect(screen.getByTestId("mock-preview").parentElement).toHaveStyle({ width: "63%" });
+
+    await user.click(screen.getByRole("button", { name: "阅读模式" }));
+    await user.click(screen.getByRole("button", { name: "写作模式" }));
+    await user.click(screen.getByRole("button", { name: "返回双列模式" }));
+
+    expect(screen.getByTestId("mock-editor").parentElement).toHaveStyle({ width: "37%" });
+    expect(screen.getByTestId("mock-preview").parentElement).toHaveStyle({ width: "63%" });
+    expect(screen.getByRole("separator")).toBeInTheDocument();
+  });
+
+  it("constrains long note titles so the split toolbar can keep shrinking", () => {
+    useEditorStore.setState({
+      currentNote: makeNote({
+        path: "notes/long.md",
+        title: "解决大厂量化交易的秘籍：选股因子分析（五）这是一个非常长而且不应撑破布局的标题",
+      }),
+    });
+
+    render(<EditorWorkspace />);
+
+    const title = screen.getByText(/解决大厂量化交易的秘籍/);
+
+    expect(title).toHaveStyle({
+      minWidth: "0",
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap",
+    });
   });
 
   it("shows opening hint when no note is loaded yet", () => {
@@ -282,6 +401,30 @@ describe("EditorWorkspace", () => {
       background: "#f8fafc",
       border: "1px solid #d9e0e8",
       color: "#475467",
+    });
+  });
+
+  it("applies the shared hover style to reading-mode buttons", async () => {
+    const user = userEvent.setup();
+    useEditorStore.getState().setViewMode("preview");
+    render(<EditorWorkspace />);
+
+    const cycleButton = screen.getByRole("button", { name: "写作模式" });
+    const returnSplitButton = screen.getByRole("button", { name: "返回双列模式" });
+
+    await user.hover(cycleButton);
+    expect(cycleButton).toHaveStyle({
+      background: "#eff6ff",
+      border: "1px solid #93c5fd",
+      color: "#0969da",
+    });
+    await user.unhover(cycleButton);
+
+    await user.hover(returnSplitButton);
+    expect(returnSplitButton).toHaveStyle({
+      background: "#eff6ff",
+      border: "1px solid #93c5fd",
+      color: "#0969da",
     });
   });
 

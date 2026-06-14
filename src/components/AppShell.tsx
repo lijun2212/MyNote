@@ -57,6 +57,7 @@ const COPY_NOTICE_DURATION_MS = 1600;
 export function AppShell() {
   useProjectionLifecycle();
   const copyNoticeTimerRef = useRef<number | null>(null);
+  const [hoveredSidebarToggle, setHoveredSidebarToggle] = useState<"left" | "right" | null>(null);
 
   const kb = useAppStore((s) => s.kb);
   const leftSidebarVisible = useAppStore((s) => s.leftSidebarVisible);
@@ -169,7 +170,17 @@ export function AppShell() {
         setError(String(error));
       }
     },
-    closeKnowledgeBase: () => {
+    closeKnowledgeBase: async () => {
+      if (useProjectionStore.getState().projectionSessionRequested) {
+        try {
+          await closeProjectionWindow();
+        } catch (error) {
+          useProjectionStore.getState().setError(toProjectionErrorMessage(error));
+        } finally {
+          useProjectionStore.getState().markClosed();
+        }
+      }
+
       clearKnowledgeBaseSession();
       resetEditorSession();
       setShortcutsOpen(false);
@@ -198,8 +209,13 @@ export function AppShell() {
       }
     },
     closeProjection: async () => {
-      await closeProjectionWindow();
-      useProjectionStore.getState().markClosed();
+      try {
+        await closeProjectionWindow();
+      } catch (error) {
+        useProjectionStore.getState().setError(toProjectionErrorMessage(error));
+      } finally {
+        useProjectionStore.getState().markClosed();
+      }
     },
     toggleProjectionFollowScroll: () => {
       const store = useProjectionStore.getState();
@@ -320,8 +336,10 @@ export function AppShell() {
             onMouseDown={left.handleMouseDown}
           >
             <button
-              className="sidebar-toggle sidebar-toggle-left"
+              className={`sidebar-toggle sidebar-toggle-left${hoveredSidebarToggle === "left" ? " is-hovered" : ""}`}
               onClick={left.toggleVisible}
+              onMouseEnter={() => setHoveredSidebarToggle("left")}
+              onMouseLeave={() => setHoveredSidebarToggle((current) => (current === "left" ? null : current))}
               title={left.isVisible ? "收起左侧栏" : "展开左侧栏"}
             >
               {left.isVisible ? "‹" : "›"}
@@ -339,8 +357,10 @@ export function AppShell() {
             onMouseDown={right.handleMouseDown}
           >
             <button
-              className="sidebar-toggle sidebar-toggle-right"
+              className={`sidebar-toggle sidebar-toggle-right${hoveredSidebarToggle === "right" ? " is-hovered" : ""}`}
               onClick={right.toggleVisible}
+              onMouseEnter={() => setHoveredSidebarToggle("right")}
+              onMouseLeave={() => setHoveredSidebarToggle((current) => (current === "right" ? null : current))}
               title={right.isVisible ? "收起右侧栏" : "展开右侧栏"}
             >
               {right.isVisible ? "›" : "‹"}
