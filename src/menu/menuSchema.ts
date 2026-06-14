@@ -75,7 +75,6 @@ export function buildAppMenuSchema(options: AppMenuSchemaOptions): MenuSchemaIte
           label: "AI 设置",
           children: [
             item("ai.settings", "打开 AI 设置", true),
-            item("ai.testConnection", "测试模型", hasDefaultAiProfile),
             {
               id: "ai.toggleAutoSummaryAgent",
               label: "启用自动摘要",
@@ -95,6 +94,7 @@ export function buildAppMenuSchema(options: AppMenuSchemaOptions): MenuSchemaIte
         item("edit.copyLink", "复制链接", hasCurrentNote, "Cmd+L"),
         item("note.copyWikiLink", "复制 Wiki 链接", hasCurrentNote, "Cmd+Shift+W"),
         item("note.delete", "删除笔记", hasCurrentNote),
+        item("edit.paste", "粘贴", true),
         item("edit.undo", "撤销", true),
         item("edit.redo", "重做", true),
       ],

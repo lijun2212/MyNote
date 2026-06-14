@@ -193,9 +193,6 @@ export function AppShell() {
     },
     openSearch: () => dispatchWindowEvent(new Event(OPEN_SEARCH_EVENT)),
     openAiSettings: () => openAiSettings(),
-    testAiConnection: () => {
-      void testAiConnection().catch(ignoreAsyncError);
-    },
     toggleAutoSummaryAgent: () => toggleAutoSummaryAgent().catch(ignoreAsyncError),
     openProjection: async () => {
       const store = useProjectionStore.getState();

@@ -49,7 +49,7 @@ pub fn reset_profile_secret_cache_for_tests() {
 pub fn normalize_profile_id(profile_id: &str) -> AppResult<String> {
 	let trimmed = profile_id.trim();
 	if trimmed.is_empty() {
-		Err(AppError::InvalidInput("AI profile id cannot be blank".into()))
+		Err(AppError::InvalidInput("AI 配置 ID 不能为空".into()))
 	} else {
 		Ok(trimmed.to_string())
 	}
@@ -88,7 +88,7 @@ pub fn load_profile_secret(
 		Err(AppError::NotFound(_)) => {
 			let legacy_key = build_legacy_secret_store_key(kb_root, profile_id);
 			if legacy_key == current_key {
-				return Err(AppError::NotFound("AI profile secret not found".into()));
+				return Err(AppError::NotFound("系统密钥链中未找到 AI 配置密钥".into()));
 			}
 
 			let api_key = secret_store.get_profile_secret(&legacy_key)?;

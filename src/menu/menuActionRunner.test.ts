@@ -12,7 +12,6 @@ function createHandlers() {
     refreshFileTree: vi.fn().mockResolvedValue(undefined),
     openSearch: vi.fn().mockResolvedValue(undefined),
     openAiSettings: vi.fn().mockResolvedValue(undefined),
-    testAiConnection: vi.fn().mockResolvedValue(undefined),
     toggleAutoSummaryAgent: vi.fn().mockResolvedValue(undefined),
     openProjection: vi.fn().mockResolvedValue(undefined),
     closeProjection: vi.fn().mockResolvedValue(undefined),
@@ -266,11 +265,9 @@ describe("menuActionRunner", () => {
     const runner = createMenuActionRunner(handlers);
 
     await expect(runner.run("ai.settings")).resolves.toBe(true);
-    await expect(runner.run("ai.testConnection")).resolves.toBe(true);
     await expect(runner.run("ai.toggleAutoSummaryAgent")).resolves.toBe(true);
 
     expect(handlers.openAiSettings).toHaveBeenCalledOnce();
-    expect(handlers.testAiConnection).toHaveBeenCalledOnce();
     expect(handlers.toggleAutoSummaryAgent).toHaveBeenCalledOnce();
   });
 

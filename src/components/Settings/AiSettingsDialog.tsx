@@ -21,28 +21,38 @@ const dialogStyle: React.CSSProperties = {
   border: "1px solid #d7dce5",
   borderRadius: 14,
   boxShadow: "0 20px 48px rgba(15, 23, 42, 0.18)",
-  padding: 20,
+  padding: 18,
 };
 
 const gridStyle: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: 12,
+  gap: 10,
 };
 
 const fieldStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
-  gap: 6,
+  gap: 5,
 };
 
 const inputStyle: React.CSSProperties = {
   border: "1px solid #c7ced9",
   borderRadius: 8,
-  padding: "10px 12px",
-  fontSize: 14,
+  minHeight: 36,
+  padding: "8px 10px",
+  fontSize: 13,
+  lineHeight: 1.2,
   color: "#243041",
   background: "#fff",
+  boxSizing: "border-box",
+};
+
+const selectStyle: React.CSSProperties = {
+  ...inputStyle,
+  height: 36,
+  minHeight: 36,
+  paddingRight: 28,
 };
 
 const actionButtonStyle: React.CSSProperties = {
@@ -50,9 +60,12 @@ const actionButtonStyle: React.CSSProperties = {
   border: "1px solid #c7ced9",
   background: "#fff",
   color: "#243041",
-  padding: "10px 14px",
-  fontSize: 14,
+  minHeight: 36,
+  padding: "8px 12px",
+  fontSize: 13,
+  lineHeight: 1.2,
   cursor: "pointer",
+  boxSizing: "border-box",
 };
 
 type FormState = {
@@ -184,7 +197,7 @@ export function AiSettingsDialog() {
     const normalizedApiKey = apiKey.trim();
     const savedProfile = await saveDefaultProfile(input, normalizedApiKey);
     setForm(createFormState(savedProfile));
-    setApiKey("");
+    setApiKey(normalizedApiKey);
     setSavedApiKeyForSession(normalizedApiKey || savedApiKeyForSession);
   };
 
@@ -193,20 +206,20 @@ export function AiSettingsDialog() {
       <div aria-label="AI 设置" aria-modal="true" role="dialog" style={dialogStyle}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
           <div>
-            <h2 style={{ margin: 0, fontSize: 20, color: "#111827" }}>AI 设置</h2>
-            <p style={{ margin: "8px 0 0", fontSize: 13, color: "#5b6472" }}>
+            <h2 style={{ margin: 0, fontSize: 18, color: "#111827" }}>AI 设置</h2>
+            <p style={{ margin: "6px 0 0", fontSize: 12, color: "#5b6472" }}>
               先配置默认 profile，用于摘要生成与连接测试。
             </p>
           </div>
           <button onClick={closeDialog} style={actionButtonStyle} type="button">关闭</button>
         </div>
 
-        <div aria-label="默认 profile" style={{ marginTop: 16, padding: 12, borderRadius: 10, background: "#f7f9fc", color: "#334155", fontSize: 14 }}>
+        <div aria-label="默认 profile" style={{ marginTop: 14, padding: "10px 12px", borderRadius: 10, background: "#f7f9fc", color: "#334155", fontSize: 13 }}>
           默认 profile：{defaultProfile?.name ?? "未配置"}
         </div>
 
         <label style={{ ...fieldStyle, marginTop: 16 }}>
-          <span style={{ fontSize: 13, color: "#475467" }}>全局 AI 摘要</span>
+          <span style={{ fontSize: 12, color: "#475467" }}>全局 AI 摘要</span>
           <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <input
               aria-label="全局 AI 摘要开关"
@@ -226,7 +239,7 @@ export function AiSettingsDialog() {
           </label>
           <label style={fieldStyle}>
             <span>Provider</span>
-            <select aria-label="Provider" onChange={(event) => handleChange("provider", event.target.value as AiProviderKind)} style={inputStyle} value={form.provider}>
+            <select aria-label="Provider" onChange={(event) => handleChange("provider", event.target.value as AiProviderKind)} style={selectStyle} value={form.provider}>
               <option value="anthropic">Anthropic</option>
               <option value="open_ai_compatible">OpenAI Compatible</option>
             </select>
@@ -264,45 +277,45 @@ export function AiSettingsDialog() {
         </div>
 
         {(isLoading || error || lastTestResult) ? (
-          <div style={{ marginTop: 16, padding: 12, borderRadius: 10, background: "#fbfcfe", border: "1px solid #e5e7eb", fontSize: 13 }}>
+          <div style={{ marginTop: 16, padding: 10, borderRadius: 10, background: "#fbfcfe", border: "1px solid #e5e7eb", fontSize: 12 }}>
             {isLoading ? <div>加载 AI 设置中...</div> : null}
             {error ? <div style={{ color: "#b42318" }}>{error}</div> : null}
             {lastTestResult ? <div>{lastTestResult.message}</div> : null}
             {lastTestResult ? (
               <div aria-label="AI 测试详情" style={{ marginTop: 12, borderTop: "1px solid #e5e7eb", paddingTop: 12 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#344054", marginBottom: 8 }}>测试详情</div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: "#344054", marginBottom: 8 }}>测试详情</div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8, marginBottom: 10 }}>
                   <div>
-                    <div style={{ color: "#667085", fontSize: 11 }}>状态</div>
+                    <div style={{ color: "#667085", fontSize: 10 }}>状态</div>
                     <div>{formatTestStatus(lastTestResult.status)}</div>
                   </div>
                   {lastTestResult.error_kind ? (
                     <div>
-                      <div style={{ color: "#667085", fontSize: 11 }}>错误类型</div>
+                      <div style={{ color: "#667085", fontSize: 10 }}>错误类型</div>
                       <div>{lastTestResult.error_kind}</div>
                     </div>
                   ) : null}
                   {typeof lastTestResult.retryable === "boolean" ? (
                     <div>
-                      <div style={{ color: "#667085", fontSize: 11 }}>是否可重试</div>
+                      <div style={{ color: "#667085", fontSize: 10 }}>是否可重试</div>
                       <div>{lastTestResult.retryable ? "可重试" : "不可重试"}</div>
                     </div>
                   ) : null}
                   {lastTestResult.total_tokens != null ? (
                     <div>
-                      <div style={{ color: "#667085", fontSize: 11 }}>总 Tokens</div>
+                      <div style={{ color: "#667085", fontSize: 10 }}>总 Tokens</div>
                       <div>{lastTestResult.total_tokens}</div>
                     </div>
                   ) : null}
                   {lastTestResult.latency_ms != null ? (
                     <div>
-                      <div style={{ color: "#667085", fontSize: 11 }}>耗时</div>
+                      <div style={{ color: "#667085", fontSize: 10 }}>耗时</div>
                       <div>{lastTestResult.latency_ms} ms</div>
                     </div>
                   ) : null}
                 </div>
-                <div style={{ color: "#667085", fontSize: 11, marginBottom: 6 }}>日志</div>
-                <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: 10, color: "#243041", fontSize: 12 }}>
+                <div style={{ color: "#667085", fontSize: 10, marginBottom: 6 }}>日志</div>
+                <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: 10, color: "#243041", fontSize: 11 }}>
                   {lastTestResult.message}
                 </pre>
               </div>

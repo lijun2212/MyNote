@@ -8,7 +8,8 @@ interface UseAppMenuOptions {
   run: (actionId: MenuActionId) => Promise<boolean> | boolean;
 }
 
-const PREDEFINED_EDIT_MENU_ITEMS: Partial<Record<MenuActionId, "Undo" | "Redo">> = {
+const PREDEFINED_EDIT_MENU_ITEMS: Partial<Record<MenuActionId, "Paste" | "Undo" | "Redo">> = {
+  "edit.paste": "Paste",
   "edit.undo": "Undo",
   "edit.redo": "Redo",
 };

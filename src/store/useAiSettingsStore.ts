@@ -55,9 +55,9 @@ function toErrorMessage(error: unknown) {
   if (typeof error === "object" && error !== null) {
     const entries = Object.entries(error as Record<string, unknown>);
     if (entries.length === 1) {
-      const [kind, value] = entries[0];
+      const [, value] = entries[0];
       if (typeof value === "string" && value.trim()) {
-        return `${kind}: ${value}`;
+        return value;
       }
     }
 
@@ -71,7 +71,7 @@ function toErrorMessage(error: unknown) {
     }
   }
 
-  return "AI settings request failed";
+  return "AI 设置请求失败";
 }
 
 function resolveDefaultProfile(settings: AiSettings | null) {

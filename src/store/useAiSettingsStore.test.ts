@@ -247,7 +247,7 @@ describe("useAiSettingsStore", () => {
   it("surfaces Rust AppError objects instead of a generic fallback message", async () => {
     apiMocks.getAiSettings.mockResolvedValue(makeSettings({ default_profile_id: null, profiles: [] }));
     apiMocks.upsertAiProfile.mockResolvedValue(makeProfile({ id: "profile-2", name: "Primary" }));
-    apiMocks.hasAiProfileSecret.mockRejectedValueOnce({ Io: "System keychain operation failed" });
+    apiMocks.hasAiProfileSecret.mockRejectedValueOnce({ Io: "系统密钥链操作失败" });
 
     await useAiSettingsStore.getState().loadSettings();
 
@@ -259,9 +259,9 @@ describe("useAiSettingsStore", () => {
       temperature: 0.2,
       max_tokens: 2048,
       enabled: true,
-    }, "sk-test")).rejects.toEqual({ Io: "System keychain operation failed" });
+    }, "sk-test")).rejects.toEqual({ Io: "系统密钥链操作失败" });
 
-    expect(useAiSettingsStore.getState().error).toBe("Io: System keychain operation failed");
+    expect(useAiSettingsStore.getState().error).toBe("系统密钥链操作失败");
   });
 
   it("requires a persisted keychain secret when saving without a new api key", async () => {

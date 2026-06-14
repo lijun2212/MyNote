@@ -277,6 +277,7 @@ describe("menuSchema", () => {
       "edit.copyLink",
       "note.copyWikiLink",
       "note.delete",
+      "edit.paste",
       "edit.undo",
       "edit.redo",
     ]);
@@ -286,6 +287,7 @@ describe("menuSchema", () => {
       "复制链接",
       "复制 Wiki 链接",
       "删除笔记",
+      "粘贴",
       "撤销",
       "重做",
     ]);
@@ -296,6 +298,9 @@ describe("menuSchema", () => {
     expect(findMenuItem(editMenu?.children, "note.copyWikiLink")).toMatchObject({
       enabled: true,
       accelerator: "Cmd+Shift+W",
+    });
+    expect(findMenuItem(editMenu?.children, "edit.paste")).toMatchObject({
+      enabled: true,
     });
   });
 
@@ -381,15 +386,12 @@ describe("menuSchema", () => {
     });
     expect(aiMenu?.children?.map((item) => item.id)).toEqual([
       "ai.settings",
-      "ai.testConnection",
       "ai.toggleAutoSummaryAgent",
     ]);
     expect(aiMenu?.children?.filter(isMenuItem).map((item) => item.label)).toEqual([
       "打开 AI 设置",
-      "测试模型",
       "启用自动摘要",
     ]);
-    expect(findMenuItem(aiMenu?.children, "ai.testConnection")?.enabled).toBe(true);
     expect(findMenuItem(aiMenu?.children, "ai.toggleAutoSummaryAgent")?.checked).toBe(true);
     expect(findMenuItem(disabledMynoteMenu?.children, "file.newNote")?.enabled).toBe(false);
     expect(findMenuItem(disabledMynoteMenu?.children, "file.newNotebook")?.enabled).toBe(false);

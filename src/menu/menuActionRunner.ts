@@ -28,7 +28,6 @@ export interface MenuActionRunnerHandlers {
   refreshFileTree?: () => MaybePromise;
   openSearch?: () => MaybePromise;
   openAiSettings?: () => MaybePromise;
-  testAiConnection?: () => MaybePromise;
   toggleAutoSummaryAgent?: () => MaybePromise;
   openProjection?: () => MaybePromise;
   closeProjection?: () => MaybePromise;
@@ -230,6 +229,7 @@ export function createMenuActionRunner(handlers: MenuActionRunnerHandlers) {
     "edit.rename": (payload) => requireHandler(handlers, "edit.rename", "renameCurrentNote")(assertNotePayload(payload)),
     "edit.move": (payload) => requireHandler(handlers, "edit.move", "moveCurrentNote")(assertNotePayload(payload)),
     "edit.copyLink": (payload) => requireHandler(handlers, "edit.copyLink", "copyCurrentNoteLink")(assertNotePayload(payload)),
+    "edit.paste": () => undefined,
     "edit.undo": () => undefined,
     "edit.redo": () => undefined,
     "view.search": () => requireHandler(handlers, "view.search", "openSearch")(),
@@ -241,7 +241,6 @@ export function createMenuActionRunner(handlers: MenuActionRunnerHandlers) {
     "view.closeProjection": () => requireHandler(handlers, "view.closeProjection", "closeProjection")(),
     "view.projectionFollowScroll": () => requireHandler(handlers, "view.projectionFollowScroll", "toggleProjectionFollowScroll")(),
     "ai.settings": () => requireHandler(handlers, "ai.settings", "openAiSettings")(),
-    "ai.testConnection": () => requireHandler(handlers, "ai.testConnection", "testAiConnection")(),
     "ai.toggleAutoSummaryAgent": () => requireHandler(handlers, "ai.toggleAutoSummaryAgent", "toggleAutoSummaryAgent")(),
     "note.rename": (payload) => requireHandler(handlers, "note.rename", "renameCurrentNote")(assertNotePayload(payload)),
     "note.move": (payload) => requireHandler(handlers, "note.move", "moveCurrentNote")(assertNotePayload(payload)),

@@ -130,7 +130,7 @@ describe("AiSettingsDialog", () => {
     expect(apiMocks.saveAiSettings).toHaveBeenCalledWith(true, "profile-1");
     expect(apiMocks.hasAiProfileSecret).toHaveBeenCalledWith("profile-1");
     expect(useAiSettingsStore.getState().defaultProfile?.name).toBe("Work");
-    expect(screen.getByText("已保存到系统密钥链，本次会话可直接测试；留空则不更新。")).toBeInTheDocument();
+    expect(screen.getByLabelText("API Key")).toHaveValue("sk-test");
   });
 
   it("shows a visible error when secret persistence verification fails after save", async () => {
@@ -185,7 +185,7 @@ describe("AiSettingsDialog", () => {
     apiMocks.testAiProfileInput.mockResolvedValue(makeTestResult({
       success: false,
       status: "failed",
-      message: "AI profile model cannot be blank",
+      message: "AI 配置的模型不能为空",
       error_kind: "invalid_configuration",
       retryable: false,
       text: null,
@@ -204,7 +204,7 @@ describe("AiSettingsDialog", () => {
     await user.click(screen.getByRole("button", { name: "测试连接" }));
 
     const details = await screen.findByLabelText("AI 测试详情");
-    expect(within(details).getByText("AI profile model cannot be blank")).toBeInTheDocument();
+    expect(within(details).getByText("AI 配置的模型不能为空")).toBeInTheDocument();
     expect(apiMocks.testAiProfileInput).toHaveBeenCalledWith({
       id: null,
       name: "默认配置",
@@ -339,5 +339,27 @@ describe("AiSettingsDialog", () => {
     expect(within(details).getByText("不可重试")).toBeInTheDocument();
     expect(within(details).getByText("13")).toBeInTheDocument();
     expect(within(details).getByText(/Anthropic response did not include text content/)).toBeInTheDocument();
+  });
+
+  it("uses compact consistent control sizing for form fields and diagnostics actions", () => {
+    render(<AiSettingsDialog />);
+
+    expect(screen.getByLabelText("名称")).toHaveStyle({
+      fontSize: "13px",
+      minHeight: "36px",
+      padding: "8px 10px",
+    });
+    expect(screen.getByLabelText("Provider")).toHaveStyle({
+      fontSize: "13px",
+      height: "36px",
+      minHeight: "36px",
+      padding: "8px 28px 8px 10px",
+      lineHeight: "1.2",
+    });
+    expect(screen.getByRole("button", { name: "测试连接" })).toHaveStyle({
+      fontSize: "13px",
+      minHeight: "36px",
+      padding: "8px 12px",
+    });
   });
 });

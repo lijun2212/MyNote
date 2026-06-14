@@ -15,7 +15,7 @@ pub struct SystemSecretStore;
 impl SystemSecretStore {
     fn entry_for(profile_id: &str) -> AppResult<Entry> {
         Entry::new(AI_SECRET_SERVICE, profile_id)
-            .map_err(|error| AppError::Io(format!("Failed to access system keychain: {error}")))
+            .map_err(|error| AppError::Io(format!("访问系统密钥链失败：{error}")))
     }
 }
 
@@ -41,7 +41,7 @@ impl AiSecretStore for SystemSecretStore {
 
 fn map_keyring_error(error: keyring::Error) -> AppError {
     match error {
-        keyring::Error::NoEntry => AppError::NotFound("AI profile secret not found".into()),
-        other => AppError::Io(format!("System keychain operation failed: {other}")),
+        keyring::Error::NoEntry => AppError::NotFound("系统密钥链中未找到 AI 配置密钥".into()),
+        other => AppError::Io(format!("系统密钥链操作失败：{other}")),
     }
 }

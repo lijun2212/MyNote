@@ -233,7 +233,7 @@ fn normalize_profile_id(input: Option<String>) -> AppResult<String> {
         Some(id) => {
             let trimmed = id.trim();
             if trimmed.is_empty() {
-                Err(AppError::InvalidInput("AI profile id cannot be blank".into()))
+                Err(AppError::InvalidInput("AI 配置 ID 不能为空".into()))
             } else {
                 Ok(trimmed.to_string())
             }
@@ -245,7 +245,12 @@ fn normalize_profile_id(input: Option<String>) -> AppResult<String> {
 fn normalize_required_string(field: &str, value: String) -> AppResult<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
-        Err(AppError::InvalidInput(format!("AI profile {field} cannot be blank")))
+        let field_label = match field {
+            "name" => "名称",
+            "model" => "模型",
+            _ => field,
+        };
+        Err(AppError::InvalidInput(format!("AI 配置的{field_label}不能为空")))
     } else {
         Ok(trimmed.to_string())
     }

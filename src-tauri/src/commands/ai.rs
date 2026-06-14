@@ -22,7 +22,7 @@ fn get_ai_settings_from_conn(conn: &Connection) -> Result<AiSettings, AppError> 
 fn normalize_api_key(api_key: &str) -> Result<String, AppError> {
     let trimmed = api_key.trim();
     if trimmed.is_empty() {
-        Err(AppError::InvalidInput("AI API key cannot be blank".into()))
+        Err(AppError::InvalidInput("API Key 不能为空".into()))
     } else {
         Ok(trimmed.to_string())
     }
@@ -46,7 +46,7 @@ fn set_ai_profile_secret_in_conn(
             Ok(())
         }
         Err(AppError::NotFound(_)) => Err(AppError::Io(
-            "Failed to verify saved AI profile secret in the system keychain".into(),
+            "无法验证已保存到系统密钥链的 AI 配置密钥，请重试。".into(),
         )),
         Err(error) => Err(error),
     }
@@ -87,10 +87,7 @@ fn prepare_ai_profile_test_in_conn(
         Err(AppError::NotFound(_)) => Ok(PreparedAiProfileTest::Immediate(AiProfileTestResult {
             success: false,
             status: AiProfileTestStatus::MissingSecret,
-            message: format!(
-                "AI profile {} is missing an API key in the system keychain.",
-                normalized_profile_id
-            ),
+            message: format!("AI 配置 {} 在系统密钥链中未找到已保存的 API Key。", normalized_profile_id),
             error_kind: None,
             retryable: None,
             text: None,
@@ -127,7 +124,12 @@ fn classify_failed_profile_test(error: &AppError) -> (AiProfileTestErrorKind, bo
 fn normalize_required_field(field: &str, value: String) -> Result<String, AppError> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
-        Err(AppError::InvalidInput(format!("AI profile {field} cannot be blank")))
+        let field_label = match field {
+            "name" => "名称",
+            "model" => "模型",
+            _ => field,
+        };
+        Err(AppError::InvalidInput(format!("AI 配置的{field_label}不能为空")))
     } else {
         Ok(trimmed.to_string())
     }
@@ -221,10 +223,7 @@ fn prepare_ai_profile_input_test_in_conn(
             PreparedAiProfileTest::Immediate(AiProfileTestResult {
                 success: false,
                 status: AiProfileTestStatus::MissingSecret,
-                message: format!(
-                    "AI profile {} is missing an API key in the system keychain.",
-                    existing_profile_id
-                ),
+                message: format!("AI 配置 {} 在系统密钥链中未找到已保存的 API Key。", existing_profile_id),
                 error_kind: None,
                 retryable: None,
                 text: None,
@@ -267,7 +266,7 @@ async fn complete_ai_profile_test(
             Ok(response) => Ok(AiProfileTestResult {
                 success: true,
                 status: AiProfileTestStatus::Ok,
-                message: format!("AI profile {} healthcheck succeeded.", profile_id),
+                message: format!("AI 配置 {} 连接测试成功。", profile_id),
                 error_kind: None,
                 retryable: None,
                 text: Some(response.text),
@@ -515,15 +514,15 @@ mod tests {
 
     impl AiSecretStore for FailingSecretStore {
         fn set_profile_secret(&self, _profile_id: &str, _api_key: &str) -> Result<(), AppError> {
-            Err(AppError::Io("System keychain operation failed: locked".into()))
+            Err(AppError::Io("系统密钥链操作失败：已锁定".into()))
         }
 
         fn get_profile_secret(&self, _profile_id: &str) -> Result<String, AppError> {
-            Err(AppError::Io("System keychain operation failed: locked".into()))
+            Err(AppError::Io("系统密钥链操作失败：已锁定".into()))
         }
 
         fn delete_profile_secret(&self, _profile_id: &str) -> Result<(), AppError> {
-            Err(AppError::Io("System keychain operation failed: locked".into()))
+            Err(AppError::Io("系统密钥链操作失败：已锁定".into()))
         }
     }
 
@@ -656,7 +655,7 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(error, AppError::Io(_)));
-        assert!(error.to_string().contains("Failed to verify saved AI profile secret"));
+        assert!(error.to_string().contains("无法验证已保存到系统密钥链的 AI 配置密钥"));
     }
 
     #[test]
@@ -725,7 +724,8 @@ mod tests {
         assert!(!result.success);
         assert_eq!(result.status, AiProfileTestStatus::MissingSecret);
         assert_eq!(result.error_kind, None);
-        assert!(result.message.contains("API key"));
+        assert!(result.message.contains("API Key"));
+        assert!(result.message.contains("系统密钥链"));
     }
 
     #[tokio::test]
@@ -752,7 +752,7 @@ mod tests {
         assert_eq!(result.status, AiProfileTestStatus::KeychainUnavailable);
         assert_eq!(result.error_kind, Some(AiProfileTestErrorKind::ProviderUnavailable));
         assert_eq!(result.retryable, Some(true));
-        assert!(result.message.contains("keychain"));
+        assert!(result.message.contains("系统密钥链"));
     }
 
     #[test]
@@ -1008,6 +1008,7 @@ mod tests {
         mock.assert();
         assert!(result.success);
         assert_eq!(result.status, AiProfileTestStatus::Ok);
+        assert_eq!(result.message, "AI 配置 profile-1 连接测试成功。");
         assert_eq!(result.error_kind, None);
         assert_eq!(result.retryable, None);
         assert_eq!(result.text.as_deref(), Some("MYNOTE_HEALTHCHECK_OK"));

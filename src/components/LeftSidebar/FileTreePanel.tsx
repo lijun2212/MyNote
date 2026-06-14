@@ -1173,7 +1173,7 @@ function getNoteTitleFromPath(notePath: string): string {
           pointerEvents: isToolbarExpanded ? "auto" : "none",
           transition: "opacity 140ms ease, transform 180ms ease",
         }}>
-          <div style={{ position: "relative" }}>
+          <div>
             <button
               onClick={handleImport}
               aria-label="导入笔记"
@@ -1184,67 +1184,6 @@ function getNoteTitleFromPath(notePath: string): string {
             >
               <ImportNoteIcon />
             </button>
-            {importSourcePickerOpen && (
-              <div
-                role="menu"
-                aria-label="导入来源"
-                style={{
-                  position: "absolute",
-                  right: 0,
-                  top: "calc(100% + 6px)",
-                  minWidth: 188,
-                  width: "max-content",
-                  maxWidth: "min(240px, calc(100vw - 24px))",
-                  padding: 6,
-                  borderRadius: 8,
-                  border: "1px solid #d0d7de",
-                  background: "#fff",
-                  boxShadow: "0 10px 30px rgba(15, 23, 42, 0.12)",
-                  zIndex: 20,
-                }}
-              >
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => void handleImportMarkdownFiles()}
-                  style={{
-                    width: "100%",
-                    display: "block",
-                    textAlign: "left",
-                    padding: "8px 10px",
-                    border: "none",
-                    borderRadius: 6,
-                    background: "transparent",
-                    fontSize: 13,
-                    whiteSpace: "nowrap",
-                    color: "#111827",
-                    cursor: "pointer",
-                  }}
-                >
-                  导入 Markdown 文件
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => void handleImportDirectory()}
-                  style={{
-                    width: "100%",
-                    display: "block",
-                    textAlign: "left",
-                    padding: "8px 10px",
-                    border: "none",
-                    borderRadius: 6,
-                    background: "transparent",
-                    fontSize: 13,
-                    whiteSpace: "nowrap",
-                    color: "#111827",
-                    cursor: "pointer",
-                  }}
-                >
-                  导入文件夹
-                </button>
-              </div>
-            )}
           </div>
           <button
             onClick={handleNewNotebook}
@@ -1268,6 +1207,60 @@ function getNoteTitleFromPath(notePath: string): string {
           </button>
         </div>
       </div>
+      {importSourcePickerOpen && (
+        <div
+          role="menu"
+          aria-label="导入来源"
+          style={{
+            padding: 6,
+            borderBottom: "1px solid #e0e2e7",
+            background: "#fff",
+            boxSizing: "border-box",
+            width: "100%",
+          }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => void handleImportMarkdownFiles()}
+            style={{
+              width: "100%",
+              display: "block",
+              textAlign: "left",
+              padding: "8px 10px",
+              border: "none",
+              borderRadius: 6,
+              background: "transparent",
+              fontSize: 13,
+              whiteSpace: "nowrap",
+              color: "#111827",
+              cursor: "pointer",
+            }}
+          >
+            导入 Markdown 文件
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => void handleImportDirectory()}
+            style={{
+              width: "100%",
+              display: "block",
+              textAlign: "left",
+              padding: "8px 10px",
+              border: "none",
+              borderRadius: 6,
+              background: "transparent",
+              fontSize: 13,
+              whiteSpace: "nowrap",
+              color: "#111827",
+              cursor: "pointer",
+            }}
+          >
+            导入文件夹
+          </button>
+        </div>
+      )}
       {creationHint && (
         <div style={{ padding: "6px 8px", borderBottom: "1px solid #e0e2e7", fontSize: 12, color: "#b54708", background: "#fffaeb" }}>
           {creationHint}

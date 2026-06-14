@@ -1242,10 +1242,10 @@ describe("FileTreePanel", () => {
     await user.click(screen.getByRole("button", { name: "导入笔记" }));
 
     const menu = screen.getByRole("menu", { name: "导入来源" });
+    expect(screen.getByTestId("file-tree-toolbar-header")).toHaveStyle({ overflow: "hidden" });
     expect(menu).toHaveStyle({
-      left: "auto",
-      right: "0px",
-      minWidth: "188px",
+      width: "100%",
+      boxSizing: "border-box",
     });
     expect(screen.getByRole("menuitem", { name: "导入 Markdown 文件" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "导入文件夹" })).toBeInTheDocument();

@@ -304,6 +304,7 @@ describe("useAppMenu", () => {
               { id: "edit.rename", label: "重命名", enabled: true },
               { id: "edit.move", label: "移动", enabled: true },
               { id: "edit.copyLink", label: "复制链接", enabled: true },
+              { id: "edit.paste", label: "粘贴", enabled: true },
               { id: "edit.undo", label: "撤销", enabled: true },
               { id: "edit.redo", label: "重做", enabled: true },
             ],
@@ -322,7 +323,7 @@ describe("useAppMenu", () => {
     const submenus = (rootMenuArg?.items ?? []) as Array<{ options: { items?: Array<{ options: Record<string, unknown> }> } }>;
     const childItems = submenus[0]?.options.items ?? [];
 
-    expect(childItems).toHaveLength(5);
+    expect(childItems).toHaveLength(6);
     expect(childItems[0]).toBeInstanceOf(menuMocks.MenuItem);
     expect(childItems[0]?.options.id).toBe("edit.rename");
     expect(childItems[1]).toBeInstanceOf(menuMocks.MenuItem);
@@ -330,8 +331,10 @@ describe("useAppMenu", () => {
     expect(childItems[2]).toBeInstanceOf(menuMocks.MenuItem);
     expect(childItems[2]?.options.id).toBe("edit.copyLink");
     expect(childItems[3]).toBeInstanceOf(menuMocks.PredefinedMenuItem);
-    expect(childItems[3]?.options.item).toBe("Undo");
+    expect(childItems[3]?.options.item).toBe("Paste");
     expect(childItems[4]).toBeInstanceOf(menuMocks.PredefinedMenuItem);
-    expect(childItems[4]?.options.item).toBe("Redo");
+    expect(childItems[4]?.options.item).toBe("Undo");
+    expect(childItems[5]).toBeInstanceOf(menuMocks.PredefinedMenuItem);
+    expect(childItems[5]?.options.item).toBe("Redo");
   });
 });
