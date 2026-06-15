@@ -309,6 +309,60 @@ describe("ProjectionPreviewShell", () => {
     expect(container.querySelectorAll(".markdown-table-resize-handle")).toHaveLength(0);
   });
 
+  it("renders mermaid diagrams in the projection window through the shared MarkdownPreview", async () => {
+    vi.resetModules();
+    vi.doUnmock("../EditorWorkspace/MarkdownPreview");
+
+    const { ProjectionPreviewShell } = await import("./ProjectionPreviewShell");
+
+    let syncHandler: ProjectionStateSyncHandler | undefined;
+
+    tauriMocks.listen.mockImplementation(async (eventName: string, handler: unknown) => {
+      if (eventName === PROJECTION_STATE_SYNC_EVENT) {
+        syncHandler = handler as ProjectionStateSyncHandler;
+      }
+
+      return () => undefined;
+    });
+
+    const { container } = render(
+      <ContextMenuProvider>
+        <ProjectionPreviewShell />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    await waitFor(() => {
+      expect(syncHandler).toBeTypeOf("function");
+    });
+
+    await act(async () => {
+      syncHandler?.({
+        payload: {
+          sessionId: 11,
+          notePath: "notes/diagram.md",
+          noteTitle: "Diagram",
+          content: [
+            "```mermaid",
+            "flowchart TD",
+            "  Start[Start] --> Stop[Stop]",
+            "```",
+          ].join("\n"),
+          searchNavigationTarget: null,
+          tagNavigationTarget: null,
+          revision: 1,
+        },
+      });
+    });
+
+    const diagramBlock = container.querySelector('[data-source-line="1"][data-source-end-line="4"]');
+    expect(diagramBlock).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(diagramBlock?.querySelector("svg")).not.toBeNull();
+    });
+  });
+
   it("throws for invalid injected roles in test mode instead of silently falling back", async () => {
     vi.resetModules();
     vi.doUnmock("../../projection/windowRole");

@@ -1,8 +1,10 @@
 import type { ReactElement } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
+import mermaid from "mermaid";
 import { describe, expect, it, vi } from "vitest";
 import { ContextMenuHost } from "../ContextMenu/ContextMenuHost";
+import { StatusBar } from "../StatusBar";
 import { ContextMenuProvider } from "../ContextMenu/useContextMenu";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { useAppStore } from "../../store/useAppStore";
@@ -64,6 +66,48 @@ describe("MarkdownPreview", () => {
     expect(chips).toHaveLength(2);
     expect(chips[0]).toHaveTextContent("项目报告");
     expect(chips[1]).toHaveTextContent("阶段一");
+  });
+
+  it("renders inline LaTeX formulas in markdown content", () => {
+    const { container } = render(<MarkdownPreview content="质能方程 $E = mc^2$ 很重要。" />);
+
+    expect(container.querySelector(".katex")).toBeInTheDocument();
+    expect(container.querySelector(".katex-display")).toBeNull();
+  });
+
+  it("renders block LaTeX formulas in markdown content", () => {
+    const { container } = render(
+      <MarkdownPreview
+        content={[
+          "积分公式：",
+          "",
+          "$$",
+          "\\int_0^1 x^2 \\, dx",
+          "$$",
+        ].join("\n")}
+      />,
+    );
+
+    expect(container.querySelector(".katex-display")).toBeInTheDocument();
+  });
+
+  it("left-aligns block LaTeX formulas inside the preview pane", () => {
+    const { container } = render(
+      <MarkdownPreview
+        content={[
+          "矩阵：",
+          "",
+          "$$",
+          "\\begin{pmatrix}",
+          "a & b \\\\ ",
+          "c & d",
+          "\\end{pmatrix}",
+          "$$",
+        ].join("\n")}
+      />,
+    );
+
+    expect(container.querySelector(".katex-display")).toHaveStyle({ textAlign: "left" });
   });
 
   it("adds table column resize handles and adjusts adjacent column widths", () => {
@@ -253,6 +297,38 @@ describe("MarkdownPreview", () => {
     expect(image?.getAttribute("src")).toBe("asset:///Users/lijun/KnowledgeBase/assets/20260610-092845-01ktrd.png");
   });
 
+  it("rewrites remote markdown image urls to data urls for preview rendering", async () => {
+    const remoteUrl = "https://cdn.example.com/diagram.svg";
+    const blob = new Blob(["<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>"], { type: "image/svg+xml" });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      blob: vi.fn().mockResolvedValue(blob),
+    });
+    const originalFetch = globalThis.fetch;
+    const expectedPrefix = "data:image/svg+xml;base64,";
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      const { container } = render(
+        <MarkdownPreview
+          content={`![远程图片](${remoteUrl})`}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(fetchMock).toHaveBeenCalledWith(remoteUrl);
+        const src = container.querySelector("img")?.getAttribute("src") ?? "";
+        expect(src.startsWith(expectedPrefix)).toBe(true);
+      });
+    } finally {
+      vi.unstubAllGlobals();
+      if (originalFetch) {
+        vi.stubGlobal("fetch", originalFetch);
+      }
+    }
+  });
+
   it("renders fenced code blocks with distinct Typora-like formatting", () => {
     const { container } = render(
       <MarkdownPreview
@@ -270,6 +346,450 @@ describe("MarkdownPreview", () => {
 
     expect(pre).toHaveStyle({ background: "#f6f8fa", padding: "14px 16px", borderRadius: "6px" });
     expect(code).toHaveStyle({ fontFamily: "var(--font-mono)", whiteSpace: "pre" });
+  });
+
+  it("renders syntax-highlighted tokens for fenced code blocks with an explicit language", () => {
+    const { container } = render(
+      <MarkdownPreview
+        content={[
+          "```typescript",
+          "const answer: number = 42;",
+          "```",
+        ].join("\n")}
+      />,
+    );
+
+    const code = container.querySelector("pre code.language-typescript");
+
+    expect(code).toBeInTheDocument();
+    expect(code).toHaveTextContent("const answer: number = 42;");
+    expect(code?.querySelector("span.hljs-keyword")).not.toBeNull();
+  });
+
+  it("shows a code-block toolbar with language label and copies the raw code content", async () => {
+    vi.useFakeTimers();
+    tauriMocks.listen.mockResolvedValue(() => {});
+    const writeTextMock = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: writeTextMock },
+    });
+
+    useEditorStore.getState().setCurrentNote(makeNote({ path: "notes/current.md" }));
+
+    const { container } = render(
+      <>
+        <MarkdownPreview
+          content={[
+            "```typescript",
+            "const answer: number = 42;",
+            "```",
+          ].join("\n")}
+        />
+        <StatusBar />
+      </>,
+    );
+
+    expect(container.querySelector(".markdown-code-block-language"))?.toHaveTextContent("typescript");
+
+    const copyButton = screen.getByRole("button", { name: "复制代码" });
+    await act(async () => {
+      fireEvent.click(copyButton);
+      await Promise.resolve();
+    });
+
+    expect(writeTextMock).toHaveBeenCalledWith("const answer: number = 42;\n");
+
+    expect(screen.getByText("● 已拷贝")).toBeInTheDocument();
+    expect(screen.getByText("● 已拷贝")).toHaveStyle({ color: "#0969da" });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1600);
+    });
+
+    expect(screen.queryByText("● 已拷贝")).not.toBeInTheDocument();
+  });
+
+  it("shows line numbers for fenced code blocks", () => {
+    const { container } = render(
+      <MarkdownPreview
+        content={[
+          "```typescript",
+          "const answer: number = 42;",
+          "console.log(answer);",
+          "```",
+        ].join("\n")}
+      />,
+    );
+
+    const lineNumbers = Array.from(container.querySelectorAll(".markdown-code-block-line-number"));
+    expect(lineNumbers).toHaveLength(2);
+    expect(lineNumbers[0]).toHaveTextContent("1");
+    expect(lineNumbers[1]).toHaveTextContent("2");
+  });
+
+  it("renders mermaid fenced blocks as diagrams while preserving source-line metadata", async () => {
+    const { container } = render(
+      <MarkdownPreview
+        content={[
+          "```mermaid",
+          "flowchart TD",
+          "  Start[Start] --> Stop[Stop]",
+          "```",
+        ].join("\n")}
+      />,
+    );
+
+    const diagramBlock = container.querySelector('[data-source-line="1"][data-source-end-line="4"]');
+
+    expect(diagramBlock).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(diagramBlock?.querySelector("svg")).not.toBeNull();
+    });
+  });
+
+  it("shows an error fallback and preserves raw mermaid source when diagram rendering fails", async () => {
+    const renderSpy = vi.spyOn(mermaid, "render").mockRejectedValueOnce(new Error("render failed"));
+
+    try {
+      const { container } = render(
+        <MarkdownPreview
+          content={[
+            "```mermaid",
+            "flowchart TD",
+            "  Start[Start] --> Stop[Stop]",
+            "```",
+          ].join("\n")}
+        />,
+      );
+
+      const diagramBlock = container.querySelector('[data-source-line="1"][data-source-end-line="4"]');
+
+      await waitFor(() => {
+        expect(diagramBlock).toHaveTextContent("Mermaid 渲染失败");
+        expect(diagramBlock?.querySelector("svg")).toBeNull();
+        expect(diagramBlock?.querySelector("code.language-mermaid")?.textContent).toContain("flowchart TD");
+        expect(diagramBlock?.querySelector("code.language-mermaid")?.textContent).toContain("Start[Start] --> Stop[Stop]");
+      });
+    } finally {
+      renderSpy.mockRestore();
+    }
+  });
+
+  it("sanitizes rendered mermaid svg before injecting it into the preview", async () => {
+    const renderSpy = vi.spyOn(mermaid, "render").mockResolvedValueOnce({
+      svg: '<svg><g data-source-line="99"></g><script>alert("x")</script></svg>',
+      bindFunctions: undefined,
+      diagramType: "flowchart",
+    });
+
+    try {
+      const { container } = render(
+        <MarkdownPreview
+          content={[
+            "```mermaid",
+            "flowchart TD",
+            "  A --> B",
+            "```",
+          ].join("\n")}
+        />,
+      );
+
+      const diagramBlock = container.querySelector('[data-source-line="1"][data-source-end-line="4"]');
+
+      await waitFor(() => {
+        expect(diagramBlock?.querySelector("svg")).not.toBeNull();
+      });
+
+      expect(diagramBlock?.querySelector("script")).toBeNull();
+    } finally {
+      renderSpy.mockRestore();
+    }
+  });
+
+  it("preserves mermaid svg style rules needed for diagram theming", async () => {
+    const renderSpy = vi.spyOn(mermaid, "render").mockResolvedValueOnce({
+      svg: '<svg><style>.node rect { fill: rgb(255, 244, 206); }</style><g class="node"><rect width="120" height="40"></rect></g></svg>',
+      bindFunctions: undefined,
+      diagramType: "flowchart",
+    });
+
+    try {
+      const { container } = render(
+        <MarkdownPreview
+          content={[
+            "```mermaid",
+            "flowchart TD",
+            "  A --> B",
+            "```",
+          ].join("\n")}
+        />,
+      );
+
+      const diagramBlock = container.querySelector('[data-source-line="1"][data-source-end-line="4"]');
+
+      await waitFor(() => {
+        expect(diagramBlock?.querySelector("svg")).not.toBeNull();
+      });
+
+      expect(diagramBlock?.querySelector("style")).not.toBeNull();
+    } finally {
+      renderSpy.mockRestore();
+    }
+  });
+
+  it("preserves mermaid foreignObject labels and marker geometry needed for visible flowcharts", async () => {
+    const renderSpy = vi.spyOn(mermaid, "render").mockResolvedValueOnce({
+      svg: [
+        '<svg viewBox="0 0 240 120">',
+        '<style>.label{color:#111827}.edgePath path{stroke:#6b7280;stroke-width:2px;fill:none}</style>',
+        '<defs><marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z"></path></marker></defs>',
+        '<path class="edgePath" d="M20,20 L180,20" marker-end="url(#arrow)"></path>',
+        '<foreignObject x="40" y="40" width="120" height="32"><div xmlns="http://www.w3.org/1999/xhtml"><span class="label">Step 1 数据源选择</span></div></foreignObject>',
+        '</svg>',
+      ].join(""),
+      bindFunctions: undefined,
+      diagramType: "flowchart",
+    });
+
+    try {
+      const { container } = render(
+        <MarkdownPreview
+          content={[
+            "```mermaid",
+            "flowchart TD",
+            "  A --> B",
+            "```",
+          ].join("\n")}
+        />,
+      );
+
+      const diagramBlock = container.querySelector('[data-source-line="1"][data-source-end-line="4"]');
+
+      await waitFor(() => {
+        expect(diagramBlock?.querySelector("svg")).not.toBeNull();
+      });
+
+      expect(diagramBlock?.querySelector("foreignObject div span"))?.toHaveTextContent("Step 1 数据源选择");
+      expect(diagramBlock?.querySelector("marker")?.getAttribute("markerWidth")).toBe("12");
+      expect(diagramBlock?.querySelector("marker")?.getAttribute("markerHeight")).toBe("12");
+    } finally {
+      renderSpy.mockRestore();
+    }
+  });
+
+  it("renders mermaid foreignObject HTML labels without surfacing XML parser errors", async () => {
+    const renderSpy = vi.spyOn(mermaid, "render").mockResolvedValueOnce({
+      svg: [
+        '<svg viewBox="0 0 320 160">',
+        '<foreignObject x="20" y="20" width="220" height="80">',
+        '<div xmlns="http://www.w3.org/1999/xhtml">',
+        '<span class="nodeLabel"><p>需求澄清<br>输出字段候选</p></span>',
+        '</div>',
+        '</foreignObject>',
+        '</svg>',
+      ].join(""),
+      bindFunctions: undefined,
+      diagramType: "flowchart",
+    });
+
+    try {
+      const { container } = render(
+        <MarkdownPreview
+          content={[
+            "```mermaid",
+            "flowchart TD",
+            "  A --> B",
+            "```",
+          ].join("\n")}
+        />,
+      );
+
+      const diagramBlock = container.querySelector('[data-source-line="1"][data-source-end-line="4"]');
+
+      await waitFor(() => {
+        expect(diagramBlock?.querySelector("svg")).not.toBeNull();
+      });
+
+      expect(diagramBlock).toHaveTextContent("需求澄清");
+      expect(diagramBlock).toHaveTextContent("输出字段候选");
+      expect(diagramBlock).not.toHaveTextContent("This page contains the following errors");
+    } finally {
+      renderSpy.mockRestore();
+    }
+  });
+
+  it("passes mermaid definitions through without wiki-link rewriting inside fenced blocks", async () => {
+    const renderSpy = vi.spyOn(mermaid, "render").mockResolvedValueOnce({
+      svg: "<svg></svg>",
+      bindFunctions: undefined,
+      diagramType: "flowchart",
+    });
+
+    try {
+      render(
+        <MarkdownPreview
+          content={[
+            "```mermaid",
+            "flowchart LR",
+            "  A[[Subroutine]] --> B",
+            "```",
+          ].join("\n")}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(renderSpy).toHaveBeenCalledWith(
+          expect.stringMatching(/^markdown-preview-mermaid-/),
+          "flowchart LR\n  A[[Subroutine]] --> B",
+        );
+      });
+    } finally {
+      renderSpy.mockRestore();
+    }
+  });
+
+  it("renders representative mermaid note samples for common diagram syntaxes", async () => {
+    const { container } = render(
+      <MarkdownPreview
+        content={[
+          "## 流程图",
+          "",
+          "```mermaid",
+          "flowchart TD",
+          "  Start --> Review --> Publish",
+          "```",
+          "",
+          "## 时序图",
+          "",
+          "```mermaid",
+          "sequenceDiagram",
+          "  participant User",
+          "  participant App",
+          "  User->>App: Open note",
+          "  App-->>User: Render preview",
+          "```",
+          "",
+          "## 类图",
+          "",
+          "```mermaid",
+          "classDiagram",
+          "  class Note {",
+          "    +string title",
+          "    +string content",
+          "  }",
+          "  class PreviewPane",
+          "  Note --> PreviewPane : renders in",
+          "```",
+        ].join("\n")}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelectorAll("pre.mermaid-diagram svg")).toHaveLength(3);
+    });
+  });
+
+  it("renders the real rule-builder business flowchart sample with visible Chinese labels", async () => {
+    const { container } = render(
+      <MarkdownPreview
+        content={[
+          "## 5. 业务流程图",
+          "",
+          "```mermaid",
+          "flowchart TD",
+          "  A[用户输入规则需求] --> B[Step 1 数据源选择]",
+          "  B --> B1[获取可见筛查源]",
+          "  B1 --> B2[LLM 推荐数据源和候选表]",
+          "  B2 --> B3[用户确认或切换数据源]",
+          "",
+          "  B3 --> C[Step 2 需求澄清]",
+          "  C --> C1[基于真实表结构/字段别名/样本数据提取意图]",
+          "  C1 --> C2[生成澄清问题和输出字段候选]",
+          "  C2 --> C3[用户确认答案/补充说明/选择输出字段]",
+          "",
+          "  C3 --> D[Step 3 规则构建]",
+          "  D --> D1[JOIN 推断与字段校验]",
+          "  D1 --> D2[生成结构化 query_logic]",
+          "  D2 --> D3[程序化校验与 SQL 组装]",
+          "  D3 --> D4[可视化查询构建器展示]",
+          "  D4 --> D5{用户是否调整?}",
+          "  D5 -- 是 --> D6[自然语言指令增量修改/版本快照]",
+          "  D6 --> D4",
+          "  D5 -- 否 --> E[Step 4a Demo 数据确认]",
+          "",
+          "  E --> E1[生成正例/反例/边界测试数据]",
+          "  E1 --> E2[修正跨表 JOIN 键和 tag 一致性]",
+          "  E2 --> E3[用户确认 Demo 数据]",
+          "",
+          "  E3 --> F[Step 4b 验证]",
+          "  F --> F1[创建 Demo 表并插入数据]",
+          "  F1 --> F2[执行分层验证 L1/L2/L3/L4]",
+          "  F2 --> F3{验证通过?}",
+          "```",
+        ].join("\n")}
+      />,
+    );
+
+    const diagramBlock = container.querySelector('[data-source-line="3"]');
+    expect(diagramBlock).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(diagramBlock?.querySelector("svg")).not.toBeNull();
+    });
+
+    expect(diagramBlock).toHaveTextContent("用户输入规则需求");
+    expect(diagramBlock).toHaveTextContent("Step 1 数据源选择");
+    expect(diagramBlock).toHaveTextContent("用户是否调整?");
+    expect(diagramBlock).toHaveTextContent("执行分层验证 L1/L2/L3/L4");
+  });
+
+  it("uses a diagram-oriented surface for mermaid previews instead of plain code-block chrome", async () => {
+    const { container } = render(
+      <MarkdownPreview
+        content={[
+          "```mermaid",
+          "flowchart TD",
+          "  Idea --> Draft --> Review",
+          "```",
+        ].join("\n")}
+      />,
+    );
+
+    const diagramBlock = container.querySelector("pre.mermaid-diagram");
+
+    await waitFor(() => {
+      expect(diagramBlock?.querySelector("svg")).not.toBeNull();
+    });
+
+    expect(diagramBlock).toHaveStyle({
+      background: "#ffffff",
+      padding: "18px 20px",
+      borderRadius: "8px",
+    });
+  });
+
+  it("keeps non-mermaid fenced blocks on the normal rendering path without invoking mermaid", () => {
+    const renderSpy = vi.spyOn(mermaid, "render");
+
+    try {
+      const { container } = render(
+        <MarkdownPreview
+          content={[
+            "```text",
+            "plain fenced block",
+            "```",
+          ].join("\n")}
+        />,
+      );
+
+      expect(container.querySelector("pre.mermaid-diagram")).toBeNull();
+      expect(container.querySelector("pre code.language-text")).toHaveTextContent("plain fenced block");
+      expect(renderSpy).not.toHaveBeenCalled();
+    } finally {
+      renderSpy.mockRestore();
+    }
   });
 
   it("highlights the matched term inside fenced code blocks without highlighting the whole block", async () => {

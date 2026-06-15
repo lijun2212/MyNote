@@ -2,7 +2,27 @@ import { useEffect, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import DOMPurify from "dompurify";
+import "katex/dist/katex.min.css";
+import katex from "katex";
+import hljs from "highlight.js/lib/core";
+import bash from "highlight.js/lib/languages/bash";
+import css from "highlight.js/lib/languages/css";
+import go from "highlight.js/lib/languages/go";
+import ini from "highlight.js/lib/languages/ini";
+import java from "highlight.js/lib/languages/java";
+import javascript from "highlight.js/lib/languages/javascript";
+import json from "highlight.js/lib/languages/json";
+import markdown from "highlight.js/lib/languages/markdown";
+import plaintext from "highlight.js/lib/languages/plaintext";
+import properties from "highlight.js/lib/languages/properties";
+import python from "highlight.js/lib/languages/python";
+import rust from "highlight.js/lib/languages/rust";
+import sql from "highlight.js/lib/languages/sql";
+import typescript from "highlight.js/lib/languages/typescript";
+import xml from "highlight.js/lib/languages/xml";
+import yaml from "highlight.js/lib/languages/yaml";
 import MarkdownIt from "markdown-it";
+import texmath from "markdown-it-texmath";
 import { api } from "../../api/commands";
 import { useOpenNote } from "../../hooks/useOpenNote";
 import { useAppStore } from "../../store/useAppStore";
@@ -19,6 +39,81 @@ import type { PreviewLinkKind } from "../ContextMenu/contextMenuTypes";
 
 const md = new MarkdownIt({ html: false, linkify: true, typographer: true });
 const SOURCE_LINE_TAGS = new Set(["blockquote", "h1", "h2", "h3", "h4", "h5", "h6", "li", "ol", "p", "table", "tr", "ul"]);
+type MermaidRuntime = Awaited<typeof import("mermaid")>["default"];
+type HighlightLanguage = Parameters<typeof hljs.registerLanguage>[1];
+
+let mermaidInitialized = false;
+let mermaidRuntimePromise: Promise<MermaidRuntime> | null = null;
+
+md.use(texmath, {
+  engine: katex,
+  delimiters: "dollars",
+  katexOptions: {
+    throwOnError: false,
+    strict: "ignore",
+  },
+});
+
+function registerPreviewLanguage(name: string, definition: HighlightLanguage, aliases: string[] = []) {
+  if (!hljs.getLanguage(name)) {
+    hljs.registerLanguage(name, definition);
+  }
+
+  if (aliases.length > 0) {
+    hljs.registerAliases(aliases, { languageName: name });
+  }
+}
+
+registerPreviewLanguage("bash", bash, ["sh", "shell", "zsh"]);
+registerPreviewLanguage("css", css);
+registerPreviewLanguage("go", go, ["golang"]);
+registerPreviewLanguage("ini", ini, ["toml"]);
+registerPreviewLanguage("java", java);
+registerPreviewLanguage("javascript", javascript, ["js", "jsx", "mjs", "cjs"]);
+registerPreviewLanguage("json", json, ["jsonc"]);
+registerPreviewLanguage("markdown", markdown, ["md"]);
+registerPreviewLanguage("plaintext", plaintext, ["text", "txt", "plain"]);
+registerPreviewLanguage("properties", properties, ["conf", "cfg"]);
+registerPreviewLanguage("python", python, ["py"]);
+registerPreviewLanguage("rust", rust, ["rs"]);
+registerPreviewLanguage("sql", sql);
+registerPreviewLanguage("typescript", typescript, ["ts", "tsx"]);
+registerPreviewLanguage("xml", xml, ["html", "svg"]);
+registerPreviewLanguage("yaml", yaml, ["yml"]);
+
+function escapeHtmlAttr(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+const defaultFenceRenderer = md.renderer.rules.fence;
+
+md.renderer.rules.fence = (tokens, idx, options, env, self) => {
+  const token = tokens[idx];
+  const info = token.info.trim().split(/\s+/, 1)[0]?.toLowerCase();
+  if (info !== "mermaid") {
+    if (info && hljs.getLanguage(info)) {
+      const attrs = self.renderAttrs(token);
+      const highlighted = hljs.highlight(token.content, {
+        language: info,
+        ignoreIllegals: true,
+      }).value;
+
+      return `<pre${attrs}><code class="hljs language-${escapeHtmlAttr(info)}">${highlighted}</code></pre>`;
+    }
+
+    return defaultFenceRenderer
+      ? defaultFenceRenderer(tokens, idx, options, env, self)
+      : self.renderToken(tokens, idx, options);
+  }
+
+  const attrs = self.renderAttrs(token);
+  const content = escapeHtmlAttr(token.content);
+  return `<pre class="mermaid-diagram"${attrs}><code class="language-mermaid">${content}</code></pre>`;
+};
 
 md.core.ruler.push("source_line_attrs", (state) => {
   state.tokens.forEach((token) => {
@@ -33,9 +128,13 @@ md.core.ruler.push("source_line_attrs", (state) => {
 const ALLOWED_MARKDOWN_TAGS = [
   "a", "blockquote", "br", "code", "del", "em", "hr", "h1", "h2", "h3", "h4", "h5", "h6", "img",
   "li", "ol", "p", "pre", "span", "strong", "table", "tbody", "td", "th", "thead", "tr", "ul",
+  "math", "annotation", "mrow", "mi", "mn", "mo", "msup", "msub", "msubsup", "mfrac", "mspace", "mtext", "semantics",
 ];
 
-const ALLOWED_MARKDOWN_ATTR = ["alt", "href", "src", "title", "class", "data-title", "data-source-line", "data-source-end-line"];
+const ALLOWED_MARKDOWN_ATTR = [
+  "alt", "href", "src", "title", "class", "style", "aria-hidden", "xmlns", "display", "encoding",
+  "data-title", "data-source-line", "data-source-end-line",
+];
 const ALLOWED_MARKDOWN_URI = /^(?:(?:https?):|(?:data:image\/(?:gif|png|jpe?g|webp);base64,)|(?:notes\/)|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i;
 const MIN_TABLE_COLUMN_PERCENT = 8;
 
@@ -47,13 +146,89 @@ function sanitizePreviewHtml(html: string): string {
   });
 }
 
+function sanitizeMermaidSvg(svg: string): string {
+  const template = document.createElement("template");
+  template.innerHTML = svg.trim();
+
+  const rootSvg = template.content.querySelector("svg");
+  if (!rootSvg) {
+    return "";
+  }
+
+  for (const node of Array.from(rootSvg.querySelectorAll("script, iframe, object, embed"))) {
+    node.remove();
+  }
+
+  for (const element of [rootSvg, ...Array.from(rootSvg.querySelectorAll("*"))]) {
+    for (const attribute of Array.from(element.attributes)) {
+      const name = attribute.name.toLowerCase();
+      const value = attribute.value.trim();
+      const isEventHandler = name.startsWith("on");
+      const isScriptUrl = ["href", "xlink:href", "src"].includes(name) && /^javascript:/i.test(value);
+
+      if (isEventHandler || isScriptUrl) {
+        element.removeAttribute(attribute.name);
+      }
+    }
+  }
+
+  return rootSvg.outerHTML;
+}
+
 function processWikiLinks(html: string): string {
-  // Replace [[Title]] patterns in text nodes by encoding them as spans
-  // We operate on the raw HTML string (safe since md.render has already escaped)
-  return html.replace(/\[\[([^\]]+)\]\]/g, (_, title) => {
-    const escaped = title.replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    return `<span class="wiki-link" data-title="${escaped}">${escaped}</span>`;
-  });
+  const template = document.createElement("template");
+  template.innerHTML = html;
+
+  const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_TEXT);
+  const textNodes: Text[] = [];
+  let currentNode = walker.nextNode();
+
+  while (currentNode) {
+    const parent = currentNode.parentElement;
+    if (parent && !parent.closest("a, code, pre, .wiki-link")) {
+      textNodes.push(currentNode as Text);
+    }
+    currentNode = walker.nextNode();
+  }
+
+  for (const textNode of textNodes) {
+    const text = textNode.textContent ?? "";
+    const matches = Array.from(text.matchAll(/\[\[([^\]]+)\]\]/g));
+    if (matches.length === 0) {
+      continue;
+    }
+
+    const fragment = document.createDocumentFragment();
+    let cursor = 0;
+
+    for (const match of matches) {
+      const fullMatch = match[0] ?? "";
+      const title = match[1] ?? "";
+      const matchIndex = match.index ?? -1;
+      if (matchIndex < 0) {
+        continue;
+      }
+
+      if (matchIndex > cursor) {
+        fragment.appendChild(document.createTextNode(text.slice(cursor, matchIndex)));
+      }
+
+      const wikiLink = document.createElement("span");
+      wikiLink.className = "wiki-link";
+      wikiLink.dataset.title = title;
+      wikiLink.textContent = title;
+      fragment.appendChild(wikiLink);
+      cursor = matchIndex + fullMatch.length;
+    }
+
+    if (cursor < text.length) {
+      fragment.appendChild(document.createTextNode(text.slice(cursor)));
+    }
+
+    textNode.parentNode?.replaceChild(fragment, textNode);
+  }
+
+  return template.innerHTML;
 }
 
 function extractPreviewBody(content: string): { content: string; lineOffset: number } {
@@ -217,6 +392,89 @@ function writeClipboardText(text: string) {
   return navigator.clipboard.writeText(text);
 }
 
+function getCodeBlockLanguage(pre: HTMLPreElement): string | null {
+  const code = pre.querySelector("code");
+  if (!code) {
+    return null;
+  }
+
+  for (const className of Array.from(code.classList)) {
+    if (className.startsWith("language-")) {
+      return className.slice("language-".length);
+    }
+  }
+
+  return null;
+}
+
+function getCodeBlockLineCount(codeText: string): number {
+  const normalizedText = codeText.endsWith("\n") ? codeText.slice(0, -1) : codeText;
+  if (!normalizedText) {
+    return 1;
+  }
+
+  return normalizedText.split("\n").length;
+}
+
+function enhanceCodeBlocks(container: HTMLElement, projectionMode: boolean) {
+  const codeBlocks = Array.from(container.querySelectorAll<HTMLPreElement>("pre:not(.mermaid-diagram)"));
+
+  codeBlocks.forEach((pre) => {
+    const language = getCodeBlockLanguage(pre);
+    const code = pre.querySelector(":scope > code");
+    if (!language) {
+      return;
+    }
+    if (!code) {
+      return;
+    }
+
+    pre.classList.add("markdown-code-block");
+
+    const existingToolbar = pre.querySelector(":scope > .markdown-code-block-toolbar");
+    if (existingToolbar) {
+      return;
+    }
+
+    const toolbar = document.createElement("div");
+    toolbar.className = "markdown-code-block-toolbar";
+
+    const languageLabel = document.createElement("span");
+    languageLabel.className = "markdown-code-block-language";
+    languageLabel.textContent = language;
+    toolbar.appendChild(languageLabel);
+
+    if (!projectionMode) {
+      const copyButton = document.createElement("button");
+      copyButton.type = "button";
+      copyButton.className = "markdown-code-copy-button";
+      copyButton.textContent = "复制";
+      copyButton.setAttribute("aria-label", "复制代码");
+      toolbar.appendChild(copyButton);
+    }
+
+    pre.prepend(toolbar);
+
+    const body = document.createElement("div");
+    body.className = "markdown-code-block-body";
+
+    const gutter = document.createElement("div");
+    gutter.className = "markdown-code-block-gutter";
+
+    const lineCount = getCodeBlockLineCount(code.textContent ?? "");
+    for (let index = 1; index <= lineCount; index += 1) {
+      const lineNumber = document.createElement("span");
+      lineNumber.className = "markdown-code-block-line-number";
+      lineNumber.textContent = String(index);
+      gutter.appendChild(lineNumber);
+    }
+
+    body.appendChild(gutter);
+    body.appendChild(code);
+    pre.appendChild(body);
+  });
+}
+
 function normalizeInternalNotePath(href: string): string | undefined {
   const trimmedHref = href.trim();
   if (!trimmedHref || /^https?:\/\//i.test(trimmedHref)) {
@@ -315,6 +573,47 @@ function rewriteLocalImageSourcesForTauri(
     const absolutePath = `${normalizedRoot}/${relativePath}`;
     image.setAttribute("src", convertFileSrc(absolutePath));
   }
+}
+
+function isRemoteImageSource(src: string): boolean {
+  return /^https?:\/\//i.test(src.trim());
+}
+
+async function readBlobAsDataUrl(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  const chunkSize = 0x8000;
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, index + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+
+  const mediaType = blob.type || "application/octet-stream";
+  return `data:${mediaType};base64,${btoa(binary)}`;
+}
+
+async function rewriteRemoteImageSourcesForPreview(container: HTMLElement) {
+  const images = Array.from(container.querySelectorAll<HTMLImageElement>("img[src]"));
+  await Promise.all(images.map(async (image) => {
+    const originalSrc = image.getAttribute("src") ?? "";
+    if (!isRemoteImageSource(originalSrc)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(originalSrc);
+      if (!response.ok) {
+        return;
+      }
+
+      const blob = await response.blob();
+      const dataUrl = await readBlobAsDataUrl(blob);
+      image.setAttribute("src", dataUrl);
+    } catch {
+      // Keep the original remote URL when proxying fails.
+    }
+  }));
 }
 
 function decodeHrefFragment(value: string): string {
@@ -676,6 +975,76 @@ function enhanceResizableTables(container: HTMLElement) {
   });
 }
 
+function ensureMermaidSvgMeasurementSupport() {
+  if (typeof SVGElement === "undefined") {
+    return;
+  }
+
+  const svgPrototype = SVGElement.prototype as SVGElement & {
+    getBBox?: () => { x: number; y: number; width: number; height: number };
+  };
+
+  if (!svgPrototype.getBBox) {
+    svgPrototype.getBBox = function getBBox() {
+      const textLength = this.textContent?.trim().length ?? 0;
+      return {
+        x: 0,
+        y: 0,
+        width: Math.max(1, textLength * 8),
+        height: 16,
+      };
+    };
+  }
+}
+
+function loadMermaidRuntime(): Promise<MermaidRuntime> {
+  if (!mermaidRuntimePromise) {
+    mermaidRuntimePromise = import("mermaid")
+      .then((module) => module.default)
+      .catch((error) => {
+        mermaidRuntimePromise = null;
+        throw error;
+      });
+  }
+
+  return mermaidRuntimePromise;
+}
+
+async function enhanceMermaidDiagrams(container: HTMLElement) {
+  const diagrams = Array.from(container.querySelectorAll<HTMLElement>("pre.mermaid-diagram"));
+  if (diagrams.length === 0) {
+    return;
+  }
+
+  const mermaid = await loadMermaidRuntime();
+
+  if (!mermaidInitialized) {
+    mermaid.initialize({ startOnLoad: false, securityLevel: "strict" });
+    mermaidInitialized = true;
+  }
+
+  ensureMermaidSvgMeasurementSupport();
+  await Promise.all(diagrams.map(async (diagram, index) => {
+    const code = diagram.querySelector("code");
+    const definition = code?.textContent?.trim();
+    if (!definition) {
+      return;
+    }
+
+    const renderId = `markdown-preview-mermaid-${index}-${Math.random().toString(36).slice(2, 8)}`;
+    try {
+      const { svg } = await mermaid.render(renderId, definition);
+      diagram.innerHTML = sanitizeMermaidSvg(svg);
+    } catch (error) {
+      const errorMessage = document.createElement("div");
+      errorMessage.className = "mermaid-diagram-error";
+      errorMessage.textContent = "Mermaid 渲染失败";
+      diagram.prepend(errorMessage);
+      console.error("Failed to render mermaid diagram:", error);
+    }
+  }));
+}
+
 function readColumnWidths(cols: HTMLTableColElement[]): number[] {
   const fallbackWidth = 100 / cols.length;
   return cols.map((col) => {
@@ -706,6 +1075,7 @@ export function MarkdownPreview({
   const isProgrammaticScroll = useRef(false);
   const programmaticScrollTimerRef = useRef<number | null>(null);
   const navigationHighlightTimerRef = useRef<number | null>(null);
+  const copyNoticeTimerRef = useRef<number | null>(null);
   const previewContextMenuRequestRef = useRef(0);
   const previewLineOffsetRef = useRef(0);
   const [activePreviewNavigationTarget, setActivePreviewNavigationTarget] = useState<TagNavigationTarget | null>(null);
@@ -715,11 +1085,23 @@ export function MarkdownPreview({
   const { openNote, beginOpenNote, isOpenNoteRequestCurrent } = useOpenNote();
   const setEditorMode = useEditorStore((s) => s.setEditorMode);
   const setSearchNavigationTarget = useEditorStore((s) => s.setSearchNavigationTarget);
+  const setStatusNotice = useEditorStore((s) => s.setStatusNotice);
   const currentNote = useEditorStore((s) => s.currentNote);
   const currentEditorContent = useEditorStore((s) => s.content);
   const selectedNodePath = useAppStore((s) => s.selectedNodePath);
   const setRightSidebarVisible = useAppStore((s) => s.setRightSidebarVisible);
   const kbRootPath = useAppStore((s) => s.kb?.root_path);
+
+  const showCopiedNotice = () => {
+    setStatusNotice("已拷贝");
+    if (copyNoticeTimerRef.current !== null) {
+      window.clearTimeout(copyNoticeTimerRef.current);
+    }
+    copyNoticeTimerRef.current = window.setTimeout(() => {
+      setStatusNotice(null);
+      copyNoticeTimerRef.current = null;
+    }, 1600);
+  };
 
   const openWikiNote = async (title: string, requestId = beginOpenNote()) => {
     try {
@@ -814,6 +1196,7 @@ export function MarkdownPreview({
 
   useEffect(() => {
     if (!containerRef.current) return;
+    let cancelled = false;
     const previewBody = extractPreviewBody(content);
     previewLineOffsetRef.current = previewBody.lineOffset;
     const rawHtml = md.render(previewBody.content);
@@ -832,6 +1215,17 @@ export function MarkdownPreview({
     if (!projectionMode) {
       enhanceResizableTables(containerRef.current);
     }
+    enhanceCodeBlocks(containerRef.current, projectionMode);
+
+    void enhanceMermaidDiagrams(containerRef.current).catch((error) => {
+      if (!cancelled) {
+        console.error("Failed to render mermaid preview:", error);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [content, activePreviewNavigationTarget, activeSearchNavigationTarget, isFrontMatterNavigationActive, projectionMode]);
 
   useEffect(() => {
@@ -840,6 +1234,13 @@ export function MarkdownPreview({
     }
     rewriteLocalImageSourcesForTauri(containerRef.current, kbRootPath, currentNote?.path ?? undefined);
   }, [content, kbRootPath, currentNote?.path]);
+
+  useEffect(() => {
+    if (!containerRef.current) {
+      return;
+    }
+    void rewriteRemoteImageSourcesForPreview(containerRef.current);
+  }, [content]);
 
   useEffect(() => {
     const scrollContainer = scrollContainerRef.current;
@@ -1016,6 +1417,15 @@ export function MarkdownPreview({
         return;
       }
 
+      const copyButton = target.closest(".markdown-code-copy-button") as HTMLButtonElement | null;
+      if (copyButton) {
+        e.preventDefault();
+        const codeBlock = copyButton.closest("pre")?.querySelector("code");
+        await writeClipboardText(codeBlock?.textContent ?? "");
+        showCopiedNotice();
+        return;
+      }
+
       const linkTarget = getPreviewLinkTarget(target);
       if (!linkTarget) {
         return;
@@ -1048,9 +1458,12 @@ export function MarkdownPreview({
       if (programmaticScrollTimerRef.current !== null) {
         window.clearTimeout(programmaticScrollTimerRef.current);
       }
+      if (copyNoticeTimerRef.current !== null) {
+        window.clearTimeout(copyNoticeTimerRef.current);
+      }
       stopTableResize();
     };
-  }, [openNote, beginOpenNote, isOpenNoteRequestCurrent, projectionMode]);
+  }, [openNote, beginOpenNote, isOpenNoteRequestCurrent, projectionMode, setStatusNotice]);
 
   const handlePreviewContextMenu = async (event: React.MouseEvent<HTMLDivElement>) => {
     if (projectionMode) {
@@ -1159,6 +1572,12 @@ export function MarkdownPreview({
         .markdown-preview-content p {
           margin-block: 0.85em;
         }
+        .markdown-preview-content .katex-display {
+          margin: 0.85em 0;
+          text-align: left;
+          overflow-x: auto;
+          overflow-y: hidden;
+        }
         .markdown-preview-content ul,
         .markdown-preview-content ol,
         .markdown-preview-content blockquote,
@@ -1244,12 +1663,121 @@ export function MarkdownPreview({
           border-radius: 4px;
           padding: 0.12em 0.34em;
         }
+        .markdown-preview-content .markdown-code-block-toolbar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          margin: -14px -16px 12px;
+          padding: 10px 16px 8px;
+          border-bottom: 1px solid #e1e4e8;
+        }
+        .markdown-preview-content .markdown-code-block-language {
+          color: #57606a;
+          font-family: var(--font-mono);
+          font-size: 0.76rem;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+        }
+        .markdown-preview-content .markdown-code-copy-button {
+          border: 1px solid #d0d7de;
+          border-radius: 999px;
+          padding: 2px 10px;
+          background: #ffffff;
+          color: #24292f;
+          font-size: 0.78rem;
+          line-height: 1.6;
+          cursor: pointer;
+        }
+        .markdown-preview-content .markdown-code-copy-button:hover,
+        .markdown-preview-content .markdown-code-copy-button:focus-visible {
+          background: #f3f4f6;
+          border-color: #b6bdc6;
+          outline: none;
+        }
+        .markdown-preview-content .markdown-code-block-body {
+          display: grid;
+          grid-template-columns: auto minmax(0, 1fr);
+          align-items: start;
+          column-gap: 12px;
+        }
+        .markdown-preview-content .markdown-code-block-gutter {
+          display: grid;
+          align-self: stretch;
+          grid-auto-rows: minmax(1.55em, auto);
+          padding-top: 1px;
+          color: #8c959f;
+          font-family: var(--font-mono);
+          font-size: 0.8rem;
+          line-height: 1.55;
+          text-align: right;
+          user-select: none;
+        }
+        .markdown-preview-content .markdown-code-block-line-number {
+          display: block;
+          min-width: 1.8em;
+        }
         .markdown-preview-content pre code {
           display: block;
+          min-width: 0;
           padding: 0;
           background: transparent;
           border-radius: 0;
           white-space: pre;
+        }
+        .markdown-preview-content pre code.hljs {
+          color: #24292f;
+        }
+        .markdown-preview-content pre code.hljs .hljs-comment,
+        .markdown-preview-content pre code.hljs .hljs-quote {
+          color: #6a737d;
+          font-style: italic;
+        }
+        .markdown-preview-content pre code.hljs .hljs-keyword,
+        .markdown-preview-content pre code.hljs .hljs-selector-tag,
+        .markdown-preview-content pre code.hljs .hljs-literal {
+          color: #cf222e;
+        }
+        .markdown-preview-content pre code.hljs .hljs-string,
+        .markdown-preview-content pre code.hljs .hljs-attr,
+        .markdown-preview-content pre code.hljs .hljs-template-tag {
+          color: #0a7d3b;
+        }
+        .markdown-preview-content pre code.hljs .hljs-number,
+        .markdown-preview-content pre code.hljs .hljs-symbol,
+        .markdown-preview-content pre code.hljs .hljs-bullet {
+          color: #0550ae;
+        }
+        .markdown-preview-content pre code.hljs .hljs-title,
+        .markdown-preview-content pre code.hljs .hljs-section,
+        .markdown-preview-content pre code.hljs .hljs-built_in,
+        .markdown-preview-content pre code.hljs .hljs-type {
+          color: #8250df;
+        }
+        .markdown-preview-content pre code.hljs .hljs-variable,
+        .markdown-preview-content pre code.hljs .hljs-property,
+        .markdown-preview-content pre code.hljs .hljs-params {
+          color: #24292f;
+        }
+        .markdown-preview-content pre.mermaid-diagram {
+          overflow-x: auto;
+          padding: 18px 20px;
+          background: #ffffff;
+          border: 1px solid #e4e7ec;
+          border-radius: 8px;
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+        }
+        .markdown-preview-content .mermaid-diagram-error {
+          margin-bottom: 10px;
+          color: #b42318;
+          font-size: 0.9rem;
+          font-weight: 600;
+        }
+        .markdown-preview-content pre.mermaid-diagram svg {
+          display: block;
+          max-width: 100%;
+          height: auto;
+          margin: 0 auto;
         }
         .markdown-preview-content img {
           display: block;

@@ -11,6 +11,7 @@ import { useEditorStore } from "../../store/useEditorStore";
 import { ContextMenuHost } from "../ContextMenu/ContextMenuHost";
 import { ContextMenuProvider } from "../ContextMenu/useContextMenu";
 import { useAppStore } from "../../store/useAppStore";
+import { tauriMocks } from "../../test/setup";
 import { makeKnowledgeBase, makeNote, makeSearchResult } from "../../test/testData";
 import { StatusBar } from "../StatusBar";
 
@@ -1288,7 +1289,6 @@ describe("MarkdownEditor", () => {
         writeText,
       },
     });
-
     const { container } = render(
       <ContextMenuProvider>
         <MarkdownEditor initialContent="项目周报 第二段" onChange={vi.fn()} />
@@ -1333,6 +1333,43 @@ describe("MarkdownEditor", () => {
     }
 
     vi.useRealTimers();
+  });
+
+  it("auto-detects plain URLs and only opens them on meta-click", async () => {
+    const { container } = render(
+      <MarkdownEditor initialContent="访问 https://example.com/docs 获取说明" onChange={vi.fn()} />,
+    );
+
+    const link = await waitFor(() => {
+      const element = container.querySelector(".cm-auto-link") as HTMLElement | null;
+      expect(element).not.toBeNull();
+      return element as HTMLElement;
+    });
+
+    expect(link).toHaveTextContent("https://example.com/docs");
+
+    fireEvent.click(link);
+    expect(tauriMocks.openUrl).not.toHaveBeenCalled();
+
+    fireEvent.click(link, { metaKey: true });
+    expect(tauriMocks.openUrl).toHaveBeenCalledWith("https://example.com/docs");
+  });
+
+  it("auto-detects email addresses and opens them as mailto links on meta-click", async () => {
+    const { container } = render(
+      <MarkdownEditor initialContent="联系邮箱 support@example.com 获取帮助" onChange={vi.fn()} />,
+    );
+
+    const link = await waitFor(() => {
+      const element = container.querySelector(".cm-auto-link") as HTMLElement | null;
+      expect(element).not.toBeNull();
+      return element as HTMLElement;
+    });
+
+    expect(link).toHaveTextContent("support@example.com");
+
+    fireEvent.click(link, { metaKey: true });
+    expect(tauriMocks.openUrl).toHaveBeenCalledWith("mailto:support@example.com");
   });
 
   it("writes selected text into clipboardData on copy events", () => {

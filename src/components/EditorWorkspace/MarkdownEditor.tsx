@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { EditorState, RangeSetBuilder, StateEffect, StateField } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, keymap, lineNumbers, ViewPlugin, type ViewUpdate } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
@@ -47,6 +48,8 @@ function logTagDrag(event: string, details: Record<string, unknown>) {
 const inlineTagDecoration = Decoration.mark({ class: "cm-inline-tag-token" });
 const inlineTagNavigationDecoration = Decoration.mark({ class: "cm-inline-tag-token cm-inline-tag-navigation-target" });
 const searchNavigationDecoration = Decoration.mark({ class: "cm-search-navigation-target" });
+const AUTO_LINK_URL_PATTERN = /\bhttps?:\/\/[^\s<>()\[\]{}]+/giu;
+const AUTO_LINK_EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu;
 
 const setTagNavigationTargetEffect = StateEffect.define<TagNavigationTarget | null>();
 const setSearchNavigationTargetEffect = StateEffect.define<SearchNavigationTarget | null>();
@@ -201,6 +204,52 @@ const inlineTagPlugin = ViewPlugin.fromClass(InlineTagPluginValue, {
   decorations: (plugin) => plugin.decorations,
 });
 
+type AutoLinkMatch = {
+  from: number;
+  to: number;
+  href: string;
+};
+
+class AutoLinkPluginValue {
+  decorations: DecorationSet;
+
+  constructor(view: EditorView) {
+    this.decorations = this.buildDecorations(view);
+  }
+
+  update(update: ViewUpdate) {
+    if (update.docChanged || update.viewportChanged) {
+      this.decorations = this.buildDecorations(update.view);
+    }
+  }
+
+  private buildDecorations(view: EditorView): DecorationSet {
+    const builder = new RangeSetBuilder<Decoration>();
+
+    for (let lineNumber = 1; lineNumber <= view.state.doc.lines; lineNumber += 1) {
+      const line = view.state.doc.line(lineNumber);
+      for (const match of findAutoLinkMatches(line.text)) {
+        builder.add(
+          line.from + match.from,
+          line.from + match.to,
+          Decoration.mark({
+            class: "cm-auto-link",
+            attributes: {
+              "data-auto-link-href": match.href,
+            },
+          }),
+        );
+      }
+    }
+
+    return builder.finish();
+  }
+}
+
+const autoLinkPlugin = ViewPlugin.fromClass(AutoLinkPluginValue, {
+  decorations: (plugin) => plugin.decorations,
+});
+
 function getEditorTopVisibleLine(view: EditorView): number | null {
   const topBlock = view.lineBlockAtHeight(view.scrollDOM.scrollTop);
   const lineNumber = view.state.doc.lineAt(topBlock.from).number;
@@ -236,6 +285,60 @@ function findMatchIndexes(text: string, matchText: string): number[] {
     searchFrom = matchIndex + needle.length;
   }
   return indexes;
+}
+
+function trimTrailingUrlPunctuation(candidate: string) {
+  return candidate.replace(/[.,!?;:]+$/u, "");
+}
+
+function rangesOverlap(from: number, to: number, otherFrom: number, otherTo: number) {
+  return from < otherTo && to > otherFrom;
+}
+
+function findAutoLinkMatches(text: string): AutoLinkMatch[] {
+  const matches: AutoLinkMatch[] = [];
+
+  for (const match of text.matchAll(AUTO_LINK_URL_PATTERN)) {
+    const rawText = match[0];
+    const matchIndex = match.index;
+    if (typeof matchIndex !== "number") {
+      continue;
+    }
+
+    const normalizedText = trimTrailingUrlPunctuation(rawText);
+    if (!normalizedText) {
+      continue;
+    }
+
+    matches.push({
+      from: matchIndex,
+      to: matchIndex + normalizedText.length,
+      href: normalizedText,
+    });
+  }
+
+  for (const match of text.matchAll(AUTO_LINK_EMAIL_PATTERN)) {
+    const emailText = match[0];
+    const matchIndex = match.index;
+    if (typeof matchIndex !== "number") {
+      continue;
+    }
+
+    const from = matchIndex;
+    const to = matchIndex + emailText.length;
+    if (matches.some((existing) => rangesOverlap(from, to, existing.from, existing.to))) {
+      continue;
+    }
+
+    matches.push({
+      from,
+      to,
+      href: `mailto:${emailText}`,
+    });
+  }
+
+  matches.sort((left, right) => left.from - right.from || left.to - right.to);
+  return matches;
 }
 
 function buildTagInsertText(tagName: string): string {
@@ -938,6 +1041,7 @@ export function MarkdownEditor({
           ...historyKeymap,
         ]),
         inlineTagPlugin,
+        autoLinkPlugin,
         searchNavigationPlugin,
         EditorView.domEventHandlers({
           keydown: (event, view) => {
@@ -958,6 +1062,24 @@ export function MarkdownEditor({
                 .catch(() => undefined);
             }
             return false;
+          },
+          click: (event) => {
+            const target = event.target instanceof HTMLElement
+              ? event.target.closest<HTMLElement>(".cm-auto-link")
+              : null;
+            if (!target || (!event.metaKey && !event.ctrlKey)) {
+              return false;
+            }
+
+            const href = target.getAttribute("data-auto-link-href")?.trim();
+            if (!href) {
+              return false;
+            }
+
+            event.preventDefault();
+            event.stopPropagation();
+            void Promise.resolve(openUrl(href)).catch(() => undefined);
+            return true;
           },
           copy: (event, view) => {
             if (!writeSelectionToClipboardData(view, event.clipboardData)) {
@@ -1063,6 +1185,11 @@ export function MarkdownEditor({
             backgroundColor: "rgba(255, 212, 92, 0.55)",
             boxShadow: "0 0 0 1px rgba(217, 154, 0, 0.18)",
             borderRadius: "3px",
+          },
+          ".cm-auto-link": {
+            color: "#0969da",
+            textDecoration: "underline",
+            textUnderlineOffset: "2px",
           },
         }),
       ],
