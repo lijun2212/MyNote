@@ -195,6 +195,38 @@ describe("ProjectionPreviewShell", () => {
     expect(screen.getByTestId("projection-markdown-preview")).toHaveAttribute("data-revision", "");
   });
 
+  it("provides a bounded viewport so the projection preview can scroll inside the window", async () => {
+    vi.resetModules();
+    vi.doMock("../EditorWorkspace/MarkdownPreview", () => ({
+      MarkdownPreview: () => <div data-testid="projection-markdown-preview" />,
+    }));
+
+    const { ProjectionPreviewShell } = await import("./ProjectionPreviewShell");
+
+    render(
+      <ContextMenuProvider>
+        <ProjectionPreviewShell />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    const shell = screen.getByTestId("projection-preview-shell");
+    const viewport = shell.firstElementChild as HTMLElement | null;
+
+    expect(shell).toHaveStyle({
+      height: "100vh",
+      overflow: "hidden",
+      display: "flex",
+      flexDirection: "column",
+    });
+    expect(viewport).not.toBeNull();
+    expect(viewport).toHaveStyle({
+      flex: "1 1 auto",
+      minHeight: "0",
+      overflow: "hidden",
+    });
+  });
+
   it("keeps projection preview read-only while still opening external links and suppressing internal navigation side effects", async () => {
     vi.resetModules();
     vi.doUnmock("../EditorWorkspace/MarkdownPreview");

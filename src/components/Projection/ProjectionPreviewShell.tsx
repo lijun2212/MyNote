@@ -113,8 +113,24 @@ export function ProjectionPreviewShell() {
   }, [projectionSessionId]);
 
   return (
-    <main data-testid="projection-preview-shell" style={{ minHeight: "100vh", background: "#fff" }}>
-      <div style={{ minHeight: "100vh", padding: "32px" }}>
+    <main
+      data-testid="projection-preview-shell"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        height: "100vh",
+        overflow: "hidden",
+        background: "#fff",
+      }}
+    >
+      <div
+        style={{
+          flex: "1 1 auto",
+          minHeight: 0,
+          overflow: "hidden",
+          padding: "32px",
+        }}
+      >
         <MarkdownPreview
           content={content}
           searchNavigationTarget={searchNavigationTarget}
