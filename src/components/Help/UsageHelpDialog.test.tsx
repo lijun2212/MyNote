@@ -13,7 +13,7 @@ describe("UsageHelpDialog", () => {
     expect(screen.getAllByRole("heading", { name: "使用帮助" })).toHaveLength(2);
     expect(screen.getByRole("heading", { name: "修订记录" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "目录" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "开始使用" })).toHaveAttribute("href", "#getting-started");
+    expect(screen.getByRole("link", { name: "开始使用" })).toHaveAttribute("href", "#%E5%BC%80%E5%A7%8B%E4%BD%BF%E7%94%A8");
     expect(screen.getByRole("link", { name: "界面布局" })).toHaveAttribute("href", "#interface-layout");
     expect(screen.getByText("首次使用建议按下面顺序操作：")).toBeInTheDocument();
     expect(dialog).toHaveTextContent("顶部栏");
@@ -24,6 +24,31 @@ describe("UsageHelpDialog", () => {
     expect(dialog).toHaveTextContent("复制 Wiki 链接：先打开或选中要被引用的那篇笔记");
     expect(dialog).toHaveTextContent("复制到剪贴板的是双链文本");
     expect(dialog).toHaveTextContent("右侧隐藏侧栏中的“关联”区域查看相关关系");
+  });
+
+  it("scrolls to numbered and explicit-anchor sections when clicking table of contents links", async () => {
+    const user = userEvent.setup();
+    render(<UsageHelpDialog open onClose={vi.fn()} />);
+
+    const gettingStartedHeading = screen.getByRole("heading", { name: "1. 开始使用" });
+    const glossaryHeading = screen.getByRole("heading", { name: "2. 术语说明" });
+    const gettingStartedScrollIntoView = vi.fn();
+    const glossaryScrollIntoView = vi.fn();
+
+    Object.defineProperty(gettingStartedHeading, "scrollIntoView", {
+      configurable: true,
+      value: gettingStartedScrollIntoView,
+    });
+    Object.defineProperty(glossaryHeading, "scrollIntoView", {
+      configurable: true,
+      value: glossaryScrollIntoView,
+    });
+
+    await user.click(screen.getByRole("link", { name: "开始使用" }));
+    expect(gettingStartedScrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+
+    await user.click(screen.getByRole("link", { name: "术语说明" }));
+    expect(glossaryScrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
   });
 
   it("closes via close button, overlay click, and Escape", async () => {

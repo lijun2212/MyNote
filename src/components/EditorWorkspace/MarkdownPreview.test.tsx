@@ -1573,4 +1573,74 @@ describe("MarkdownPreview", () => {
       });
     });
   });
+
+  it("navigates preview clicks to numbered headings when the hash omits the numeric prefix", async () => {
+    useAppStore.setState({ selectedNodePath: "notes/usage-help.md" });
+    useEditorStore.setState({
+      currentNote: makeNote({
+        id: "usage-help-note",
+        path: "notes/usage-help.md",
+        title: "Usage Help",
+        content_hash: "usage-help-hash",
+      }),
+      content: [
+        "## 目录",
+        "",
+        "1. [开始使用](#开始使用)",
+        "",
+        "## 1. 开始使用",
+        "",
+        "正文",
+      ].join("\n"),
+    });
+
+    render(<MarkdownPreview content={useEditorStore.getState().content} />);
+
+    fireEvent.click(screen.getByRole("link", { name: "开始使用" }));
+
+    await waitFor(() => {
+      expect(useEditorStore.getState().searchNavigationTarget).toMatchObject({
+        note_path: "notes/usage-help.md",
+        line_start: 5,
+        line_end: 5,
+        match_text: "开始使用",
+        source: "body",
+      });
+    });
+  });
+
+  it("navigates preview clicks to headings that define an explicit markdown anchor id", async () => {
+    useAppStore.setState({ selectedNodePath: "notes/usage-help.md" });
+    useEditorStore.setState({
+      currentNote: makeNote({
+        id: "usage-help-note-explicit-anchor",
+        path: "notes/usage-help.md",
+        title: "Usage Help",
+        content_hash: "usage-help-anchor-hash",
+      }),
+      content: [
+        "## 目录",
+        "",
+        "2. [术语说明](#glossary)",
+        "",
+        "## 2. 术语说明 {#glossary}",
+        "",
+        "正文",
+      ].join("\n"),
+    });
+
+    render(<MarkdownPreview content={useEditorStore.getState().content} />);
+
+    fireEvent.click(screen.getByRole("link", { name: "术语说明" }));
+
+    await waitFor(() => {
+      expect(useEditorStore.getState().searchNavigationTarget).toMatchObject({
+        note_path: "notes/usage-help.md",
+        line_start: 5,
+        line_end: 5,
+        match_text: "glossary",
+        source: "body",
+      });
+    });
+  });
 });

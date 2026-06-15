@@ -97,6 +97,10 @@ function slugifyHeading(value: string): string {
     .replace(/^-+|-+$/g, "") || "section";
 }
 
+function stripLeadingHeadingNumber(value: string): string {
+  return value.replace(/^\d+(?:\.\d+)*[.)]?\s+/, "").trim();
+}
+
 function renderUsageHelpHtml(markdown: string): string {
   const rendered = md.render(markdown);
   const parser = new DOMParser();
@@ -111,7 +115,8 @@ function renderUsageHelpHtml(markdown: string): string {
 
     const explicitIdMatch = rawText.match(/^(.*?)(?:\s*\{#([A-Za-z0-9_-]+)\})$/);
     const headingText = explicitIdMatch?.[1]?.trim() ?? rawText;
-    let headingId = explicitIdMatch?.[2] ?? slugifyHeading(headingText);
+    const defaultHeadingId = slugifyHeading(stripLeadingHeadingNumber(headingText) || headingText);
+    let headingId = explicitIdMatch?.[2] ?? defaultHeadingId;
 
     let suffix = 2;
     while (usedIds.has(headingId)) {

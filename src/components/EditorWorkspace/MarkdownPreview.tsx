@@ -628,6 +628,25 @@ function normalizeHeadingText(text: string): string {
   return text.trim().toLowerCase();
 }
 
+function stripLeadingHeadingNumber(text: string): string {
+  return text.replace(/^\d+(?:\.\d+)*[.)]?\s+/, "").trim();
+}
+
+function parseHeadingText(rawHeadingText: string): { headingText: string; explicitId: string | null } {
+  const explicitIdMatch = rawHeadingText.match(/^(.*?)(?:\s*\{#([A-Za-z0-9_-]+)\})\s*$/);
+  if (!explicitIdMatch) {
+    return {
+      headingText: rawHeadingText.trim(),
+      explicitId: null,
+    };
+  }
+
+  return {
+    headingText: (explicitIdMatch[1] ?? "").trim(),
+    explicitId: explicitIdMatch[2] ?? null,
+  };
+}
+
 function slugifyHeadingText(text: string): string {
   let slug = "";
   let lastWasDash = false;
@@ -673,9 +692,21 @@ function findHeadingLineNumber(content: string, anchor: string): number | null {
   for (let index = 0; index < lines.length; index += 1) {
     const atxHeading = extractHeadingText(lines[index]);
     if (atxHeading) {
-      const normalizedHeading = normalizeHeadingText(atxHeading);
-      const slugHeading = slugifyHeadingText(atxHeading);
-      if (normalizedHeading === normalizedAnchor || (slugAnchor && slugHeading === slugAnchor)) {
+      const { headingText, explicitId } = parseHeadingText(atxHeading);
+      const headingCandidates = [headingText, stripLeadingHeadingNumber(headingText)].filter(Boolean);
+
+      if (
+        explicitId
+        && (normalizeHeadingText(explicitId) === normalizedAnchor || (slugAnchor && slugifyHeadingText(explicitId) === slugAnchor))
+      ) {
+        return index + 1;
+      }
+
+      if (headingCandidates.some((candidate) => {
+        const normalizedHeading = normalizeHeadingText(candidate);
+        const slugHeading = slugifyHeadingText(candidate);
+        return normalizedHeading === normalizedAnchor || (slugAnchor && slugHeading === slugAnchor);
+      })) {
         return index + 1;
       }
     }
@@ -688,9 +719,21 @@ function findHeadingLineNumber(content: string, anchor: string): number | null {
       && (/^=+$/.test(nextLine) || /^-+$/.test(nextLine)),
     );
     if (isSetext) {
-      const normalizedHeading = normalizeHeadingText(currentLine);
-      const slugHeading = slugifyHeadingText(currentLine);
-      if (normalizedHeading === normalizedAnchor || (slugAnchor && slugHeading === slugAnchor)) {
+      const { headingText, explicitId } = parseHeadingText(currentLine);
+      const headingCandidates = [headingText, stripLeadingHeadingNumber(headingText)].filter(Boolean);
+
+      if (
+        explicitId
+        && (normalizeHeadingText(explicitId) === normalizedAnchor || (slugAnchor && slugifyHeadingText(explicitId) === slugAnchor))
+      ) {
+        return index + 1;
+      }
+
+      if (headingCandidates.some((candidate) => {
+        const normalizedHeading = normalizeHeadingText(candidate);
+        const slugHeading = slugifyHeadingText(candidate);
+        return normalizedHeading === normalizedAnchor || (slugAnchor && slugHeading === slugAnchor);
+      })) {
         return index + 1;
       }
     }

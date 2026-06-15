@@ -345,6 +345,40 @@ fn is_inside_markdown_link_destination(chars: &[char], index: usize) -> bool {
     false
 }
 
+fn is_explicit_heading_anchor_id(chars: &[char], hash_index: usize, tag_end: usize) -> bool {
+    hash_index > 0
+        && chars[hash_index - 1] == '{'
+        && chars.get(tag_end).copied() == Some('}')
+}
+
+fn is_parenthesized_musical_sharp_notation(
+    chars: &[char],
+    hash_index: usize,
+    tag_end: usize,
+) -> bool {
+    if hash_index == 0 || chars.get(tag_end).copied().is_none() {
+        return false;
+    }
+
+    let Some(opening) = chars.get(hash_index - 1).copied() else {
+        return false;
+    };
+    let Some(closing) = chars.get(tag_end).copied() else {
+        return false;
+    };
+
+    if !matches!((opening, closing), ('(', ')') | ('（', '）')) {
+        return false;
+    }
+
+    let tag_chars = &chars[(hash_index + 1)..tag_end];
+    if tag_chars.len() != 1 {
+        return false;
+    }
+
+    matches!(tag_chars[0], 'A'..='G' | '1'..='7')
+}
+
 fn extract_inline_tags_from_line(line: &str) -> Vec<String> {
     let mut tags = Vec::new();
     let mut in_inline_code = false;
@@ -393,6 +427,14 @@ fn extract_inline_tags_from_line(line: &str) -> Vec<String> {
             }
 
             if end > start {
+                if is_explicit_heading_anchor_id(&chars, i, end) {
+                    i = end + 1;
+                    continue;
+                }
+                if is_parenthesized_musical_sharp_notation(&chars, i, end) {
+                    i = end + 1;
+                    continue;
+                }
                 tags.push(chars[start..end].iter().collect());
                 i = end;
                 continue;
@@ -816,6 +858,17 @@ fn remove_inline_tag_mentions(body: &str, tag_name: &str) -> String {
                     }
 
                     if end > start {
+                        if is_explicit_heading_anchor_id(&chars, i, end) {
+                            result.push(chars[i]);
+                            i += 1;
+                            continue;
+                        }
+                        if is_parenthesized_musical_sharp_notation(&chars, i, end) {
+                            result.push(chars[i]);
+                            i += 1;
+                            continue;
+                        }
+
                         let current_tag: String = chars[start..end].iter().collect();
                         if current_tag == tag_name {
                             let next_char = chars.get(end).copied();
@@ -1263,6 +1316,34 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_inline_tags_skips_explicit_heading_anchor_ids() {
+        let body = [
+            "## 常见问题 {#faq}",
+            "### 为什么有些图片是链接而不是直接显示？ {#faq-images}",
+            "真实标签 #项目报告",
+        ]
+        .join("\n");
+
+        let tags = extract_inline_tags(&body);
+
+        assert_eq!(tags, vec!["项目报告".to_string()]);
+    }
+
+    #[test]
+    fn test_extract_inline_tags_skips_musical_sharp_notation() {
+        let body = [
+            "三弦一品就是升G（#G）或者是降A（bA）。",
+            "升do（#1）和降re（b2）的音高一样。",
+            "真实标签 #项目报告",
+        ]
+        .join("\n");
+
+        let tags = extract_inline_tags(&body);
+
+        assert_eq!(tags, vec!["项目报告".to_string()]);
+    }
+
+    #[test]
     fn test_extract_inline_tag_occurrences_returns_lines_and_context() {
         let body = [
             "# Title",
@@ -1351,6 +1432,22 @@ mod tests {
         assert!(updated.contains("`#项目报告` 应该保留"));
         assert!(!updated.contains("真实标签 #项目报告 需要删除"));
         assert!(updated.contains("```md\n#项目报告\n```"));
+    }
+
+    #[test]
+    fn test_remove_tag_from_note_content_preserves_musical_sharp_notation() {
+        let content = [
+            "三弦一品就是升G（#G）或者是降A（bA）。",
+            "升do（#1）和降re（b2）的音高一样。",
+            "真实标签 #项目报告 需要删除",
+        ]
+        .join("\n");
+
+        let updated = remove_tag_from_note_content(&content, "项目报告").unwrap();
+
+        assert!(updated.contains("升G（#G）"));
+        assert!(updated.contains("升do（#1）"));
+        assert!(!updated.contains("真实标签 #项目报告 需要删除"));
     }
 
     #[test]

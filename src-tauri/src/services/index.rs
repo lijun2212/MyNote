@@ -88,6 +88,8 @@ pub fn index_note_full(
         insert_tag_occurrence(&tx, &actual_id, occurrence, (index + 1) as i64, &now)?;
     }
 
+    prune_orphan_tags(&tx)?;
+
     // 4. Rebuild links
     tx.execute("DELETE FROM links WHERE source_note_id = ?1", params![actual_id])?;
     for raw in &raw_links {
@@ -265,6 +267,14 @@ fn insert_tag_occurrence(
     Ok(())
 }
 
+fn prune_orphan_tags(tx: &rusqlite::Transaction) -> AppResult<()> {
+    tx.execute(
+        "DELETE FROM tags WHERE NOT EXISTS (SELECT 1 FROM note_tags WHERE note_tags.tag_id = tags.id)",
+        [],
+    )?;
+    Ok(())
+}
+
 /// 从文件路径重新索引（供 watcher 调用）
 pub fn reindex_from_path(conn: &Connection, root: &PathBuf, rel_path: &str) -> AppResult<Note> {
     let rel_path = normalize_kb_relative_path(rel_path)?;
@@ -300,6 +310,7 @@ pub fn mark_note_deleted_by_path(conn: &Connection, rel_path: &str) -> AppResult
     tx.execute("DELETE FROM note_fts WHERE note_id = ?1", params![note_id])?;
     tx.execute("DELETE FROM note_tags WHERE note_id = ?1", params![note_id])?;
     tx.execute("DELETE FROM tag_occurrences WHERE note_id = ?1", params![note_id])?;
+    prune_orphan_tags(&tx)?;
     tx.execute("DELETE FROM links WHERE source_note_id = ?1", params![note_id])?;
     tx.execute(
         "UPDATE links
@@ -479,6 +490,45 @@ mod tests {
         let occurrences = occurrence_rows(&conn, "Demo", "项目报告");
         assert_eq!(occurrences.len(), 1);
         assert_eq!(occurrences[0], (7, 7, Some("Title".to_string()), "Alpha(#项目报告) here.".to_string(), 1));
+    }
+
+    #[test]
+    fn index_note_full_prunes_orphan_tags_after_rebuild() {
+        let (root, conn) = setup_index_db();
+
+        index_note_full(
+            &conn,
+            root.path(),
+            "notes/source.md",
+            "# Title\n\n真实标签 #项目报告",
+        )
+        .unwrap();
+
+        let initial_tag_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tags WHERE normalized_name = '项目报告'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(initial_tag_count, 1);
+
+        index_note_full(
+            &conn,
+            root.path(),
+            "notes/source.md",
+            "# Title\n\n这里已经没有标签了",
+        )
+        .unwrap();
+
+        let remaining_tag_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tags WHERE normalized_name = '项目报告'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining_tag_count, 0);
     }
 
     #[test]
