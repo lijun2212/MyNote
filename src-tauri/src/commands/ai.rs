@@ -39,17 +39,8 @@ fn set_ai_profile_secret_in_conn(
     let normalized_api_key = normalize_api_key(api_key)?;
     load_ai_profile(conn, &normalized_profile_id)?;
     secret_store.set_profile_secret(secret_key, &normalized_api_key)?;
-
-    match secret_store.get_profile_secret(secret_key) {
-        Ok(_) => {
-            cache_profile_secret(secret_key, &normalized_api_key);
-            Ok(())
-        }
-        Err(AppError::NotFound(_)) => Err(AppError::Io(
-            "无法验证已保存到系统密钥链的 AI 配置密钥，请重试。".into(),
-        )),
-        Err(error) => Err(error),
-    }
+    cache_profile_secret(secret_key, &normalized_api_key);
+    Ok(())
 }
 
 fn has_ai_profile_secret_in_conn(
@@ -638,24 +629,24 @@ mod tests {
     }
 
     #[test]
-    fn set_ai_profile_secret_fails_when_secret_cannot_be_read_back() {
+    fn set_ai_profile_secret_allows_write_only_secret_store_when_cache_is_primed() {
         let temp = tempdir().unwrap();
         let conn = open_and_migrate(&temp.path().join("test.sqlite")).unwrap();
         let secret_store = WriteOnlySecretStore;
+        let kb_root = Path::new("/tmp/kb-a");
         insert_profile(&conn, "profile-1", AiProviderKind::OpenAiCompatible);
-        let secret_key = build_secret_store_key(Path::new("/tmp/kb-a"), "profile-1");
+        let secret_key = build_secret_store_key(kb_root, "profile-1");
 
-        let error = set_ai_profile_secret_in_conn(
+        set_ai_profile_secret_in_conn(
             &conn,
             &secret_store,
             &secret_key,
             "profile-1",
             "sk-demo",
         )
-        .unwrap_err();
+        .unwrap();
 
-        assert!(matches!(error, AppError::Io(_)));
-        assert!(error.to_string().contains("无法验证已保存到系统密钥链的 AI 配置密钥"));
+        assert_eq!(load_profile_secret(&secret_store, kb_root, "profile-1").unwrap(), "sk-demo");
     }
 
     #[test]
