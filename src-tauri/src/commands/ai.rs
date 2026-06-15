@@ -828,8 +828,9 @@ mod tests {
         let conn = open_and_migrate(&temp.path().join("test.sqlite")).unwrap();
         let secret_store = MemorySecretStore::default();
         let kb_root = Path::new("/tmp/kb-a");
-        insert_profile(&conn, "profile-1", AiProviderKind::Anthropic);
-        let legacy_key = legacy_secret_key(kb_root, "profile-1");
+        let profile_id = "profile-legacy-input-test";
+        insert_profile(&conn, profile_id, AiProviderKind::Anthropic);
+        let legacy_key = legacy_secret_key(kb_root, profile_id);
         secret_store
             .set_profile_secret(&legacy_key, "sk-from-legacy-keychain")
             .unwrap();
@@ -839,7 +840,7 @@ mod tests {
             &secret_store,
             kb_root,
             AiProfileInput {
-                id: Some("profile-1".into()),
+                id: Some(profile_id.into()),
                 name: "Edited Profile".into(),
                 provider: AiProviderKind::Anthropic,
                 model: "claude-3-5-haiku-latest".into(),
