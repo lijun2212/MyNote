@@ -238,6 +238,7 @@ fn map_windows_credential_error() -> AppError {
     }
 }
 
+#[cfg(not(windows))]
 fn map_keyring_error(error: keyring::Error) -> AppError {
     match error {
         keyring::Error::NoEntry => AppError::NotFound("系统密钥链中未找到 AI 配置密钥".into()),
