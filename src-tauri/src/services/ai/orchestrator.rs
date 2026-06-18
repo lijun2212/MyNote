@@ -7,6 +7,8 @@ use std::time::{Duration, Instant};
 
 const HEALTHCHECK_PROMPT: &str = "Reply with exactly MYNOTE_HEALTHCHECK_OK and no extra words.";
 const HEALTHCHECK_EXPECTED_TEXT: &str = "MYNOTE_HEALTHCHECK_OK";
+const AI_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+const AI_READ_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone)]
 pub struct AiOrchestrator {
@@ -16,7 +18,12 @@ pub struct AiOrchestrator {
 impl Default for AiOrchestrator {
     fn default() -> Self {
         let client = Client::builder()
-            .timeout(Duration::from_secs(20))
+            .connect_timeout(AI_CONNECT_TIMEOUT)
+            .read_timeout(AI_READ_TIMEOUT)
+            .no_gzip()
+            .no_brotli()
+            .no_deflate()
+            .no_zstd()
             .build()
             .expect("failed to construct AI HTTP client");
         Self { client }
@@ -110,6 +117,9 @@ mod tests {
     use crate::services::ai::orchestrator::{HEALTHCHECK_EXPECTED_TEXT, HEALTHCHECK_PROMPT};
     use mockito::{Matcher, Server};
     use reqwest::Client;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+    use tokio::time::{sleep, Duration};
 
     fn openai_profile(base_url: String) -> AiProfile {
         AiProfile {
@@ -244,5 +254,79 @@ mod tests {
 
         assert_eq!(chunks, vec!["MYNOTE_", "HEALTHCHECK_OK"]);
         assert_eq!(response.text, "MYNOTE_HEALTHCHECK_OK");
+    }
+
+    #[tokio::test]
+    async fn orchestrator_allows_long_openai_streams_when_chunks_keep_arriving() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request_buffer = [0_u8; 4096];
+            let _ = socket.read(&mut request_buffer).await.unwrap();
+
+            async fn write_chunk(socket: &mut tokio::net::TcpStream, body: &str) {
+                socket
+                    .write_all(format!("{:x}\r\n", body.as_bytes().len()).as_bytes())
+                    .await
+                    .unwrap();
+                socket.write_all(body.as_bytes()).await.unwrap();
+                socket.write_all(b"\r\n").await.unwrap();
+            }
+
+            socket
+                .write_all(
+                    concat!(
+                        "HTTP/1.1 200 OK\r\n",
+                        "Content-Type: text/event-stream\r\n",
+                        "Transfer-Encoding: chunked\r\n",
+                        "\r\n"
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            write_chunk(
+                &mut socket,
+                "data: {\"choices\":[{\"delta\":{\"content\":\"first\"}}]}\n\n",
+            )
+            .await;
+            socket.flush().await.unwrap();
+
+            sleep(Duration::from_secs(21)).await;
+
+            write_chunk(
+                &mut socket,
+                "data: {\"choices\":[{\"delta\":{\"content\":\" second\"}}]}\n\n",
+            )
+            .await;
+            write_chunk(&mut socket, "data: [DONE]\n\n").await;
+            socket.write_all(b"0\r\n\r\n").await.unwrap();
+            socket.flush().await.unwrap();
+        });
+
+        let orchestrator = AiOrchestrator::default();
+        let mut chunks = Vec::new();
+        let response = orchestrator
+            .invoke_text_stream(
+                &openai_profile(format!("http://{addr}/v1")),
+                "sk-demo",
+                &crate::domain::ai::AiTextRequest {
+                    prompt: "hello".into(),
+                    max_tokens: Some(16),
+                    temperature: Some(0.0),
+                    expected_text: None,
+                },
+                &mut |chunk| {
+                    chunks.push(chunk);
+                    Ok(())
+                },
+            )
+            .await
+            .unwrap();
+
+        server.await.unwrap();
+        assert_eq!(chunks, vec!["first", " second"]);
+        assert_eq!(response.text, "first second");
     }
 }

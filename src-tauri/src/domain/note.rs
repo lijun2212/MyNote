@@ -21,6 +21,72 @@ pub struct NoteDetail {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkdownBeautifyOptions {
+    pub fix_syntax: bool,
+    pub refresh_toc: bool,
+    pub normalize_headings: bool,
+    pub normalize_code_blocks: bool,
+    pub normalize_spacing: bool,
+    pub use_ai_assist: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkdownBeautifyRequest {
+    pub note_path: String,
+    pub content: String,
+    pub options: MarkdownBeautifyOptions,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MarkdownBeautifySeverity {
+    Error,
+    Warning,
+    Info,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MarkdownBeautifyAiStatus {
+    NotRequested,
+    Applied,
+    Unavailable,
+    CandidateRejected,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarkdownBeautifyIssue {
+    pub id: String,
+    pub severity: MarkdownBeautifySeverity,
+    pub kind: String,
+    pub message: String,
+    pub line_start: Option<i64>,
+    pub line_end: Option<i64>,
+    pub auto_fixable: bool,
+    pub ai_eligible: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarkdownBeautifySummary {
+    pub error_count: i64,
+    pub warning_count: i64,
+    pub auto_fixable_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarkdownBeautifyResult {
+    pub original_hash: String,
+    pub beautified_content: String,
+    pub applied_ai: bool,
+    pub ai_status: MarkdownBeautifyAiStatus,
+    pub ai_status_detail: Option<String>,
+    pub diagnostics: Vec<MarkdownBeautifyIssue>,
+    pub summary: MarkdownBeautifySummary,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NoteTreeNode {
     pub id: Option<String>,
     pub name: String,

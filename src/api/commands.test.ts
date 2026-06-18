@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { api } from "./commands";
+import { api, mapMarkdownBeautifyStreamEvent } from "./commands";
 import { tauriMocks } from "../test/setup";
 
 describe("api graph commands", () => {
@@ -418,5 +418,124 @@ describe("api graph commands", () => {
     expect(tauriMocks.invoke).toHaveBeenCalledWith("read_clipboard_text_for_paste", {
       notePath: "notes/demo.md",
     });
+  });
+
+  it("calls beautifyMarkdown and maps the backend response", async () => {
+    tauriMocks.invoke.mockResolvedValueOnce({
+      original_hash: "abc123",
+      beautified_content: "# Title\n\n## 目录\n",
+      applied_ai: false,
+      ai_status: "not_requested",
+      ai_status_detail: null,
+      diagnostics: [
+        {
+          id: "toc-missing",
+          severity: "warning",
+          kind: "toc_missing",
+          message: "缺少目录",
+          line_start: 1,
+          line_end: 1,
+          auto_fixable: true,
+          ai_eligible: false,
+        },
+      ],
+      summary: {
+        error_count: 0,
+        warning_count: 1,
+        auto_fixable_count: 1,
+      },
+    });
+
+    const result = await api.beautifyMarkdown({
+      notePath: "notes/demo.md",
+      content: "# Title",
+      options: {
+        fixSyntax: true,
+        refreshToc: true,
+        normalizeHeadings: true,
+        normalizeCodeBlocks: true,
+        normalizeSpacing: true,
+        useAiAssist: false,
+      },
+    });
+
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("beautify_markdown", {
+      request: {
+        notePath: "notes/demo.md",
+        content: "# Title",
+        options: {
+          fixSyntax: true,
+          refreshToc: true,
+          normalizeHeadings: true,
+          normalizeCodeBlocks: true,
+          normalizeSpacing: true,
+          useAiAssist: false,
+        },
+      },
+    });
+    expect(result.summary.warningCount).toBe(1);
+    expect(result.diagnostics[0].kind).toBe("toc_missing");
+    expect(result.aiStatus).toBe("not_requested");
+    expect(result.aiStatusDetail).toBeNull();
+  });
+
+  it("calls beautifyMarkdownStream with request id", async () => {
+    tauriMocks.invoke.mockResolvedValueOnce("beautify-1");
+
+    await expect(api.beautifyMarkdownStream({
+      notePath: "notes/demo.md",
+      content: "# Title",
+      options: {
+        fixSyntax: true,
+        refreshToc: true,
+        normalizeHeadings: true,
+        normalizeCodeBlocks: true,
+        normalizeSpacing: true,
+        useAiAssist: true,
+      },
+    }, "beautify-1")).resolves.toBe("beautify-1");
+
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("beautify_markdown_stream", {
+      request: {
+        notePath: "notes/demo.md",
+        content: "# Title",
+        options: {
+          fixSyntax: true,
+          refreshToc: true,
+          normalizeHeadings: true,
+          normalizeCodeBlocks: true,
+          normalizeSpacing: true,
+          useAiAssist: true,
+        },
+      },
+      requestId: "beautify-1",
+    });
+  });
+
+  it("maps markdown beautify stream completed events", () => {
+    const event = mapMarkdownBeautifyStreamEvent({
+      request_id: "beautify-1",
+      type: "completed",
+      chunk: null,
+      error: null,
+      result: {
+        original_hash: "abc123",
+        beautified_content: "# Clean",
+        applied_ai: true,
+        ai_status: "applied",
+        ai_status_detail: null,
+        diagnostics: [],
+        summary: {
+          error_count: 0,
+          warning_count: 0,
+          auto_fixable_count: 0,
+        },
+      },
+    });
+
+    expect(event.requestId).toBe("beautify-1");
+    expect(event.type).toBe("completed");
+    expect(event.result?.beautifiedContent).toBe("# Clean");
+    expect(event.result?.appliedAi).toBe(true);
   });
 });

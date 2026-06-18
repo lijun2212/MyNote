@@ -2,7 +2,7 @@ use crate::domain::ai::{AiProfile, AiTextRequest, AiTextResponse};
 use crate::error::{AppError, AppResult};
 use crate::services::ai::provider::{
     resolve_endpoint, resolve_request_max_tokens, resolve_request_temperature,
-    summarize_http_error, AiProviderAdapter,
+    summarize_http_error, summarize_reqwest_error, AiProviderAdapter,
 };
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -109,6 +109,7 @@ impl AiProviderAdapter for AnthropicProvider {
             .post(endpoint)
             .header("x-api-key", api_key)
             .header("anthropic-version", ANTHROPIC_VERSION)
+            .header("accept-encoding", "identity")
             .json(&AnthropicRequest {
                 model: &profile.model,
                 max_tokens: resolve_anthropic_max_tokens(profile, request),
@@ -193,6 +194,7 @@ impl AiProviderAdapter for AnthropicProvider {
             .header("x-api-key", api_key)
             .header("anthropic-version", ANTHROPIC_VERSION)
             .header("accept", "text/event-stream")
+            .header("accept-encoding", "identity")
             .json(&AnthropicRequest {
                 model: &profile.model,
                 max_tokens: resolve_anthropic_max_tokens(profile, request),
@@ -228,7 +230,7 @@ impl AiProviderAdapter for AnthropicProvider {
 
         while let Some(chunk) = stream.next().await {
             let bytes = chunk
-                .map_err(|error| AppError::Io(format!("Failed to read Anthropic stream chunk: {error}")))?;
+                .map_err(|error| summarize_reqwest_error("Failed to read Anthropic stream chunk", &error))?;
             buffer.extend_from_slice(&bytes);
 
             while let Some(line) = take_next_sse_line(&mut buffer)? {
@@ -399,6 +401,7 @@ mod tests {
         let mock = server
             .mock("POST", "/messages")
             .match_header("x-api-key", "sk-anthropic-test")
+            .match_header("accept-encoding", "identity")
             .match_body(Matcher::PartialJson(serde_json::json!({
                 "messages": [{
                     "role": "user",
@@ -498,6 +501,101 @@ mod tests {
         assert_eq!(chunks, vec!["MYNOTE_", "HEALTHCHECK_OK"]);
         assert_eq!(response.text, "MYNOTE_HEALTHCHECK_OK");
         assert_eq!(response.total_tokens, Some(13));
+    }
+
+    #[tokio::test]
+    async fn anthropic_non_stream_request_tolerates_incorrect_content_encoding_header() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("POST", "/messages")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_header("content-encoding", "gzip")
+            .with_body(
+                serde_json::json!({
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "MYNOTE_HEALTHCHECK_OK"
+                        }
+                    ],
+                    "usage": {
+                        "input_tokens": 9,
+                        "output_tokens": 4
+                    }
+                })
+                .to_string(),
+            )
+            .create_async()
+            .await;
+
+        let provider = AnthropicProvider;
+        let client = reqwest::Client::new();
+        let response = provider
+            .invoke(
+                &client,
+                &make_profile(server.url()),
+                "sk-anthropic-test",
+                &AiTextRequest {
+                    prompt: "hello".into(),
+                    max_tokens: Some(8),
+                    temperature: Some(0.0),
+                    expected_text: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        mock.assert();
+        assert_eq!(response.text, "MYNOTE_HEALTHCHECK_OK");
+    }
+
+    #[tokio::test]
+    async fn anthropic_stream_tolerates_incorrect_content_encoding_header() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("POST", "/messages")
+            .with_status(200)
+            .with_header("content-type", "text/event-stream")
+            .with_header("content-encoding", "gzip")
+            .with_body(concat!(
+                "event: content_block_delta\n",
+                "data: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"MYNOTE_\"}}\n\n",
+                "event: content_block_delta\n",
+                "data: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"HEALTHCHECK_OK\"}}\n\n",
+                "event: message_delta\n",
+                "data: {\"type\":\"message_delta\",\"usage\":{\"input_tokens\":9,\"output_tokens\":4}}\n\n",
+                "event: message_stop\n",
+                "data: {\"type\":\"message_stop\"}\n\n"
+            ))
+            .create_async()
+            .await;
+
+        let provider = AnthropicProvider;
+        let client = reqwest::Client::new();
+        let mut chunks = Vec::new();
+        let response = provider
+            .invoke_stream(
+                &client,
+                &make_profile(server.url()),
+                "sk-anthropic-test",
+                &AiTextRequest {
+                    prompt: "hello".into(),
+                    max_tokens: Some(8),
+                    temperature: Some(0.0),
+                    expected_text: None,
+                },
+                &mut |chunk| {
+                    chunks.push(chunk);
+                    Ok(())
+                },
+            )
+            .await
+            .unwrap();
+
+        mock.assert();
+        assert_eq!(chunks, vec!["MYNOTE_", "HEALTHCHECK_OK"]);
+        assert_eq!(response.text, "MYNOTE_HEALTHCHECK_OK");
     }
 
     #[test]

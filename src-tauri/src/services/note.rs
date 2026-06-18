@@ -774,13 +774,13 @@ pub fn delete_notebook_in_root(
     )?;
     if indexed_note_count > 0 {
         return Err(AppError::InvalidInput(format!(
-            "Notebook directory is not empty: {}",
+            "只能删除空笔记本: {}",
             notebook_path
         )));
     }
     if std::fs::read_dir(&notebook_abs)?.next().transpose()?.is_some() {
         return Err(AppError::InvalidInput(format!(
-            "Notebook directory is not empty: {}",
+            "只能删除空笔记本: {}",
             notebook_path
         )));
     }
@@ -3415,6 +3415,7 @@ mod tests {
         let err = delete_notebook_in_root(&conn, root.path(), "notes/work").unwrap_err();
 
         assert!(matches!(err, AppError::InvalidInput(_)));
+        assert!(err.to_string().contains("只能删除空笔记本"));
         assert!(root.path().join("notes/work").exists());
         assert!(load_notebook_visuals(root.path()).get("notes/work").is_some());
     }
@@ -3451,6 +3452,7 @@ mod tests {
         let err = delete_notebook_in_root(&conn, root.path(), "notes/work").unwrap_err();
 
         assert!(matches!(err, AppError::InvalidInput(_)));
+        assert!(err.to_string().contains("只能删除空笔记本"));
         assert!(root.path().join("notes/work").exists());
     }
 

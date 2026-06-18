@@ -7,6 +7,17 @@ import { useProjectionStore } from "../../store/useProjectionStore";
 import { useSearchSessionStore } from "../../store/useSearchSessionStore";
 import { deferred, makeNote, makeSearchResult } from "../../test/testData";
 
+const apiMocks = vi.hoisted(() => ({
+  beautifyMarkdown: vi.fn(),
+  beautifyMarkdownStream: vi.fn(),
+  mapMarkdownBeautifyStreamEvent: vi.fn((event: unknown) => event),
+}));
+
+const eventMocks = vi.hoisted(() => ({
+  listen: vi.fn(),
+  listener: null as ((event: { payload: unknown }) => void) | null,
+}));
+
 const projectionWindowApiMocks = vi.hoisted(() => ({
   openProjectionWindow: vi.fn(),
   closeProjectionWindow: vi.fn().mockResolvedValue(undefined),
@@ -50,6 +61,75 @@ const splitResizeState = vi.hoisted(() => ({
   stopResize: vi.fn(),
 }));
 
+function mockBeautifyStreamResult(result: Record<string, unknown>) {
+  apiMocks.beautifyMarkdownStream.mockImplementation((_request: unknown, requestId: string) => {
+    queueMicrotask(() => {
+      eventMocks.listener?.({
+        payload: {
+          requestId,
+          type: "rule_result",
+          chunk: null,
+          result,
+          error: null,
+        },
+      });
+      eventMocks.listener?.({
+        payload: {
+          requestId,
+          type: "completed",
+          chunk: null,
+          result,
+          error: null,
+        },
+      });
+    });
+    return Promise.resolve(requestId);
+  });
+}
+
+function mockBeautifyStreamWithDelta(ruleResult: Record<string, unknown>, finalResult: Record<string, unknown>, delta: string) {
+  apiMocks.beautifyMarkdownStream.mockImplementation((_request: unknown, requestId: string) => {
+    queueMicrotask(() => {
+      eventMocks.listener?.({
+        payload: {
+          requestId,
+          type: "rule_result",
+          chunk: null,
+          result: ruleResult,
+          error: null,
+        },
+      });
+      eventMocks.listener?.({
+        payload: {
+          requestId,
+          type: "ai_delta",
+          chunk: delta,
+          result: null,
+          error: null,
+        },
+      });
+    });
+    return Promise.resolve(requestId);
+  });
+
+  return () => {
+    const call = apiMocks.beautifyMarkdownStream.mock.calls[0];
+    const requestId = call?.[1] as string | undefined;
+    if (!requestId) {
+      throw new Error("beautify stream was not started");
+    }
+    eventMocks.listener?.({
+      payload: {
+        requestId,
+        type: "completed",
+        chunk: null,
+        result: finalResult,
+        error: null,
+      },
+    });
+  };
+}
+
 vi.mock("../../hooks/useAutoSave", () => ({
   useAutoSave: () => undefined,
 }));
@@ -92,6 +172,15 @@ vi.mock("./MarkdownPreview", () => ({
   },
 }));
 
+vi.mock("../../api/commands", () => ({
+  api: apiMocks,
+  mapMarkdownBeautifyStreamEvent: apiMocks.mapMarkdownBeautifyStreamEvent,
+}));
+
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: eventMocks.listen,
+}));
+
 vi.mock("../../projection/windowApi", () => ({
   openProjectionWindow: projectionWindowApiMocks.openProjectionWindow,
   closeProjectionWindow: projectionWindowApiMocks.closeProjectionWindow,
@@ -104,6 +193,15 @@ describe("EditorWorkspace", () => {
   beforeEach(() => {
     capturedProps.editor = null;
     capturedProps.preview = null;
+    apiMocks.beautifyMarkdown.mockReset();
+    apiMocks.beautifyMarkdownStream.mockReset();
+    apiMocks.mapMarkdownBeautifyStreamEvent.mockClear();
+    eventMocks.listener = null;
+    eventMocks.listen.mockReset();
+    eventMocks.listen.mockImplementation((_eventName: string, callback: (event: { payload: unknown }) => void) => {
+      eventMocks.listener = callback;
+      return Promise.resolve(vi.fn());
+    });
     openNoteMock.mockReset();
     beginOpenNoteMock.mockClear();
     isOpenNoteRequestCurrentMock.mockClear();
@@ -425,6 +523,229 @@ describe("EditorWorkspace", () => {
       background: "#eff6ff",
       border: "1px solid #93c5fd",
       color: "#0969da",
+    });
+  });
+
+  it("runs markdown beautify in the existing preview pane and applies the reviewed result", async () => {
+    const user = userEvent.setup();
+    mockBeautifyStreamResult({
+      originalHash: "hash-1",
+      beautifiedContent: "# Demo\n\n## 目录\n\nBody",
+      appliedAi: false,
+      aiStatus: "not_requested",
+      aiStatusDetail: null,
+      diagnostics: [
+        {
+          id: "toc-missing",
+          severity: "warning",
+          kind: "toc_missing",
+          message: "缺少目录",
+          lineStart: 1,
+          lineEnd: 1,
+          autoFixable: true,
+          aiEligible: false,
+        },
+      ],
+      summary: {
+        errorCount: 0,
+        warningCount: 1,
+        autoFixableCount: 1,
+      },
+    });
+
+    render(<EditorWorkspace />);
+
+    await user.click(screen.getByRole("button", { name: "美化 Markdown" }));
+    await user.click(screen.getByRole("button", { name: "确认美化" }));
+
+    await waitFor(() => {
+      expect(apiMocks.beautifyMarkdownStream).toHaveBeenCalledWith(
+        {
+          notePath: "notes/demo.md",
+          content: "# Demo\n\nBody",
+          options: {
+            fixSyntax: true,
+            refreshToc: true,
+            normalizeHeadings: true,
+            normalizeCodeBlocks: true,
+            normalizeSpacing: true,
+            useAiAssist: false,
+          },
+        },
+        expect.stringMatching(/^beautify-/),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "应用美化结果" })).toBeInTheDocument();
+      expect(screen.queryAllByTestId("mock-preview")).toHaveLength(1);
+      expect(useEditorStore.getState().beautifyReview?.beautifiedContent).toBe("# Demo\n\n## 目录\n\nBody");
+      expect(useEditorStore.getState().beautifyReview?.aiStatus).toBe("not_requested");
+    });
+    expect(useEditorStore.getState().content).toBe("# Demo\n\nBody");
+
+    await user.click(screen.getByRole("button", { name: "应用美化结果" }));
+
+    expect(useEditorStore.getState().content).toBe("# Demo\n\n## 目录\n\nBody");
+    expect(useEditorStore.getState().beautifyReview).toBeNull();
+  });
+
+  it("shows streaming AI beautify progress without reporting AI failure", async () => {
+    const user = userEvent.setup();
+    const ruleResult = {
+      originalHash: "hash-1",
+      beautifiedContent: "# Rule Result",
+      appliedAi: false,
+      aiStatus: "not_requested",
+      aiStatusDetail: null,
+      diagnostics: [],
+      summary: {
+        errorCount: 0,
+        warningCount: 1,
+        autoFixableCount: 0,
+      },
+    };
+    const finalResult = {
+      ...ruleResult,
+      beautifiedContent: "# AI Final",
+      appliedAi: true,
+      aiStatus: "applied",
+    };
+    const completeStream = mockBeautifyStreamWithDelta(ruleResult, finalResult, "# AI Streaming");
+
+    render(<EditorWorkspace />);
+
+    await user.click(screen.getByRole("button", { name: "美化 Markdown" }));
+    await user.click(screen.getByRole("button", { name: "确认美化" }));
+
+    await waitFor(() => {
+      expect(useEditorStore.getState().beautifyReview?.beautifiedContent).toBe("# AI Streaming");
+      expect(screen.getAllByText(/AI 正在流式美化|AI 美化中/).length).toBeGreaterThan(0);
+      expect(screen.queryByText(/AI 未生效/)).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "等待 AI 完成" })).toBeDisabled();
+    });
+
+    act(() => completeStream());
+
+    await waitFor(() => {
+      expect(useEditorStore.getState().beautifyReview?.beautifiedContent).toBe("# AI Final");
+      expect(screen.getByRole("button", { name: "应用美化结果" })).toBeEnabled();
+    });
+  });
+
+  it("switches the existing preview pane into beautify diff mode when view diff is clicked", async () => {
+    const user = userEvent.setup();
+    mockBeautifyStreamResult({
+      originalHash: "hash-1",
+      beautifiedContent: "# Demo\n\n## 目录\n\nBody",
+      appliedAi: false,
+      aiStatus: "candidate_rejected",
+      aiStatusDetail: "AI beautify candidate appears to be missing trailing document content",
+      diagnostics: [],
+      summary: {
+        errorCount: 0,
+        warningCount: 0,
+        autoFixableCount: 0,
+      },
+    });
+
+    render(<EditorWorkspace />);
+
+    await user.click(screen.getByRole("button", { name: "美化 Markdown" }));
+    await user.click(screen.getByRole("button", { name: "确认美化" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "查看改动" })).toBeInTheDocument();
+      expect(screen.getAllByText(/AI 未生效：候选结果未通过校验（AI 返回的内容不完整，缺少文档后半部分）/).length).toBeGreaterThan(0);
+    });
+
+    await user.click(screen.getByRole("button", { name: "查看改动" }));
+
+    expect(useEditorStore.getState().beautifyReview?.diffMode).toBe(true);
+    expect(screen.queryAllByTestId("mock-preview")).toHaveLength(1);
+    expect(capturedProps.preview).toMatchObject({
+      content: "# Demo\n\n## 目录\n\nBody",
+      beautifyReview: expect.objectContaining({
+        originalContent: "# Demo\n\nBody",
+        beautifiedContent: "# Demo\n\n## 目录\n\nBody",
+        diffMode: true,
+      }),
+    });
+  });
+
+  it("shows unavailable AI detail without letting the review toolbar buttons collapse", async () => {
+    const user = userEvent.setup();
+    mockBeautifyStreamResult({
+      originalHash: "hash-1",
+      beautifiedContent: "# Demo\n\n## 目录\n\nBody",
+      appliedAi: false,
+      aiStatus: "unavailable",
+      aiStatusDetail: "AI provider request failed with status 401 Unauthorized: bad api key",
+      diagnostics: [],
+      summary: {
+        errorCount: 0,
+        warningCount: 1,
+        autoFixableCount: 0,
+      },
+    });
+
+    render(<EditorWorkspace />);
+
+    await user.click(screen.getByRole("button", { name: "美化 Markdown" }));
+    await user.click(screen.getByRole("button", { name: "确认美化" }));
+
+    await screen.findByText(/AI 未生效：未获取到可用候选结果/);
+    const toolbarStatus = screen.getByText("美化审阅中", {
+      selector: "span[title]",
+    });
+
+    expect(toolbarStatus).toHaveAttribute(
+      "title",
+      "美化审阅中 · 1 条提示 · AI 未生效：未获取到可用候选结果（AI 服务认证失败，请检查 API Key 或服务商配置）",
+    );
+    expect(toolbarStatus).toHaveStyle({
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap",
+    });
+    expect(screen.getByRole("button", { name: "查看改动" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "放弃美化结果" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "应用美化结果" })).toBeInTheDocument();
+  });
+
+  it("discards beautify review and returns the existing preview pane to normal preview mode", async () => {
+    const user = userEvent.setup();
+    mockBeautifyStreamResult({
+      originalHash: "hash-1",
+      beautifiedContent: "# Demo\n\n## 目录\n\nBody",
+      appliedAi: false,
+      diagnostics: [],
+      summary: {
+        errorCount: 0,
+        warningCount: 0,
+        autoFixableCount: 0,
+      },
+    });
+
+    render(<EditorWorkspace />);
+
+    await user.click(screen.getByRole("button", { name: "美化 Markdown" }));
+    await user.click(screen.getByRole("button", { name: "确认美化" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "放弃美化结果" })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "查看改动" }));
+    await user.click(screen.getByRole("button", { name: "放弃美化结果" }));
+
+    expect(useEditorStore.getState().beautifyReview).toBeNull();
+    expect(screen.queryByRole("button", { name: "应用美化结果" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "查看改动" })).not.toBeInTheDocument();
+    expect(screen.queryAllByTestId("mock-preview")).toHaveLength(1);
+    expect(capturedProps.preview).toMatchObject({
+      content: "# Demo\n\nBody",
+      beautifyReview: null,
     });
   });
 

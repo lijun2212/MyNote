@@ -17,6 +17,9 @@ import type {
   GraphRelationItem,
   KnowledgeBase,
   LinkItem,
+  MarkdownBeautifyRequest,
+  MarkdownBeautifyResult,
+  MarkdownBeautifyStreamEvent,
   MarkdownImportRequest,
   MarkdownImportResult,
   InsertImageResult,
@@ -162,6 +165,39 @@ type RawMarkdownImportResult = {
 
 interface RawInsertImageResult {
   markdown_path: string;
+}
+
+interface RawMarkdownBeautifyIssue {
+  id: string;
+  severity: "error" | "warning" | "info";
+  kind: string;
+  message: string;
+  line_start: number | null;
+  line_end: number | null;
+  auto_fixable: boolean;
+  ai_eligible: boolean;
+}
+
+interface RawMarkdownBeautifyResult {
+  original_hash: string;
+  beautified_content: string;
+  applied_ai: boolean;
+  ai_status: "not_requested" | "applied" | "unavailable" | "candidate_rejected";
+  ai_status_detail: string | null;
+  diagnostics: RawMarkdownBeautifyIssue[];
+  summary: {
+    error_count: number;
+    warning_count: number;
+    auto_fixable_count: number;
+  };
+}
+
+interface RawMarkdownBeautifyStreamEvent {
+  request_id: string;
+  type: "rule_result" | "ai_delta" | "completed" | "error";
+  chunk: string | null;
+  result: RawMarkdownBeautifyResult | null;
+  error: string | null;
 }
 
 interface RawRewritePastedRemoteImagesResult {
@@ -334,6 +370,41 @@ function mapInsertImageResult(result: RawInsertImageResult | null): InsertImageR
   };
 }
 
+function mapMarkdownBeautifyResult(result: RawMarkdownBeautifyResult): MarkdownBeautifyResult {
+  return {
+    originalHash: result.original_hash,
+    beautifiedContent: result.beautified_content,
+    appliedAi: result.applied_ai,
+    aiStatus: result.ai_status,
+    aiStatusDetail: result.ai_status_detail,
+    diagnostics: result.diagnostics.map((item) => ({
+      id: item.id,
+      severity: item.severity,
+      kind: item.kind,
+      message: item.message,
+      lineStart: item.line_start,
+      lineEnd: item.line_end,
+      autoFixable: item.auto_fixable,
+      aiEligible: item.ai_eligible,
+    })),
+    summary: {
+      errorCount: result.summary.error_count,
+      warningCount: result.summary.warning_count,
+      autoFixableCount: result.summary.auto_fixable_count,
+    },
+  };
+}
+
+export function mapMarkdownBeautifyStreamEvent(event: RawMarkdownBeautifyStreamEvent): MarkdownBeautifyStreamEvent {
+  return {
+    requestId: event.request_id,
+    type: event.type,
+    chunk: event.chunk,
+    result: event.result ? mapMarkdownBeautifyResult(event.result) : null,
+    error: event.error,
+  };
+}
+
 export const api = {
   createKnowledgeBase: (rootPath: string, name: string) =>
     invoke<KnowledgeBase>("create_knowledge_base", { rootPath, name }),
@@ -387,6 +458,12 @@ export const api = {
 
   importMarkdownSources: (request: MarkdownImportRequest) =>
     invoke<RawMarkdownImportResult>("import_markdown_sources", { request }).then(mapMarkdownImportResult),
+
+  beautifyMarkdown: (request: MarkdownBeautifyRequest) =>
+    invoke<RawMarkdownBeautifyResult>("beautify_markdown", { request }).then(mapMarkdownBeautifyResult),
+
+  beautifyMarkdownStream: (request: MarkdownBeautifyRequest, requestId: string) =>
+    invoke<string>("beautify_markdown_stream", { request, requestId }),
 
   insertImageForNote: (notePath: string): Promise<InsertImageResult | null> =>
     invoke<RawInsertImageResult | null>("insert_image_for_note", { notePath }).then(mapInsertImageResult),

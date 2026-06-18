@@ -876,6 +876,45 @@ describe("FileTreePanel", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: "确认删除笔记本 空笔记本" })).not.toBeInTheDocument());
   });
 
+  it("renders compact delete confirmation actions as icon-only buttons", async () => {
+    const user = userEvent.setup();
+    useAppStore.setState({
+      tree: [
+        {
+          id: null,
+          name: "notes",
+          path: "notes",
+          is_dir: true,
+          children: [
+            {
+              id: null,
+              name: "空笔记本",
+              path: "notes/空笔记本",
+              is_dir: true,
+              children: [],
+            },
+          ],
+        },
+      ],
+    });
+
+    render(<FileTreePanel />);
+
+    await user.hover(screen.getByRole("button", { name: "空笔记本" }));
+    const deleteNotebookButton = screen.getByRole("button", { name: "删除笔记本 空笔记本" });
+    await waitFor(() => expect(deleteNotebookButton).toBeVisible());
+    fireEvent.click(deleteNotebookButton);
+
+    const confirmButton = screen.getByRole("button", { name: "确认删除笔记本 空笔记本" });
+    const cancelButton = screen.getByRole("button", { name: "取消删除笔记本 空笔记本" });
+
+    expect(confirmButton).not.toHaveTextContent(/\S/);
+    expect(cancelButton).not.toHaveTextContent(/\S/);
+    expect(confirmButton.querySelector("svg")).not.toBeNull();
+    expect(cancelButton.querySelector("svg")).not.toBeNull();
+    expect(screen.getByText("确认删除该笔记本？")).toBeInTheDocument();
+  });
+
   it("shows a lightweight delete confirmation inline and keeps it open on delete failure", async () => {
     const user = userEvent.setup();
     hookMocks.deleteNotebook.mockRejectedValue(new Error("只能删除空笔记本"));
@@ -893,6 +932,24 @@ describe("FileTreePanel", () => {
     await waitFor(() => expect(hookMocks.deleteNotebook).toHaveBeenCalledWith("notes/法律"));
     expect(screen.getByRole("button", { name: "确认删除笔记本 法律" })).toBeInTheDocument();
     expect(screen.getByText("只能删除空笔记本")).toBeInTheDocument();
+  });
+
+  it("extracts a readable message when notebook deletion rejects with an error object", async () => {
+    const user = userEvent.setup();
+    hookMocks.deleteNotebook.mockRejectedValue({ message: "只能删除空笔记本" });
+
+    render(<FileTreePanel />);
+
+    await user.hover(screen.getByRole("button", { name: "法律" }));
+    const deleteNotebookButton = screen.getByRole("button", { name: "删除笔记本 法律" });
+    await waitFor(() => expect(deleteNotebookButton).toBeVisible());
+    fireEvent.click(deleteNotebookButton);
+
+    await user.click(screen.getByRole("button", { name: "确认删除笔记本 法律" }));
+
+    await waitFor(() => expect(hookMocks.deleteNotebook).toHaveBeenCalledWith("notes/法律"));
+    expect(screen.getByText("只能删除空笔记本")).toBeInTheDocument();
+    expect(screen.queryByText("[object Object]")).not.toBeInTheDocument();
   });
 
   it("reorders notebooks directly from inline arrow buttons", async () => {
@@ -1064,6 +1121,10 @@ describe("FileTreePanel", () => {
     expect(screen.getByRole("textbox", { name: "笔记本名称" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /图标 / })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "颜色 蓝色" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "颜色 蓝色" })).not.toHaveTextContent(/\S/);
+    expect(screen.getByRole("button", { name: "颜色 橙色" })).not.toHaveTextContent(/\S/);
+    expect(screen.getByRole("button", { name: "创建笔记本" })).toHaveTextContent("创建笔记本");
+    expect(screen.getByRole("button", { name: "取消创建笔记本" })).toHaveTextContent("取消");
   });
 
   it("creates a notebook with the default icon and color when pressing Enter", async () => {

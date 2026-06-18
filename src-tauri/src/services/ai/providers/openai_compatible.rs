@@ -2,7 +2,7 @@ use crate::domain::ai::{AiProfile, AiTextRequest, AiTextResponse};
 use crate::error::{AppError, AppResult};
 use crate::services::ai::provider::{
     resolve_endpoint, resolve_request_max_tokens, resolve_request_temperature,
-    summarize_http_error, AiProviderAdapter,
+    summarize_http_error, summarize_reqwest_error, AiProviderAdapter,
 };
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -98,6 +98,7 @@ impl AiProviderAdapter for OpenAiCompatibleProvider {
         let response = client
             .post(endpoint)
             .bearer_auth(api_key)
+            .header("accept-encoding", "identity")
             .json(&OpenAiChatRequest {
                 model: &profile.model,
                 messages: [OpenAiChatMessage {
@@ -155,6 +156,8 @@ impl AiProviderAdapter for OpenAiCompatibleProvider {
         let response = client
             .post(endpoint)
             .bearer_auth(api_key)
+            .header("accept", "text/event-stream")
+            .header("accept-encoding", "identity")
             .json(&OpenAiChatRequest {
                 model: &profile.model,
                 messages: [OpenAiChatMessage {
@@ -186,7 +189,7 @@ impl AiProviderAdapter for OpenAiCompatibleProvider {
 
         while let Some(chunk) = stream.next().await {
             let bytes = chunk
-                .map_err(|error| AppError::Io(format!("Failed to read OpenAI-compatible stream chunk: {error}")))?;
+                .map_err(|error| summarize_reqwest_error("Failed to read OpenAI-compatible stream chunk", &error))?;
             buffer.extend_from_slice(&bytes);
 
             while let Some(line) = take_next_sse_line(&mut buffer)? {
@@ -299,7 +302,25 @@ fn extract_openai_text(choices: Vec<OpenAiChoice>) -> AppResult<String> {
 
 #[cfg(test)]
 mod tests {
+    use super::OpenAiCompatibleProvider;
+    use crate::domain::ai::{AiProfile, AiProviderKind, AiTextRequest};
+    use crate::services::ai::provider::AiProviderAdapter;
     use super::{OpenAiChatMessage, OpenAiChatRequest};
+    use mockito::{Matcher, Server};
+    use reqwest::Client;
+
+    fn openai_profile(base_url: String) -> AiProfile {
+        AiProfile {
+            id: "profile-openai".into(),
+            name: "OpenAI".into(),
+            provider: AiProviderKind::OpenAiCompatible,
+            model: "demo-model".into(),
+            base_url: Some(base_url),
+            max_tokens: Some(32),
+            temperature: Some(0.0),
+            enabled: true,
+        }
+    }
 
     #[test]
     fn openai_request_omits_max_tokens_when_not_configured() {
@@ -316,5 +337,106 @@ mod tests {
         .unwrap();
 
         assert!(payload.get("max_tokens").is_none());
+    }
+
+    #[tokio::test]
+    async fn openai_non_stream_request_tolerates_incorrect_content_encoding_header() {
+        let mut server = Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/chat/completions")
+            .match_header("accept-encoding", "identity")
+            .match_body(Matcher::PartialJson(serde_json::json!({
+                "stream": false,
+            })))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_header("content-encoding", "gzip")
+            .with_body(
+                serde_json::json!({
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "hello"
+                            }
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 5,
+                        "completion_tokens": 2,
+                        "total_tokens": 7
+                    }
+                })
+                .to_string(),
+            )
+            .create_async()
+            .await;
+
+        let provider = OpenAiCompatibleProvider;
+        let client = Client::new();
+        let response = provider
+            .invoke(
+                &client,
+                &openai_profile(server.url()),
+                "sk-test",
+                &AiTextRequest {
+                    prompt: "hello".into(),
+                    max_tokens: Some(16),
+                    temperature: Some(0.0),
+                    expected_text: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.text, "hello");
+        assert_eq!(response.total_tokens, Some(7));
+    }
+
+    #[tokio::test]
+    async fn openai_stream_tolerates_incorrect_content_encoding_header() {
+        let mut server = Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/chat/completions")
+            .match_header("accept", "text/event-stream")
+            .match_header("accept-encoding", "identity")
+            .match_body(Matcher::PartialJson(serde_json::json!({
+                "stream": true,
+            })))
+            .with_status(200)
+            .with_header("content-type", "text/event-stream")
+            .with_header("content-encoding", "gzip")
+            .with_body(concat!(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n",
+                "data: {\"choices\":[{\"delta\":{}}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2,\"total_tokens\":7}}\n\n",
+                "data: [DONE]\n\n"
+            ))
+            .create_async()
+            .await;
+
+        let provider = OpenAiCompatibleProvider;
+        let client = Client::new();
+        let mut deltas = Vec::new();
+        let response = provider
+            .invoke_stream(
+                &client,
+                &openai_profile(server.url()),
+                "sk-test",
+                &AiTextRequest {
+                    prompt: "hello".into(),
+                    max_tokens: Some(16),
+                    temperature: Some(0.0),
+                    expected_text: None,
+                },
+                &mut |delta| {
+                    deltas.push(delta);
+                    Ok(())
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(deltas, vec!["hello"]);
+        assert_eq!(response.text, "hello");
+        assert_eq!(response.total_tokens, Some(7));
     }
 }

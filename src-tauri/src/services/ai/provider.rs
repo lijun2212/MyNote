@@ -60,6 +60,15 @@ pub fn summarize_http_error(status: StatusCode, body: &str) -> AppError {
     }
 }
 
+pub fn summarize_reqwest_error(context: &str, error: &reqwest::Error) -> AppError {
+    AppError::Io(format!(
+        "{context}: {error} (timeout={}, connect={}, body={})",
+        error.is_timeout(),
+        error.is_connect(),
+        error.is_body()
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{resolve_request_max_tokens, summarize_http_error};

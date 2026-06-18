@@ -100,6 +100,37 @@ function NewNoteIcon() {
   );
 }
 
+function CompactDeleteIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 16 16" style={compactInlineActionIconStyle}>
+      <path d="M5.5 4.5h5" />
+      <path d="M6.5 4.5V3.75h3v.75" />
+      <path d="M5 4.5v6.25a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V4.5" />
+      <path d="M7 6.5v3" />
+      <path d="M9 6.5v3" />
+    </svg>
+  );
+}
+
+function CompactCancelIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 16 16" style={compactInlineActionIconStyle}>
+      <path d="m6.25 5.25-2 2 2 2" />
+      <path d="M4.5 7.25h4.75a2.25 2.25 0 1 1 0 4.5H8" />
+    </svg>
+  );
+}
+
+function CompactCreateNotebookIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 16 16" style={compactInlineActionIconStyle}>
+      <path d="M2.5 5h4l1 1h6v5.75a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z" />
+      <path d="M10.5 7.5v3" />
+      <path d="M9 9h3" />
+    </svg>
+  );
+}
+
 function logNoteDrag(event: string, details: Record<string, unknown>) {
   console.info(DRAG_DEBUG_PREFIX, event, details);
 }
@@ -117,6 +148,38 @@ function getEventElement(target: EventTarget | null): Element | null {
   if (target instanceof Element) return target;
   if (target instanceof Text) return target.parentElement;
   return null;
+}
+
+function toErrorMessage(error: unknown, fallback = "操作失败") {
+  if (typeof error === "string" && error.trim()) {
+    return error;
+  }
+
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  if (
+    typeof error === "object"
+    && error !== null
+    && "message" in error
+    && typeof (error as { message?: unknown }).message === "string"
+    && (error as { message: string }).message.trim()
+  ) {
+    return (error as { message: string }).message;
+  }
+
+  if (typeof error === "object" && error !== null) {
+    const entries = Object.entries(error as Record<string, unknown>);
+    if (entries.length === 1) {
+      const [, value] = entries[0];
+      if (typeof value === "string" && value.trim()) {
+        return value;
+      }
+    }
+  }
+
+  return fallback;
 }
 
 function getNoteDirectoryPath(notePath: string): string {
@@ -819,7 +882,7 @@ function getNoteTitleFromPath(notePath: string): string {
     } catch (error) {
       setNotebookErrors((current) => ({
         ...current,
-        [path]: error instanceof Error ? error.message : String(error),
+        [path]: toErrorMessage(error),
       }));
     }
   }
@@ -847,7 +910,7 @@ function getNoteTitleFromPath(notePath: string): string {
     } catch (error) {
       setNotebookErrors((current) => ({
         ...current,
-        [path]: error instanceof Error ? error.message : String(error),
+        [path]: toErrorMessage(error),
       }));
     }
   }
@@ -1311,31 +1374,27 @@ function getNoteTitleFromPath(notePath: string): string {
                     style={{
                       border: selected ? "1px solid #0969da" : "1px solid #d0d7de",
                       background: selected ? "#eff6ff" : "#fff",
-                      color: "#4b5563",
                       borderRadius: 6,
-                      minHeight: 32,
+                      width: "100%",
+                      minHeight: 24,
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      gap: 6,
                       cursor: "pointer",
-                      fontSize: 12,
-                      fontWeight: 600,
-                      padding: "0 6px",
+                      padding: 0,
                     }}
                   >
                     <span
                       aria-hidden="true"
                       style={{
-                        width: 10,
-                        height: 10,
+                        width: 12,
+                        height: 12,
                         borderRadius: 999,
                         background: preset.swatch,
                         boxShadow: `0 0 0 3px ${preset.background}`,
                         flex: "0 0 auto",
                       }}
                     />
-                    <span>{preset.label}</span>
                   </button>
                 );
               })}
@@ -1347,16 +1406,22 @@ function getNoteTitleFromPath(notePath: string): string {
               onClick={() => void handleNotebookInputConfirm()}
               style={{
                 flex: 1,
-                minHeight: 32,
+                minHeight: 28,
                 border: "1px solid #0969da",
                 borderRadius: 6,
                 background: "#0969da",
                 color: "#fff",
-                fontSize: 12,
+                fontSize: 11,
                 fontWeight: 600,
                 cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 4,
+                padding: "0 10px",
               }}
             >
+              <CompactCreateNotebookIcon />
               创建笔记本
             </button>
             <button
@@ -1364,17 +1429,23 @@ function getNoteTitleFromPath(notePath: string): string {
               aria-label="取消创建笔记本"
               onClick={closeNotebookCreationPanel}
               style={{
-                minWidth: 72,
-                minHeight: 32,
+                minWidth: 64,
+                minHeight: 28,
                 border: "1px solid #d0d7de",
                 borderRadius: 6,
                 background: "#fff",
                 color: "#4b5563",
-                fontSize: 12,
+                fontSize: 11,
                 fontWeight: 600,
                 cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 4,
+                padding: "0 10px",
               }}
             >
+              <CompactCancelIcon />
               取消
             </button>
           </div>
@@ -1485,7 +1556,7 @@ function getNoteTitleFromPath(notePath: string): string {
                     alignItems: "center",
                     justifyContent: "space-between",
                     gap: 8,
-                    padding: "8px 10px",
+                    padding: "6px 8px",
                     borderRadius: 8,
                     border: "1px solid #fecaca",
                     background: "#fff5f5",
@@ -1497,17 +1568,22 @@ function getNoteTitleFromPath(notePath: string): string {
                       type="button"
                       aria-label={`确认删除笔记本 ${node.name}`}
                       onClick={() => void handleDeleteNotebook(node.path)}
-                      style={{ ...inlinePrimaryButtonStyle, background: "#b42318", borderColor: "#b42318" }}
+                      style={{
+                        ...compactInlineActionButtonStyle,
+                        background: "#fff1f2",
+                        borderColor: "#fecaca",
+                        color: "#b42318",
+                      }}
                     >
-                      删除
+                      <CompactDeleteIcon />
                     </button>
                     <button
                       type="button"
                       aria-label={`取消删除笔记本 ${node.name}`}
                       onClick={() => toggleNotebookDeleteConfirmation(node.path)}
-                      style={inlineSecondaryButtonStyle}
+                      style={compactInlineActionButtonStyle}
                     >
-                      取消
+                      <CompactCancelIcon />
                     </button>
                   </div>
                 </div>
@@ -1609,30 +1685,6 @@ function getNoteTitleFromPath(notePath: string): string {
   );
 }
 
-const inlinePrimaryButtonStyle: CSSProperties = {
-  minHeight: 32,
-  border: "1px solid #0969da",
-  borderRadius: 6,
-  background: "#0969da",
-  color: "#fff",
-  fontSize: 12,
-  fontWeight: 600,
-  cursor: "pointer",
-  padding: "0 12px",
-};
-
-const inlineSecondaryButtonStyle: CSSProperties = {
-  minHeight: 32,
-  border: "1px solid #d0d7de",
-  borderRadius: 6,
-  background: "#fff",
-  color: "#4b5563",
-  fontSize: 12,
-  fontWeight: 600,
-  cursor: "pointer",
-  padding: "0 12px",
-};
-
 const inlineOptionButtonStyle: CSSProperties = {
   border: "1px solid #d0d7de",
   borderRadius: 6,
@@ -1643,6 +1695,33 @@ const inlineOptionButtonStyle: CSSProperties = {
   justifyContent: "center",
   cursor: "pointer",
   padding: 0,
+  flex: "0 0 auto",
+};
+
+const compactInlineActionButtonStyle: CSSProperties = {
+  height: 20,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  border: "1px solid #d0d7de",
+  borderRadius: 999,
+  background: "#fff",
+  color: "#4b5563",
+  cursor: "pointer",
+  width: 22,
+  padding: 0,
+  flex: "0 0 auto",
+};
+
+const compactInlineActionIconStyle: CSSProperties = {
+  width: 12,
+  height: 12,
+  display: "block",
+  stroke: "currentColor",
+  strokeWidth: 1.8,
+  fill: "none",
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
   flex: "0 0 auto",
 };
 

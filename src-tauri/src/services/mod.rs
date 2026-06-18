@@ -2,6 +2,7 @@ pub mod ai;
 pub mod graph;
 pub mod index;
 pub mod knowledge_base;
+pub mod markdown_beautify;
 pub mod note;
 pub mod notebook_visual;
 pub mod relation;

@@ -36,6 +36,7 @@ import {
 } from "./sourceLineSync";
 import type { SearchNavigationTarget, TagNavigationTarget } from "../../types";
 import type { PreviewLinkKind } from "../ContextMenu/contextMenuTypes";
+import type { BeautifyReviewState } from "../../store/useEditorStore";
 
 const md = new MarkdownIt({ html: false, linkify: true, typographer: true });
 const SOURCE_LINE_TAGS = new Set(["blockquote", "h1", "h2", "h3", "h4", "h5", "h6", "li", "ol", "p", "table", "tr", "ul"]);
@@ -1098,6 +1099,7 @@ function readColumnWidths(cols: HTMLTableColElement[]): number[] {
 
 interface Props {
   content: string;
+  beautifyReview?: BeautifyReviewState | null;
   projectionMode?: boolean;
   searchNavigationTarget?: SearchNavigationTarget | null;
   tagNavigationTarget?: TagNavigationTarget | null;
@@ -1105,8 +1107,157 @@ interface Props {
   onTopVisibleLineChange?: (line: number) => void;
 }
 
+function escapeDiffHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+type BeautifyDiffOp =
+  | { kind: "same"; value: string; beforeLine: number; afterLine: number }
+  | { kind: "removed"; value: string; beforeLine: number }
+  | { kind: "added"; value: string; afterLine: number };
+
+const BEAUTIFY_DIFF_CONTEXT_LINES = 2;
+
+function computeBeautifyLineDiff(originalLines: string[], beautifiedLines: string[]): BeautifyDiffOp[] {
+  const m = originalLines.length;
+  const n = beautifiedLines.length;
+  const dp = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+
+  for (let i = m - 1; i >= 0; i -= 1) {
+    for (let j = n - 1; j >= 0; j -= 1) {
+      if (originalLines[i] === beautifiedLines[j]) {
+        dp[i][j] = dp[i + 1][j + 1] + 1;
+      } else {
+        dp[i][j] = Math.max(dp[i + 1][j], dp[i][j + 1]);
+      }
+    }
+  }
+
+  const ops: BeautifyDiffOp[] = [];
+  let i = 0;
+  let j = 0;
+
+  while (i < m && j < n) {
+    if (originalLines[i] === beautifiedLines[j]) {
+      ops.push({ kind: "same", value: originalLines[i], beforeLine: i + 1, afterLine: j + 1 });
+      i += 1;
+      j += 1;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      ops.push({ kind: "removed", value: originalLines[i], beforeLine: i + 1 });
+      i += 1;
+    } else {
+      ops.push({ kind: "added", value: beautifiedLines[j], afterLine: j + 1 });
+      j += 1;
+    }
+  }
+
+  while (i < m) {
+    ops.push({ kind: "removed", value: originalLines[i], beforeLine: i + 1 });
+    i += 1;
+  }
+
+  while (j < n) {
+    ops.push({ kind: "added", value: beautifiedLines[j], afterLine: j + 1 });
+    j += 1;
+  }
+
+  return ops;
+}
+
+function renderBeautifyDiffHtml(review: BeautifyReviewState): string {
+  const originalLines = review.originalContent.split(/\r?\n/);
+  const beautifiedLines = review.beautifiedContent.split(/\r?\n/);
+  const operations = computeBeautifyLineDiff(originalLines, beautifiedLines);
+  const rows: string[] = [];
+  const omittedRow = (count: number, anchorLine: number) =>
+    `<div class="beautify-diff-row beautify-diff-row--omitted"><div class="beautify-diff-gutter">${anchorLine}</div><pre class="beautify-diff-code">@@ 省略前文 ${count} 行未改内容 @@</pre></div>`;
+
+  for (let index = 0; index < operations.length; index += 1) {
+    const op = operations[index];
+
+    if (op.kind !== "same") {
+      if (op.kind === "removed") {
+        rows.push(
+          `<div class="beautify-diff-row beautify-diff-row--removed"><div class="beautify-diff-gutter">${op.beforeLine}</div><pre class="beautify-diff-code">- ${escapeDiffHtml(op.value)}</pre></div>`,
+        );
+      } else {
+        rows.push(
+          `<div class="beautify-diff-row beautify-diff-row--added"><div class="beautify-diff-gutter">${op.afterLine}</div><pre class="beautify-diff-code">+ ${escapeDiffHtml(op.value)}</pre></div>`,
+        );
+      }
+      continue;
+    }
+
+    let runEnd = index;
+    while (runEnd + 1 < operations.length && operations[runEnd + 1]?.kind === "same") {
+      runEnd += 1;
+    }
+
+    const runLength = runEnd - index + 1;
+    const previousOp = index > 0 ? operations[index - 1] : null;
+    const nextOp = runEnd + 1 < operations.length ? operations[runEnd + 1] : null;
+    const hasChangeBefore = previousOp !== null && previousOp.kind !== "same";
+    const hasChangeAfter = nextOp !== null && nextOp.kind !== "same";
+
+    if (!hasChangeBefore && !hasChangeAfter) {
+      for (let cursor = index; cursor <= runEnd; cursor += 1) {
+        const sameOp = operations[cursor] as Extract<BeautifyDiffOp, { kind: "same" }>;
+        rows.push(
+          `<div class="beautify-diff-row beautify-diff-row--same"><div class="beautify-diff-gutter">${sameOp.afterLine}</div><pre class="beautify-diff-code">${escapeDiffHtml(sameOp.value)}</pre></div>`,
+        );
+      }
+      index = runEnd;
+      continue;
+    }
+
+    if (runLength <= BEAUTIFY_DIFF_CONTEXT_LINES * 2 + 1) {
+      for (let cursor = index; cursor <= runEnd; cursor += 1) {
+        const sameOp = operations[cursor] as Extract<BeautifyDiffOp, { kind: "same" }>;
+        rows.push(
+          `<div class="beautify-diff-row beautify-diff-row--same"><div class="beautify-diff-gutter">${sameOp.afterLine}</div><pre class="beautify-diff-code">${escapeDiffHtml(sameOp.value)}</pre></div>`,
+        );
+      }
+      index = runEnd;
+      continue;
+    }
+
+    const leadingVisibleCount = hasChangeBefore ? BEAUTIFY_DIFF_CONTEXT_LINES : 0;
+    const trailingVisibleCount = hasChangeAfter ? BEAUTIFY_DIFF_CONTEXT_LINES : 0;
+    const omittedCount = runLength - leadingVisibleCount - trailingVisibleCount;
+
+    for (let cursor = index; cursor < index + leadingVisibleCount; cursor += 1) {
+      const sameOp = operations[cursor] as Extract<BeautifyDiffOp, { kind: "same" }>;
+      rows.push(
+        `<div class="beautify-diff-row beautify-diff-row--same"><div class="beautify-diff-gutter">${sameOp.afterLine}</div><pre class="beautify-diff-code">${escapeDiffHtml(sameOp.value)}</pre></div>`,
+      );
+    }
+
+    if (omittedCount > 0) {
+      const anchorLine = (operations[index + leadingVisibleCount] as Extract<BeautifyDiffOp, { kind: "same" }>).afterLine;
+      rows.push(omittedRow(omittedCount, anchorLine));
+    }
+
+    for (let cursor = runEnd - trailingVisibleCount + 1; cursor <= runEnd; cursor += 1) {
+      const sameOp = operations[cursor] as Extract<BeautifyDiffOp, { kind: "same" }>;
+      rows.push(
+        `<div class="beautify-diff-row beautify-diff-row--same"><div class="beautify-diff-gutter">${sameOp.afterLine}</div><pre class="beautify-diff-code">${escapeDiffHtml(sameOp.value)}</pre></div>`,
+      );
+    }
+
+    index = runEnd;
+  }
+
+  return `<section class="beautify-diff" aria-label="Markdown beautify diff">${rows.join("")}</section>`;
+}
+
 export function MarkdownPreview({
   content,
+  beautifyReview,
   projectionMode = false,
   searchNavigationTarget,
   tagNavigationTarget,
@@ -1240,6 +1391,16 @@ export function MarkdownPreview({
   useEffect(() => {
     if (!containerRef.current) return;
     let cancelled = false;
+
+    if (beautifyReview?.diffMode) {
+      previewLineOffsetRef.current = 0;
+      containerRef.current.innerHTML = renderBeautifyDiffHtml(beautifyReview);
+      containerRef.current.classList.remove("markdown-preview-front-matter-navigation-target");
+      return () => {
+        cancelled = true;
+      };
+    }
+
     const previewBody = extractPreviewBody(content);
     previewLineOffsetRef.current = previewBody.lineOffset;
     const rawHtml = md.render(previewBody.content);
@@ -1269,21 +1430,21 @@ export function MarkdownPreview({
     return () => {
       cancelled = true;
     };
-  }, [content, activePreviewNavigationTarget, activeSearchNavigationTarget, isFrontMatterNavigationActive, projectionMode]);
+  }, [beautifyReview, content, activePreviewNavigationTarget, activeSearchNavigationTarget, isFrontMatterNavigationActive, projectionMode]);
 
   useEffect(() => {
     if (!containerRef.current) {
       return;
     }
     rewriteLocalImageSourcesForTauri(containerRef.current, kbRootPath, currentNote?.path ?? undefined);
-  }, [content, kbRootPath, currentNote?.path]);
+  }, [beautifyReview, content, kbRootPath, currentNote?.path]);
 
   useEffect(() => {
     if (!containerRef.current) {
       return;
     }
     void rewriteRemoteImageSourcesForPreview(containerRef.current);
-  }, [content]);
+  }, [beautifyReview, content]);
 
   useEffect(() => {
     const scrollContainer = scrollContainerRef.current;
@@ -1581,6 +1742,46 @@ export function MarkdownPreview({
         .markdown-preview-content {
           overflow-wrap: anywhere;
           word-break: normal;
+        }
+        .markdown-preview-content .beautify-diff {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          font-family: ui-monospace, SFMono-Regular, SFMono-Regular, Consolas, Liberation Mono, Menlo, monospace;
+          font-size: 13px;
+          line-height: 1.55;
+        }
+        .markdown-preview-content .beautify-diff-row {
+          display: grid;
+          grid-template-columns: 52px minmax(0, 1fr);
+          align-items: start;
+          border-radius: 8px;
+        }
+        .markdown-preview-content .beautify-diff-row--same {
+          background: #f8fafc;
+          color: #475467;
+        }
+        .markdown-preview-content .beautify-diff-row--removed {
+          background: #fef3f2;
+          color: #b42318;
+        }
+        .markdown-preview-content .beautify-diff-row--added {
+          background: #ecfdf3;
+          color: #027a48;
+        }
+        .markdown-preview-content .beautify-diff-gutter {
+          padding: 6px 10px;
+          text-align: right;
+          border-right: 1px solid rgba(15, 23, 42, 0.08);
+          color: #98a2b3;
+          user-select: none;
+        }
+        .markdown-preview-content .beautify-diff-code {
+          margin: 0;
+          padding: 6px 12px;
+          white-space: pre-wrap;
+          overflow-wrap: anywhere;
+          background: transparent;
         }
         .markdown-preview-content h1,
         .markdown-preview-content h2,

@@ -25,6 +25,64 @@ function renderWithContextMenu(ui: ReactElement) {
 }
 
 describe("MarkdownPreview", () => {
+  it("does not render unchanged shifted lines as remove/add pairs in beautify diff mode", () => {
+    const { container } = render(
+      <MarkdownPreview
+        content={"Line A\nLine B\nLine C"}
+        beautifyReview={{
+          originalContent: "Line A\nLine B\nLine C",
+          beautifiedContent: "Line A\nLine X\nLine B\nLine C",
+          diagnostics: [],
+          summary: { errorCount: 0, warningCount: 0, autoFixableCount: 0 },
+          diffMode: true,
+          appliedAi: false,
+          aiStatus: "not_requested",
+          aiStatusDetail: null,
+        }}
+      />,
+    );
+
+    const removedRows = Array.from(container.querySelectorAll(".beautify-diff-row--removed"));
+    const addedRows = Array.from(container.querySelectorAll(".beautify-diff-row--added"));
+    const removedTexts = removedRows.map((row) => row.textContent ?? "");
+    const addedTexts = addedRows.map((row) => row.textContent ?? "");
+
+    expect(addedTexts.some((text) => text.includes("+ Line X"))).toBe(true);
+    expect(removedTexts.some((text) => text.includes("- Line B"))).toBe(false);
+    expect(removedTexts.some((text) => text.includes("- Line C"))).toBe(false);
+  });
+
+  it("collapses long unchanged prefixes in beautify diff mode so later edits are immediately visible", () => {
+    const originalLines = Array.from({ length: 8 }, (_, index) => `Same ${index + 1}`)
+      .concat(["Formula", "解析：", "1.  \\$close: 当天的收盘价。"])
+      .join("\n");
+    const beautifiedLines = Array.from({ length: 8 }, (_, index) => `Same ${index + 1}`)
+      .concat(["```text", "Formula", "```", "## 解析", "1.  `$close`: 当天的收盘价。"])
+      .join("\n");
+
+    const { container } = render(
+      <MarkdownPreview
+        content={originalLines}
+        beautifyReview={{
+          originalContent: originalLines,
+          beautifiedContent: beautifiedLines,
+          diagnostics: [],
+          summary: { errorCount: 0, warningCount: 0, autoFixableCount: 0 },
+          diffMode: true,
+          appliedAi: false,
+          aiStatus: "not_requested",
+          aiStatusDetail: null,
+        }}
+      />,
+    );
+
+    expect(container.textContent).toContain("@@ 省略前文 6 行未改内容 @@");
+    expect(container.textContent).toContain("+ ```text");
+    expect(container.textContent).toContain("+ ## 解析");
+    expect(container.textContent).not.toContain("Same 1");
+    expect(container.textContent).not.toContain("Same 2");
+  });
+
   it("keeps rendered content constrained to the preview pane", () => {
     const { container } = render(
       <MarkdownPreview

@@ -24,6 +24,58 @@ export interface NoteDetail {
   content: string;
 }
 
+export interface MarkdownBeautifyOptions {
+  fixSyntax: boolean;
+  refreshToc: boolean;
+  normalizeHeadings: boolean;
+  normalizeCodeBlocks: boolean;
+  normalizeSpacing: boolean;
+  useAiAssist: boolean;
+}
+
+export type MarkdownBeautifyAiStatus = "not_requested" | "applied" | "unavailable" | "candidate_rejected";
+
+export interface MarkdownBeautifyIssue {
+  id: string;
+  severity: "error" | "warning" | "info";
+  kind: string;
+  message: string;
+  lineStart: number | null;
+  lineEnd: number | null;
+  autoFixable: boolean;
+  aiEligible: boolean;
+}
+
+export interface MarkdownBeautifySummary {
+  errorCount: number;
+  warningCount: number;
+  autoFixableCount: number;
+}
+
+export interface MarkdownBeautifyRequest {
+  notePath: string;
+  content: string;
+  options: MarkdownBeautifyOptions;
+}
+
+export interface MarkdownBeautifyResult {
+  originalHash: string;
+  beautifiedContent: string;
+  appliedAi: boolean;
+  aiStatus: MarkdownBeautifyAiStatus;
+  aiStatusDetail: string | null;
+  diagnostics: MarkdownBeautifyIssue[];
+  summary: MarkdownBeautifySummary;
+}
+
+export interface MarkdownBeautifyStreamEvent {
+  requestId: string;
+  type: "rule_result" | "ai_delta" | "completed" | "error";
+  chunk: string | null;
+  result: MarkdownBeautifyResult | null;
+  error: string | null;
+}
+
 export type MarkdownImportSource =
   | { kind: "file"; path: string }
   | { kind: "directory"; path: string };

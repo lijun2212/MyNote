@@ -36,6 +36,8 @@ pub fn run() {
             commands::note::get_note_tree,
             commands::note::import_note,
             commands::note::import_markdown_sources,
+            commands::note::beautify_markdown,
+            commands::note::beautify_markdown_stream,
             commands::note::insert_image_for_note,
             commands::note::insert_pasted_image_for_note,
             commands::note::insert_pasted_image_from_clipboard_for_note,

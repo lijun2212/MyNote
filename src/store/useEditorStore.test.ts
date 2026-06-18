@@ -77,4 +77,64 @@ describe("useEditorStore", () => {
     expect(useEditorStore.getState().showPreview).toBe(true);
     expect(useEditorStore.getState().getEditorMode()).toBe("split");
   });
+
+  it("stores beautify review mode separately from normal preview mode", () => {
+    useEditorStore.getState().setViewMode("editor");
+
+    useEditorStore.getState().setBeautifyReview({
+      originalContent: "# Old",
+      beautifiedContent: "# New",
+      diagnostics: [],
+      summary: { errorCount: 0, warningCount: 0, autoFixableCount: 0 },
+      diffMode: false,
+      appliedAi: false,
+      aiStatus: "not_requested",
+      aiStatusDetail: null,
+    });
+
+    expect(useEditorStore.getState().beautifyReview?.beautifiedContent).toBe("# New");
+    expect(useEditorStore.getState().viewMode).toBe("editor");
+    expect(useEditorStore.getState().showPreview).toBe(false);
+  });
+
+  it("toggles beautify diff mode without changing normal preview state", () => {
+    useEditorStore.getState().setViewMode("preview");
+    useEditorStore.getState().setBeautifyReview({
+      originalContent: "# Old",
+      beautifiedContent: "# New",
+      diagnostics: [],
+      summary: { errorCount: 0, warningCount: 0, autoFixableCount: 0 },
+      diffMode: false,
+      appliedAi: false,
+      aiStatus: "not_requested",
+      aiStatusDetail: null,
+    });
+
+    useEditorStore.getState().setBeautifyDiffMode(true);
+
+    expect(useEditorStore.getState().beautifyReview?.diffMode).toBe(true);
+    expect(useEditorStore.getState().viewMode).toBe("preview");
+    expect(useEditorStore.getState().showPreview).toBe(true);
+  });
+
+  it("applies beautified content, marks dirty, and clears beautify review", () => {
+    useEditorStore.setState({ content: "# Old", isDirty: false, saveStatus: "saved" });
+    useEditorStore.getState().setBeautifyReview({
+      originalContent: "# Old",
+      beautifiedContent: "# New",
+      diagnostics: [],
+      summary: { errorCount: 0, warningCount: 0, autoFixableCount: 0 },
+      diffMode: true,
+      appliedAi: false,
+      aiStatus: "not_requested",
+      aiStatusDetail: null,
+    });
+
+    useEditorStore.getState().applyBeautifyContent();
+
+    expect(useEditorStore.getState().content).toBe("# New");
+    expect(useEditorStore.getState().isDirty).toBe(true);
+    expect(useEditorStore.getState().saveStatus).toBe("unsaved");
+    expect(useEditorStore.getState().beautifyReview).toBeNull();
+  });
 });
