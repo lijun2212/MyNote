@@ -22,6 +22,8 @@ import typescript from "highlight.js/lib/languages/typescript";
 import xml from "highlight.js/lib/languages/xml";
 import yaml from "highlight.js/lib/languages/yaml";
 import MarkdownIt from "markdown-it";
+import * as markdownItEmoji from "markdown-it-emoji";
+import markdownItFootnote from "markdown-it-footnote";
 import texmath from "markdown-it-texmath";
 import { api } from "../../api/commands";
 import { useOpenNote } from "../../hooks/useOpenNote";
@@ -54,6 +56,8 @@ md.use(texmath, {
     strict: "ignore",
   },
 });
+md.use(markdownItEmoji.full);
+md.use(markdownItFootnote);
 
 function registerPreviewLanguage(name: string, definition: HighlightLanguage, aliases: string[] = []) {
   if (!hljs.getLanguage(name)) {
@@ -128,7 +132,7 @@ md.core.ruler.push("source_line_attrs", (state) => {
 
 const ALLOWED_MARKDOWN_TAGS = [
   "a", "abbr", "blockquote", "br", "code", "del", "details", "em", "hr", "h1", "h2", "h3", "h4", "h5", "h6", "img",
-  "kbd", "li", "mark", "ol", "p", "pre", "span", "strong", "sub", "summary", "sup", "table", "tbody", "td", "th", "thead", "tr", "ul",
+  "kbd", "li", "mark", "ol", "p", "pre", "section", "span", "strong", "sub", "summary", "sup", "table", "tbody", "td", "th", "thead", "tr", "ul",
   "math", "annotation", "mrow", "mi", "mn", "mo", "msup", "msub", "msubsup", "mfrac", "mspace", "mtext", "semantics",
 ];
 
@@ -152,7 +156,7 @@ const ALLOWED_RAW_HTML_ATTRS: Record<string, Set<string>> = {
 const ALLOWED_RAW_HTML_IMAGE_SRC = /^(?:(?:https?):|(?:data:image\/(?:gif|png|jpe?g|webp);base64,)|(?:notes\/)|(?:assets\/)|\/)/i;
 
 const ALLOWED_MARKDOWN_ATTR = [
-  "alt", "href", "src", "title", "class", "style", "aria-hidden", "xmlns", "display", "encoding",
+  "alt", "href", "src", "title", "class", "id", "style", "aria-hidden", "xmlns", "display", "encoding",
   "data-title", "data-source-line", "data-source-end-line", "open",
 ];
 const ALLOWED_MARKDOWN_URI = /^(?:(?:https?):|(?:data:image\/(?:gif|png|jpe?g|webp);base64,)|(?:notes\/)|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i;
@@ -600,6 +604,40 @@ function enhanceCodeBlocks(container: HTMLElement, projectionMode: boolean) {
     body.appendChild(gutter);
     body.appendChild(code);
     pre.appendChild(body);
+  });
+}
+
+function enhanceTaskLists(container: HTMLElement) {
+  const listItems = Array.from(container.querySelectorAll<HTMLLIElement>("li"));
+
+  listItems.forEach((item) => {
+    const contentRoot = item.firstElementChild?.tagName === "P"
+      ? item.firstElementChild
+      : item;
+    const firstChild = contentRoot.firstChild;
+
+    if (!(firstChild instanceof Text)) {
+      return;
+    }
+
+    const match = firstChild.textContent?.match(/^(\s*)\[( |x|X)\]\s+/);
+    if (!match) {
+      return;
+    }
+
+    const checked = match[2].toLowerCase() === "x";
+    firstChild.textContent = firstChild.textContent?.slice(match[0].length) ?? "";
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.disabled = true;
+    checkbox.checked = checked;
+    checkbox.className = "markdown-task-list-checkbox";
+    checkbox.setAttribute("aria-label", checked ? "已完成任务" : "未完成任务");
+
+    item.classList.add("markdown-task-list-item");
+    item.parentElement?.classList.add("markdown-task-list");
+    contentRoot.insertBefore(checkbox, firstChild);
   });
 }
 
@@ -1537,6 +1575,7 @@ export function MarkdownPreview({
       "markdown-preview-front-matter-navigation-target",
       isFrontMatterNavigationActive,
     );
+    enhanceTaskLists(containerRef.current);
     enhanceInlineTags(
       containerRef.current,
       collectInlineTagLineMatches(previewBody.content),
@@ -1974,6 +2013,19 @@ export function MarkdownPreview({
         .markdown-preview-content li {
           padding-left: 0.15em;
           margin-block: 0.35em;
+        }
+        .markdown-preview-content .markdown-task-list {
+          padding-left: 1.7em;
+        }
+        .markdown-preview-content .markdown-task-list-item {
+          list-style: none;
+          padding-left: 0;
+        }
+        .markdown-preview-content .markdown-task-list-checkbox {
+          width: 1em;
+          height: 1em;
+          margin: 0 0.55em 0 0;
+          vertical-align: text-top;
         }
         .markdown-preview-content table {
           width: 100%;

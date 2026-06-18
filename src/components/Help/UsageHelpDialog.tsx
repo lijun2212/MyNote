@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef } from "react";
 import DOMPurify from "dompurify";
 import MarkdownIt from "markdown-it";
+import * as markdownItEmoji from "markdown-it-emoji";
+import markdownItFootnote from "markdown-it-footnote";
 import usageHelpMarkdown from "../../../docs/usage-help.md?raw";
 
 interface UsageHelpDialogProps {
@@ -9,6 +11,8 @@ interface UsageHelpDialogProps {
 }
 
 const md = new MarkdownIt({ html: false, linkify: true, typographer: true });
+md.use(markdownItEmoji.full);
+md.use(markdownItFootnote);
 
 const ALLOWED_TAGS = [
   "a",
@@ -26,7 +30,9 @@ const ALLOWED_TAGS = [
   "ol",
   "p",
   "pre",
+  "section",
   "strong",
+  "sup",
   "table",
   "tbody",
   "td",
@@ -36,7 +42,7 @@ const ALLOWED_TAGS = [
   "ul",
 ];
 
-const ALLOWED_ATTR = ["href", "id"];
+const ALLOWED_ATTR = ["class", "href", "id"];
 
 const overlayStyle: React.CSSProperties = {
   position: "fixed",

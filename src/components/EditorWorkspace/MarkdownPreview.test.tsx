@@ -133,6 +133,33 @@ describe("MarkdownPreview", () => {
     expect(container.querySelector(".katex-display")).toBeNull();
   });
 
+  it("renders emoji shortcodes in markdown content", () => {
+    const { container } = render(<MarkdownPreview content="今天状态不错 :joy:" />);
+
+    expect(container.textContent).toContain("😂");
+    expect(container.textContent).not.toContain(":joy:");
+  });
+
+  it("renders markdown footnotes with references and footnote content", () => {
+    const { container } = render(
+      <MarkdownPreview
+        content={[
+          "这里有一个脚注引用。[^1]",
+          "",
+          "[^1]: 这是脚注内容。",
+        ].join("\n")}
+      />,
+    );
+
+    const footnoteRef = container.querySelector("sup.footnote-ref a");
+    expect(footnoteRef).toBeInTheDocument();
+    expect(footnoteRef).toHaveAttribute("href", "#fn1");
+
+    const footnoteSection = container.querySelector("section.footnotes");
+    expect(footnoteSection).toBeInTheDocument();
+    expect(footnoteSection).toHaveTextContent("这是脚注内容。");
+  });
+
   it("renders block LaTeX formulas in markdown content", () => {
     const { container } = render(
       <MarkdownPreview
@@ -255,6 +282,31 @@ describe("MarkdownPreview", () => {
     expect(container.querySelector("ul")).toHaveStyle({ paddingLeft: "2em" });
     expect(container.querySelector("ol")).toHaveStyle({ paddingLeft: "2em" });
     expect(container.querySelector("li")).toHaveStyle({ marginBlock: "0.35em" });
+  });
+
+  it("renders markdown task list items as disabled checkboxes in preview", () => {
+    const { container } = render(
+      <MarkdownPreview
+        content={[
+          "- [ ] Pending task",
+          "- [x] Finished task",
+          "- [X] Confirmed task",
+        ].join("\n")}
+      />,
+    );
+
+    const checkboxes = container.querySelectorAll("input[type='checkbox']");
+    expect(checkboxes).toHaveLength(3);
+    expect(checkboxes[0]).not.toBeChecked();
+    expect(checkboxes[1]).toBeChecked();
+    expect(checkboxes[2]).toBeChecked();
+    expect(checkboxes[0]).toBeDisabled();
+
+    const items = Array.from(container.querySelectorAll("li")).map((item) => item.textContent ?? "");
+    expect(items[0]).toContain("Pending task");
+    expect(items[1]).toContain("Finished task");
+    expect(items[2]).toContain("Confirmed task");
+    expect(items.some((text) => text.includes("[ ]") || text.includes("[x]") || text.includes("[X]"))).toBe(false);
   });
 
   it("uses larger Typora-like spacing between preview sections", () => {
