@@ -38,7 +38,7 @@ import type { SearchNavigationTarget, TagNavigationTarget } from "../../types";
 import type { PreviewLinkKind } from "../ContextMenu/contextMenuTypes";
 import type { BeautifyReviewState } from "../../store/useEditorStore";
 
-const md = new MarkdownIt({ html: false, linkify: true, typographer: true });
+const md = new MarkdownIt({ html: true, linkify: true, typographer: true });
 const SOURCE_LINE_TAGS = new Set(["blockquote", "h1", "h2", "h3", "h4", "h5", "h6", "li", "ol", "p", "table", "tr", "ul"]);
 type MermaidRuntime = Awaited<typeof import("mermaid")>["default"];
 type HighlightLanguage = Parameters<typeof hljs.registerLanguage>[1];
@@ -127,14 +127,33 @@ md.core.ruler.push("source_line_attrs", (state) => {
 });
 
 const ALLOWED_MARKDOWN_TAGS = [
-  "a", "blockquote", "br", "code", "del", "em", "hr", "h1", "h2", "h3", "h4", "h5", "h6", "img",
-  "li", "ol", "p", "pre", "span", "strong", "table", "tbody", "td", "th", "thead", "tr", "ul",
+  "a", "abbr", "blockquote", "br", "code", "del", "details", "em", "hr", "h1", "h2", "h3", "h4", "h5", "h6", "img",
+  "kbd", "li", "mark", "ol", "p", "pre", "span", "strong", "sub", "summary", "sup", "table", "tbody", "td", "th", "thead", "tr", "ul",
   "math", "annotation", "mrow", "mi", "mn", "mo", "msup", "msub", "msubsup", "mfrac", "mspace", "mtext", "semantics",
 ];
 
+const ALLOWED_RAW_HTML_TAGS = new Set([
+  "abbr", "br", "details", "hr", "img", "kbd", "mark", "p", "span", "sub", "summary", "sup",
+]);
+
+const VOID_RAW_HTML_TAGS = new Set(["br", "hr", "img"]);
+const RAW_HTML_PAIRED_TAG_PATTERN = /<([A-Za-z][A-Za-z0-9:-]*)(\s[^<>]*)?>([\s\S]*?)<\/\1\s*>/gi;
+const RAW_HTML_TAG_PATTERN = /<\/?([A-Za-z][A-Za-z0-9:-]*)(?:\s[^<>]*)?\/?>/gi;
+const RAW_HTML_ATTR_PATTERN = /([A-Za-z_:][\w:.-]*)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s"'=<>`]+))?/g;
+
+const ALLOWED_RAW_HTML_ATTRS: Record<string, Set<string>> = {
+  abbr: new Set(["title"]),
+  details: new Set(["open"]),
+  img: new Set(["alt", "src", "title"]),
+  p: new Set(["title"]),
+  span: new Set(["title"]),
+};
+
+const ALLOWED_RAW_HTML_IMAGE_SRC = /^(?:(?:https?):|(?:data:image\/(?:gif|png|jpe?g|webp);base64,)|(?:notes\/)|(?:assets\/)|\/)/i;
+
 const ALLOWED_MARKDOWN_ATTR = [
   "alt", "href", "src", "title", "class", "style", "aria-hidden", "xmlns", "display", "encoding",
-  "data-title", "data-source-line", "data-source-end-line",
+  "data-title", "data-source-line", "data-source-end-line", "open",
 ];
 const ALLOWED_MARKDOWN_URI = /^(?:(?:https?):|(?:data:image\/(?:gif|png|jpe?g|webp);base64,)|(?:notes\/)|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i;
 const MIN_TABLE_COLUMN_PERCENT = 8;
@@ -145,6 +164,114 @@ function sanitizePreviewHtml(html: string): string {
     ALLOWED_ATTR: ALLOWED_MARKDOWN_ATTR,
     ALLOWED_URI_REGEXP: ALLOWED_MARKDOWN_URI,
   });
+}
+
+function sanitizeRawHtmlAttributeValue(value: string | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const unquotedValue = value.replace(/^(["'])([\s\S]*)\1$/, "$2");
+  return escapeHtmlAttr(unquotedValue);
+}
+
+function sanitizeAllowedRawHtmlTag(rawTag: string, tagName: string): string {
+  const normalizedTagName = tagName.toLowerCase();
+  const isClosingTag = /^<\s*\//.test(rawTag);
+  if (isClosingTag) {
+    return VOID_RAW_HTML_TAGS.has(normalizedTagName) ? "" : `</${normalizedTagName}>`;
+  }
+
+  const allowedAttrs = ALLOWED_RAW_HTML_ATTRS[normalizedTagName] ?? new Set<string>();
+  const attrs = rawTag.match(/^<\s*[A-Za-z][A-Za-z0-9:-]*(.*?)\/?>\s*$/s)?.[1] ?? "";
+  const sanitizedAttrs: string[] = [];
+
+  for (const attrMatch of attrs.matchAll(RAW_HTML_ATTR_PATTERN)) {
+    const attrName = attrMatch[1]?.toLowerCase();
+    if (!attrName || !allowedAttrs.has(attrName)) {
+      continue;
+    }
+
+    if (attrName === "open" && normalizedTagName === "details") {
+      sanitizedAttrs.push("open");
+      continue;
+    }
+
+    const attrValue = sanitizeRawHtmlAttributeValue(attrMatch[2]);
+    if (attrValue !== null) {
+      if (normalizedTagName === "img" && attrName === "src" && !ALLOWED_RAW_HTML_IMAGE_SRC.test(attrValue)) {
+        continue;
+      }
+      sanitizedAttrs.push(`${attrName}="${attrValue}"`);
+    }
+  }
+
+  const suffix = VOID_RAW_HTML_TAGS.has(normalizedTagName) ? "" : rawTag.trimEnd().endsWith("/>") ? " /" : "";
+  const attrText = sanitizedAttrs.length > 0 ? ` ${sanitizedAttrs.join(" ")}` : "";
+  return `<${normalizedTagName}${attrText}${suffix}>`;
+}
+
+function sanitizeRawHtmlSegment(segment: string): string {
+  let sanitized = segment;
+  let previous = "";
+
+  while (sanitized !== previous) {
+    previous = sanitized;
+    sanitized = sanitized.replace(RAW_HTML_PAIRED_TAG_PATTERN, (_match, rawTagName: string, rawAttrs: string | undefined, inner: string) => {
+      const tagName = rawTagName.toLowerCase();
+      if (!ALLOWED_RAW_HTML_TAGS.has(tagName)) {
+        return "";
+      }
+
+      const openingTag = sanitizeAllowedRawHtmlTag(`<${tagName}${rawAttrs ?? ""}>`, tagName);
+      const closingTag = VOID_RAW_HTML_TAGS.has(tagName) ? "" : `</${tagName}>`;
+      return `${openingTag}${sanitizeRawHtmlSegment(inner)}${closingTag}`;
+    });
+  }
+
+  return sanitized.replace(RAW_HTML_TAG_PATTERN, (match, rawTagName: string) => {
+    const tagName = rawTagName.toLowerCase();
+    return ALLOWED_RAW_HTML_TAGS.has(tagName)
+      ? sanitizeAllowedRawHtmlTag(match, tagName)
+      : "";
+  });
+}
+
+function sanitizeRawHtmlInMarkdownSource(content: string): string {
+  const lines = content.split("\n");
+  const sanitizedLines: string[] = [];
+  let openFence: string | null = null;
+  let pendingSegment: string[] = [];
+
+  const flushPendingSegment = () => {
+    if (pendingSegment.length === 0) {
+      return;
+    }
+
+    sanitizedLines.push(...sanitizeRawHtmlSegment(pendingSegment.join("\n")).split("\n"));
+    pendingSegment = [];
+  };
+
+  for (const line of lines) {
+    const fenceMatch = line.match(/^\s*(`{3,}|~{3,})/);
+    const fenceMarker = fenceMatch?.[1]?.[0] ?? null;
+    if (fenceMarker && (!openFence || fenceMarker === openFence)) {
+      flushPendingSegment();
+      openFence = openFence ? null : fenceMarker;
+      sanitizedLines.push(line);
+      continue;
+    }
+
+    if (openFence) {
+      sanitizedLines.push(line);
+      continue;
+    }
+
+    pendingSegment.push(line);
+  }
+
+  flushPendingSegment();
+  return sanitizedLines.join("\n");
 }
 
 function sanitizeMermaidSvg(svg: string): string {
@@ -1403,7 +1530,7 @@ export function MarkdownPreview({
 
     const previewBody = extractPreviewBody(content);
     previewLineOffsetRef.current = previewBody.lineOffset;
-    const rawHtml = md.render(previewBody.content);
+    const rawHtml = md.render(sanitizeRawHtmlInMarkdownSource(previewBody.content));
     const processedHtml = processWikiLinks(rawHtml);
     containerRef.current.innerHTML = sanitizePreviewHtml(processedHtml);
     containerRef.current.classList.toggle(

@@ -920,6 +920,64 @@ describe("MarkdownPreview", () => {
     expect(screen.getByRole("heading", { name: "Still Part Of The Draft" })).toBeInTheDocument();
   });
 
+  it("renders the limited raw HTML tags allowed inside markdown content", () => {
+    const { container } = render(
+      <MarkdownPreview
+        content={[
+          "水是 H<sub>2</sub>O，能量是 mc<sup>2</sup>。",
+          "",
+          "按 <kbd>Cmd</kbd> + <kbd>K</kbd>，这是 <mark>重点</mark>。",
+          "",
+          "<p>HTML 段落<span title=\"note\">内联说明</span><br>下一行</p>",
+          "",
+          "<details open>",
+          "<summary>展开说明</summary>",
+          "更多内容",
+          "</details>",
+          "",
+          "<img src=\"notes/assets/demo.png\" alt=\"示例图\" title=\"Demo\">",
+        ].join("\n")}
+      />,
+    );
+
+    expect(container.querySelector("sub")).toHaveTextContent("2");
+    expect(container.querySelector("sup")).toHaveTextContent("2");
+    expect(container.querySelector("kbd")).toHaveTextContent("Cmd");
+    expect(container.querySelector("mark")).toHaveTextContent("重点");
+    expect(container.querySelector("p span[title='note']")).toHaveTextContent("内联说明");
+    expect(container.querySelector("p br")).toBeInTheDocument();
+    expect(container.querySelector("details[open] summary")).toHaveTextContent("展开说明");
+    expect(container.querySelector("img[alt='示例图']")).toHaveAttribute("src", "notes/assets/demo.png");
+  });
+
+  it("removes raw HTML tags outside the whitelist without disabling markdown-generated elements", () => {
+    const { container } = render(
+      <MarkdownPreview
+        content={[
+          "| A | B |",
+          "| --- | --- |",
+          "| 1 | 2 |",
+          "",
+          "<table><tr><td>Raw table</td></tr></table>",
+          "<iframe src=\"https://example.com\"></iframe>",
+          "<script>window.__previewXss = true</script>",
+          "<video src=\"demo.mp4\"></video>",
+          "<span style=\"color:red\" onclick=\"alert(1)\">Safe text</span>",
+        ].join("\n")}
+      />,
+    );
+
+    expect(container.querySelector("table")).toBeInTheDocument();
+    expect(container.querySelector("td")).toHaveTextContent("1");
+    expect(container).not.toHaveTextContent("Raw table");
+    expect(container.querySelector("iframe")).not.toBeInTheDocument();
+    expect(container.querySelector("script")).not.toBeInTheDocument();
+    expect(container.querySelector("video")).not.toBeInTheDocument();
+    expect(container.querySelector("span")).toHaveTextContent("Safe text");
+    expect(container.querySelector("span")).not.toHaveAttribute("style");
+    expect(container.querySelector("span")).not.toHaveAttribute("onclick");
+  });
+
   it("does not render dangerous HTML or non-http links as executable elements or links", () => {
     const { container } = render(
       <MarkdownPreview
@@ -936,7 +994,9 @@ describe("MarkdownPreview", () => {
     );
 
     expect(container.querySelector("script")).not.toBeInTheDocument();
-    expect(container.querySelector("img")).not.toBeInTheDocument();
+    expect(container.querySelector("img")).toBeInTheDocument();
+    expect(container.querySelector("img")).not.toHaveAttribute("src");
+    expect(container.querySelector("img")).not.toHaveAttribute("onerror");
     expect(container.querySelector('a[href^="javascript:"]')).not.toBeInTheDocument();
     expect(container.querySelector('a[href^="mailto:"]')).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Bad JavaScript" })).not.toBeInTheDocument();
