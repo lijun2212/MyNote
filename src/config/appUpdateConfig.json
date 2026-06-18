@@ -1,0 +1,6 @@
+{
+  "provider": "tauri-updater",
+  "releasePageUrl": "https://github.com/lijun2212/MyNote/releases",
+  "updaterManifestUrl": "https://github.com/lijun2212/MyNote/releases/latest/download/latest.json",
+  "updaterPubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJFRjlFMERGN0M0NzY4MEYKUldRUGFFZDgzK0Q1THJCSHR4YlVmSXlRMC9hU1FJdzhJVC8xc3lUalNWZEpKVkx3V3RzSGluK1AK"
+}

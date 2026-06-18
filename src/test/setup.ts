@@ -1,5 +1,7 @@
 const tauriMocks = vi.hoisted(() => ({
   invoke: vi.fn(),
+  getVersion: vi.fn(),
+  updaterCheck: vi.fn(),
   convertFileSrc: vi.fn((filePath: string) => `asset://${filePath}`),
   openDialog: vi.fn(),
   openUrl: vi.fn(),
@@ -25,6 +27,9 @@ import { useEditorStore } from "../store/useEditorStore";
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: tauriMocks.invoke,
   convertFileSrc: tauriMocks.convertFileSrc,
+}));
+vi.mock("@tauri-apps/api/app", () => ({
+  getVersion: tauriMocks.getVersion,
 }));
 vi.mock("@tauri-apps/api/event", () => ({
   listen: tauriMocks.listen,
@@ -79,9 +84,14 @@ vi.mock("@tauri-apps/api/webviewWindow", () => ({
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: tauriMocks.openDialog }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: tauriMocks.openUrl }));
+vi.mock("@tauri-apps/plugin-updater", () => ({ check: tauriMocks.updaterCheck }));
 
 export function resetTauriMocks() {
   tauriMocks.invoke.mockReset();
+  tauriMocks.getVersion.mockReset();
+  tauriMocks.getVersion.mockResolvedValue("0.1.0");
+  tauriMocks.updaterCheck.mockReset();
+  tauriMocks.updaterCheck.mockResolvedValue(null);
   tauriMocks.convertFileSrc.mockReset();
   tauriMocks.convertFileSrc.mockImplementation((filePath: string) => `asset://${filePath}`);
   tauriMocks.openDialog.mockReset();

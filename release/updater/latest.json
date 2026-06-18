@@ -1,0 +1,11 @@
+{
+  "version": "0.2.3",
+  "notes": "Release v0.2.3 (2026 年 6 月 19 日)",
+  "pub_date": "2026-06-18T23:54:13.418Z",
+  "platforms": {
+    "darwin-arm64": {
+      "url": "https://github.com/lijun2212/MyNote/releases/download/v0.2.3/MyNote.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRUGFFZDgzK0Q1THRTSVNqT29wMUVteDN0OGFNdnNRS3lKM2sxVTFaLzlOVEhDZlFnOG5JRlp4VnNSZE5ZaE1XU2x5U1FnK1ozT1ppZzFHejNuVkRXTFpoUkl6bVU1K1F3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgxODI2ODUzCWZpbGU6TXlOb3RlLmFwcC50YXIuZ3oKK0NxdHZpVEZzNGVCK09tZzVYUE5pQjVPdFRuVkg2bGE5UEs3UCsrSGQ2SGZxUDRxN2lZTnh2RjYrK2RJSFZYNjBGM1BjajB3WThheFZyczNQWDhkQ3c9PQo="
+    }
+  }
+}

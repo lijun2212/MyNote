@@ -47,6 +47,7 @@ export const MENU_ACTION_IDS = [
 	"note.delete",
 	"help.shortcuts",
 	"help.manual",
+	"help.checkForUpdates",
 	"help.about",
 	"notebook.createNote",
 	"notebook.rename",

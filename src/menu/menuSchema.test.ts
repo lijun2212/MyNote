@@ -256,6 +256,30 @@ describe("menuSchema", () => {
     ]);
   });
 
+  it("includes a manual update action in the Help menu", () => {
+    const schema = buildAppMenuSchema({
+      hasKnowledgeBase: true,
+      hasCurrentNote: true,
+      leftSidebarVisible: true,
+      rightSidebarVisible: false,
+      editorMode: "split",
+      hasDefaultAiProfile: false,
+      autoSummaryAgentEnabled: false,
+      projectionEnabled: false,
+      projectionFollowScroll: true,
+    });
+
+    const helpMenu = findMenuItem(schema, "help");
+    expect(helpMenu).toBeDefined();
+
+    const updateItem = findMenuItem(helpMenu?.children, "help.checkForUpdates");
+    expect(updateItem).toMatchObject({
+      id: "help.checkForUpdates",
+      label: "检查更新",
+      enabled: true,
+    });
+  });
+
   it("builds the Edit menu with merged note actions plus undo and redo", () => {
     const schema = buildAppMenuSchema({
       hasKnowledgeBase: true,
@@ -470,10 +494,12 @@ describe("menuSchema", () => {
     expect(helpMenu?.children?.map((item) => item.id)).toEqual([
       "help.shortcuts",
       "help.manual",
+      "help.checkForUpdates",
       "help.about",
     ]);
     expect(findMenuItem(helpMenu?.children, "help.shortcuts")?.enabled).toBe(true);
     expect(findMenuItem(helpMenu?.children, "help.manual")?.enabled).toBe(true);
+    expect(findMenuItem(helpMenu?.children, "help.checkForUpdates")?.enabled).toBe(true);
     expect(findMenuItem(helpMenu?.children, "help.about")?.enabled).toBe(true);
   });
 

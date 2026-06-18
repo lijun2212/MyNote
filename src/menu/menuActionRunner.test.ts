@@ -62,6 +62,7 @@ function createHandlers() {
     deleteRelation: vi.fn().mockResolvedValue(undefined),
     openShortcuts: vi.fn().mockResolvedValue(undefined),
     openManual: vi.fn().mockResolvedValue(undefined),
+    checkForUpdates: vi.fn().mockResolvedValue(undefined),
     openAbout: vi.fn().mockResolvedValue(undefined),
   };
 }
@@ -130,6 +131,14 @@ describe("menuActionRunner", () => {
 
     await expect(runner.run("help.manual")).resolves.toBe(true);
     expect(handlers.openManual).toHaveBeenCalledOnce();
+  });
+
+  it("routes help.checkForUpdates to the provided handler", async () => {
+    const handlers = createHandlers();
+    const runner = createMenuActionRunner(handlers);
+
+    await expect(runner.run("help.checkForUpdates")).resolves.toBe(true);
+    expect(handlers.checkForUpdates).toHaveBeenCalledOnce();
   });
 
   it("runs every declared action id", async () => {

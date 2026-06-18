@@ -1,0 +1,28 @@
+{
+  "manifestOutputPath": "/Users/lijun/mynote/release/updater/latest.json",
+  "releaseTag": "v0.2.3",
+  "repository": "lijun2212/MyNote",
+  "releasePageUrl": "https://github.com/lijun2212/MyNote/releases",
+  "latestManifestReleaseUrl": "https://github.com/lijun2212/MyNote/releases/latest/download/latest.json",
+  "manifestAssetName": "latest.json",
+  "manifestAssetDownloadUrl": "https://github.com/lijun2212/MyNote/releases/download/v0.2.3/latest.json",
+  "manifestPlatforms": [
+    {
+      "target": "darwin-arm64",
+      "url": "https://github.com/lijun2212/MyNote/releases/download/v0.2.3/MyNote.app.tar.gz",
+      "signaturePath": "/Users/lijun/mynote/src-tauri/target/release/bundle/macos/MyNote.app.tar.gz.sig"
+    }
+  ],
+  "releaseAssets": [
+    {
+      "localPath": "/Users/lijun/mynote/src-tauri/target/release/bundle/macos/MyNote.app.tar.gz",
+      "assetName": "MyNote.app.tar.gz",
+      "downloadUrl": "https://github.com/lijun2212/MyNote/releases/download/v0.2.3/MyNote.app.tar.gz"
+    },
+    {
+      "localPath": "/Users/lijun/mynote/src-tauri/target/release/bundle/dmg/MyNote_0.2.3_aarch64.dmg",
+      "assetName": "MyNote_0.2.3_aarch64.dmg",
+      "downloadUrl": "https://github.com/lijun2212/MyNote/releases/download/v0.2.3/MyNote_0.2.3_aarch64.dmg"
+    }
+  ]
+}

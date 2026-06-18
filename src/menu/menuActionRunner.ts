@@ -78,6 +78,7 @@ export interface MenuActionRunnerHandlers {
   deleteRelation?: (payload: RelationItemContextMenuPayload) => MaybePromise;
   openShortcuts?: () => MaybePromise;
   openManual?: () => MaybePromise;
+  checkForUpdates?: () => MaybePromise;
   openAbout?: () => MaybePromise;
 }
 
@@ -249,6 +250,7 @@ export function createMenuActionRunner(handlers: MenuActionRunnerHandlers) {
     "note.delete": (payload) => requireHandler(handlers, "note.delete", "deleteCurrentNote")(assertNotePayload(payload)),
     "help.shortcuts": () => requireHandler(handlers, "help.shortcuts", "openShortcuts")(),
     "help.manual": () => requireHandler(handlers, "help.manual", "openManual")(),
+    "help.checkForUpdates": () => requireHandler(handlers, "help.checkForUpdates", "checkForUpdates")(),
     "help.about": () => requireHandler(handlers, "help.about", "openAbout")(),
     "notebook.createNote": (payload) => requireHandler(handlers, "notebook.createNote", "createNoteInNotebook")(assertNotebookPayload(payload)),
     "notebook.rename": (payload) => requireHandler(handlers, "notebook.rename", "renameNotebook")(assertNotebookPayload(payload)),

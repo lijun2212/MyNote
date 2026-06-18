@@ -86,6 +86,7 @@ export function AppShell() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [usageHelpOpen, setUsageHelpOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [aboutAutoCheckRequest, setAboutAutoCheckRequest] = useState(0);
 
   useEffect(() => () => {
     if (copyNoticeTimerRef.current !== null) {
@@ -273,6 +274,10 @@ export function AppShell() {
     showLeftSidebar: () => setLeftSidebarVisible(true),
     openShortcuts: () => setShortcutsOpen(true),
     openManual: () => setUsageHelpOpen(true),
+    checkForUpdates: () => {
+      setAboutOpen(true);
+      setAboutAutoCheckRequest((current) => current + 1);
+    },
     openAbout: () => setAboutOpen(true),
   }), [
     clearKnowledgeBaseSession,
@@ -284,6 +289,7 @@ export function AppShell() {
     setEditorMode,
     setKb,
     setLeftSidebarVisible,
+    setAboutAutoCheckRequest,
     setAboutOpen,
     setShortcutsOpen,
     setUsageHelpOpen,
@@ -375,7 +381,7 @@ export function AppShell() {
         <AiSettingsDialog />
         <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
         <UsageHelpDialog open={usageHelpOpen} onClose={() => setUsageHelpOpen(false)} />
-        <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
+        <AboutDialog autoCheckRequest={aboutAutoCheckRequest} open={aboutOpen} onClose={() => setAboutOpen(false)} />
         <ContextMenuHost />
       </div>
     </ContextMenuProvider>

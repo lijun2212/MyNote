@@ -17,6 +17,7 @@
         { "url": "http://*" }
       ]
     },
-    "dialog:default"
+    "dialog:default",
+    "updater:default"
   ]
 }

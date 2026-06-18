@@ -70,6 +70,15 @@ vi.mock("../menu/useAppMenu", () => ({
   useAppMenu: (options: unknown) => capturedUseAppMenu(options),
 }));
 
+vi.mock("../config/appUpdateConfig.json", () => ({
+  default: {
+    provider: "release-page",
+    releasePageUrl: "https://gitlab.totalapp.cn:8991/lijun/mynote/-/releases",
+    updaterManifestUrl: "",
+    updaterPubkey: "",
+  },
+}));
+
 describe("AppShell", () => {
   beforeEach(() => {
     useAppStore.setState({
@@ -308,6 +317,21 @@ describe("AppShell", () => {
 
     await waitFor(() => {
       expect(screen.getByRole("dialog", { name: "关于 MyNote" })).toBeInTheDocument();
+    });
+  });
+
+  it("checks for updates from the Help menu action and opens the release page fallback", async () => {
+    render(<AppShell />);
+
+    const useAppMenuCall = capturedUseAppMenu.mock.calls[capturedUseAppMenu.mock.calls.length - 1]?.[0] as { run: (actionId: string) => boolean | Promise<boolean> };
+    await act(async () => {
+      await useAppMenuCall.run("help.checkForUpdates");
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "关于 MyNote" })).toBeInTheDocument();
+      expect(screen.getByText("已打开发布页，请下载最新安装包完成手动更新。")).toBeInTheDocument();
+      expect(tauriMocks.openUrl).toHaveBeenCalledWith("https://gitlab.totalapp.cn:8991/lijun/mynote/-/releases");
     });
   });
 

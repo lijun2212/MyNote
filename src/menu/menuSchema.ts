@@ -124,6 +124,7 @@ export function buildAppMenuSchema(options: AppMenuSchemaOptions): MenuSchemaIte
       children: [
         item("help.shortcuts", "快捷键", true),
         item("help.manual", "使用帮助", true),
+        item("help.checkForUpdates", "检查更新", true),
         item("help.about", "关于 MyNote", true),
       ],
     },

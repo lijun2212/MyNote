@@ -1,19 +1,26 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import appReleaseMetadata from "../../config/appReleaseMetadata.json";
+import { tauriMocks } from "../../test/setup";
+import { deferred } from "../../test/testData";
+import { checkForManualUpdate } from "../../updater/manualUpdate";
 import { AboutDialog } from "./AboutDialog";
 
 describe("AboutDialog", () => {
-  it("renders the approved about content", () => {
+  it("renders the approved about content with runtime app version", async () => {
+    tauriMocks.getVersion.mockResolvedValue("0.2.3");
+
     render(<AboutDialog open onClose={vi.fn()} />);
 
     expect(screen.getByRole("dialog", { name: "关于 MyNote" })).toBeInTheDocument();
     expect(screen.getByText("MyNote")).toBeInTheDocument();
-    expect(screen.getByText("版本 0.1.0")).toBeInTheDocument();
+    expect(await screen.findByText("版本 0.2.3")).toBeInTheDocument();
     expect(screen.getByText("本地优先的个人知识库与笔记应用")).toBeInTheDocument();
     expect(screen.getByText("帮助用户记录、整理并沉淀自己的知识与日常")).toBeInTheDocument();
     expect(screen.getByText("个人开发者 LJ")).toBeInTheDocument();
-    expect(screen.getByText("2026 年 6 月")).toBeInTheDocument();
+    expect(screen.getByText("发布时间")).toBeInTheDocument();
+    expect(screen.getByText(appReleaseMetadata.releaseDate)).toBeInTheDocument();
     expect(screen.getByText("Copyright © 2026 LJ. All rights reserved.")).toBeInTheDocument();
   });
 
@@ -40,5 +47,89 @@ describe("AboutDialog", () => {
     render(<AboutDialog open={false} onClose={vi.fn()} />);
 
     expect(screen.queryByRole("dialog", { name: "关于 MyNote" })).not.toBeInTheDocument();
+  });
+
+  it("checks for updates from the about dialog and reports when already up to date", async () => {
+    const user = userEvent.setup();
+    const pendingResult = deferred<{ status: "up-to-date"; currentVersion: string }>();
+    const onCheckForUpdates = vi.fn().mockReturnValue(pendingResult.promise);
+
+    tauriMocks.getVersion.mockResolvedValue("0.2.3");
+
+    render(<AboutDialog open onClose={vi.fn()} onCheckForUpdates={onCheckForUpdates} />);
+
+    await user.click(screen.getByRole("button", { name: "检查更新" }));
+
+    expect(onCheckForUpdates).toHaveBeenCalledOnce();
+    expect(screen.getByText("正在检查更新...")).toBeInTheDocument();
+
+    pendingResult.resolve({
+      status: "up-to-date",
+      currentVersion: "0.2.3",
+    });
+
+    expect(await screen.findByText("当前已是最新版本 0.2.3")).toBeInTheDocument();
+  });
+
+  it("shows the latest version when an update is available", async () => {
+    const user = userEvent.setup();
+    const onCheckForUpdates = vi.fn().mockResolvedValue({
+      status: "update-available",
+      currentVersion: "0.2.3",
+      version: "0.2.4",
+      date: "2026 年 6 月 20 日",
+      body: "修复稳定性问题",
+    });
+
+    tauriMocks.getVersion.mockResolvedValue("0.2.3");
+
+    render(<AboutDialog open onClose={vi.fn()} onCheckForUpdates={onCheckForUpdates} />);
+
+    await user.click(screen.getByRole("button", { name: "检查更新" }));
+
+    expect(await screen.findByText("发现新版本 0.2.4")).toBeInTheDocument();
+    expect(screen.getByText("发布时间：2026 年 6 月 20 日")).toBeInTheDocument();
+    expect(screen.getByText("修复稳定性问题")).toBeInTheDocument();
+  });
+
+  it("uses the updater plugin when provider is tauri-updater", async () => {
+    tauriMocks.updaterCheck.mockResolvedValue({
+      currentVersion: "0.2.3",
+      version: "0.2.4",
+      date: "2026-06-20T00:00:00.000Z",
+      body: "修复稳定性问题",
+      downloadAndInstall: vi.fn(),
+    });
+
+    const result = await checkForManualUpdate({
+      provider: "tauri-updater",
+      releasePageUrl: "https://example.com/releases",
+      updaterManifestUrl: "https://example.com/latest.json",
+      updaterPubkey: "mock-pubkey",
+    });
+
+    expect(tauriMocks.updaterCheck).toHaveBeenCalledOnce();
+    expect(tauriMocks.openUrl).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      status: "update-available",
+      currentVersion: "0.2.3",
+      version: "0.2.4",
+    });
+  });
+
+  it("keeps using the release page while provider remains release-page", async () => {
+    const result = await checkForManualUpdate({
+      provider: "release-page",
+      releasePageUrl: "https://example.com/releases",
+      updaterManifestUrl: "https://example.com/latest.json",
+      updaterPubkey: "configured-pubkey",
+    });
+
+    expect(tauriMocks.openUrl).toHaveBeenCalledWith("https://example.com/releases");
+    expect(tauriMocks.updaterCheck).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      status: "release-page",
+      releasePageUrl: "https://example.com/releases",
+    });
   });
 });

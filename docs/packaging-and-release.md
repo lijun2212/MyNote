@@ -4,6 +4,12 @@
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| 0.8 | 2026-06-19 | 发布链切换到 GitHub Releases：`release:build` 直接生成 GitHub 版 updater 发布计划，`release:publish` 直接创建或覆盖 GitHub Release 资产。 |
+| 0.7 | 2026-06-19 | 新增 `release:publish`，可读取 `publish-plan.json` 自动上传 GitLab package 并同步 Release asset links。 |
+| 0.6 | 2026-06-19 | `release:build` 现可在存在签名 updater bundle 时自动生成 `latest.json` 与 GitLab 发布计划；缺少签名产物时会明确跳过。 |
+| 0.5 | 2026-06-18 | `release:build` 现可在真实构建完成后自动生成 GitLab updater 发布计划文件。 |
+| 0.4 | 2026-06-18 | 固定 GitLab latest release 资产托管地址，补充 Tauri updater endpoint 与 latest.json 永久链接约定。 |
+| 0.3 | 2026-06-18 | 增加手动更新发布元数据准备：补充 updater key 生成、latest.json manifest 生成与发布页 fallback 说明。 |
 | 0.2 | 2026-06-14 | 细化通用准备章节，补充 Node.js、pnpm/Corepack、Rust、Cargo、Tauri CLI、各平台系统依赖的版本要求、安装方式与验收命令。 |
 | 0.1 | 2026-06-14 | 首版发布说明，补充 macOS、Windows、Linux 的打包命令、产物路径、清理方式与平台限制。 |
 
@@ -19,6 +25,8 @@
 8. [清理与重打包](#clean-build)
 9. [当前已验证结果](#validated-result)
 10. [已知限制](#known-limitations)
+11. [手动更新准备](#manual-update-prep)
+12. [GitHub 托管约定](#github-updater-hosting)
 
 ## 适用范围 {#scope}
 
@@ -47,6 +55,8 @@ MyNote 当前使用 Tauri 2、React、TypeScript 和 Rust。
 3. Tauri bundler 已启用，`bundle.targets` 当前配置为 `all`。
 4. 应用标识为 `com.lijun.mynote`。
 5. 当前产品名为 `MyNote`。
+6. 当前手动更新入口默认已切到 `tauri-updater`，配置见 [src/config/appUpdateConfig.json](src/config/appUpdateConfig.json)。
+7. 原生 updater 的目标 manifest 地址已经固定为 GitHub latest release 资产永久链接：`https://github.com/lijun2212/MyNote/releases/latest/download/latest.json`。
 
 ## 通用准备 {#general-prerequisites}
 
@@ -428,8 +438,58 @@ cd src-tauri && cargo test
 在 macOS 主机上，直接在仓库根目录执行：
 
 ```bash
-corepack pnpm tauri build
+corepack pnpm release:build v0.1.0
 ```
+
+如果当前提交已经打上精确的 Git Tag，也可以直接让脚本从当前 HEAD 自动读取发布版本：
+
+```bash
+git tag v0.1.0
+corepack pnpm release:build
+```
+
+`release:build` 会先执行 `prepare:release`，确认版本号和发布时间已经同步，然后再调用 `corepack pnpm tauri build`。
+
+当真实构建成功且当前平台已经产出带 `.sig` 的 updater bundle 后，`release:build` 还会额外在 `release/updater/` 下生成三份发布辅助文件：
+
+1. `latest.json`：当前平台对应的 Tauri updater 静态 manifest，直接读取 `.sig` 文件内容生成。
+2. `publish-plan.json`：结构化的 GitHub updater 发布计划，包含当前平台安装包、补充安装包资产、manifest 输出路径、GitHub 仓库和 release tag。
+3. `publish-plan.md`：可直接照着执行的文本化发布指引，包含 manifest 生成命令、`gh release upload` 命令模板，以及 `latest` 固定下载地址。
+
+如果你已经拿到了 `publish-plan.json`，后续优先执行：
+
+```bash
+corepack pnpm release:publish
+```
+
+这个命令会读取 `release/updater/publish-plan.json`，自动完成两类动作：
+
+1. 如果目标 tag 还没有 GitHub Release，则先在当前 `HEAD` 上创建对应 release。
+2. 把 updater bundle、补充安装包资产和 `latest.json` 上传到 GitHub Release，并在同名资产已存在时自动覆盖。
+
+如果只是想先看将执行什么动作，可以执行：
+
+```bash
+corepack pnpm release:publish --dry-run
+```
+
+`release:publish` 依赖本机已经安装并登录 `gh`。如果只想预演上传哪些资产，可直接执行 `--dry-run`，它不会修改远端 release。
+
+`prepare:release` 会完成两件事：
+
+1. 从显式传入的 Git Tag，或当前 HEAD 的精确 Git Tag 中解析版本号。
+2. 同步更新 [package.json](package.json)、[src-tauri/Cargo.toml](src-tauri/Cargo.toml)、[src-tauri/tauri.conf.json](src-tauri/tauri.conf.json) 和 [src/config/appReleaseMetadata.json](src/config/appReleaseMetadata.json) 中的版本与发布时间。
+
+如果只想预演而不落盘，可以执行：
+
+```bash
+corepack pnpm prepare:release v0.1.0 --dry-run
+corepack pnpm release:build v0.1.0 --dry-run
+```
+
+`release:build --dry-run` 当前只会预演版本同步和打包动作，不会生成 updater 文件，因为 dry-run 不会产出新的 bundle。
+
+如果真实打包成功，但当前环境没有生成带签名的 updater bundle，例如没有提供 `TAURI_SIGNING_PRIVATE_KEY`，`release:build` 会明确打印跳过原因，而不是在打包完成后再让整个命令失败。
 
 如果你希望先清掉旧前端产物和旧 bundle，再重新打包，可先执行：
 
@@ -557,3 +617,113 @@ corepack pnpm tauri build
 3. Linux 包在 Linux runner 上构建。
 
 如果后续要做正式三平台发布，建议把上述命令接入 CI，并在每个平台独立保存 release artifact。
+
+## 手动更新准备 {#manual-update-prep}
+
+当前仓库已经具备“手动更新入口”和“发布元数据生成脚本”，但默认仍使用发布页 fallback。
+
+如果你要继续推进到真正的 Tauri updater，需要至少准备三样东西：
+
+1. updater 私钥
+2. updater 公钥
+3. 可公开访问的 `latest.json` manifest 与对应安装包 URL
+
+### 第一步：生成 updater key {#manual-update-keygen}
+
+建议在仓库根目录执行：
+
+```bash
+corepack pnpm updater:keygen --dry-run
+corepack pnpm updater:keygen
+```
+
+默认会把私钥写到 `.local/updater/updater.key`。
+
+注意：
+
+1. 私钥不要提交到 git。
+2. Tauri CLI 会在终端输出公钥字符串，后续要把它填到真正的 updater 配置里。
+3. 如果你需要换位置，也可以直接传路径，例如：
+
+```bash
+corepack pnpm updater:keygen .local/updater/prod.key
+```
+
+### 第二步：生成 latest.json manifest {#manual-update-manifest}
+
+当你已经有安装包的下载 URL 和对应 `.sig` 文件后，可以生成静态 manifest：
+
+```bash
+corepack pnpm updater:manifest 0.2.3 \
+	--pub-date 2026-06-18T00:00:00.000Z \
+	--notes "修复稳定性问题" \
+	--platform darwin-aarch64=https://example.com/MyNote_0.2.3_aarch64.app.tar.gz::release/signatures/darwin-aarch64.sig \
+	--output release/updater/latest.json
+```
+
+脚本会读取 `.sig` 文件内容并写出如下结构的静态 manifest：
+
+```json
+{
+	"version": "0.2.3",
+	"notes": "修复稳定性问题",
+	"pub_date": "2026-06-18T00:00:00.000Z",
+	"platforms": {
+		"darwin-aarch64": {
+			"url": "https://example.com/MyNote_0.2.3_aarch64.app.tar.gz",
+			"signature": "...sig file content..."
+		}
+	}
+}
+```
+
+如果只想预演而不落盘：
+
+```bash
+corepack pnpm updater:manifest 0.2.3 \
+	--platform darwin-aarch64=https://example.com/MyNote_0.2.3_aarch64.app.tar.gz::release/signatures/darwin-aarch64.sig \
+	--dry-run
+```
+
+### 第三步：何时切换到真正的应用内 updater {#manual-update-provider-switch}
+
+当前 [src/config/appUpdateConfig.json](src/config/appUpdateConfig.json) 中已经预留：
+
+1. `provider`
+2. `releasePageUrl`
+3. `updaterManifestUrl`
+4. `updaterPubkey`
+
+但当前代码默认仍走 `release-page`。
+
+原因不是前端没接好，而是如果没有真实可访问的 manifest URL 和签名公钥，直接切到 `tauri-updater` 只会让“检查更新”变成一个必报错入口。
+
+建议顺序：
+
+1. 先生成 key。
+2. 再为每个发布版本生成 `latest.json`。
+3. 把 `latest.json` 和安装包放到稳定可公开访问的 URL。
+4. 最后再把 provider 从 `release-page` 切到真正的 `tauri-updater`。
+
+## GitHub 托管约定 {#github-updater-hosting}
+
+当前仓库的 updater 静态 JSON 与签名产物，统一按 GitHub Releases 资产方案托管。
+
+固定约定如下：
+
+1. `latest.json` 作为 GitHub Release asset 上传到每个版本 release。
+2. 对应永久最新发布地址为 `https://github.com/lijun2212/MyNote/releases/latest/download/latest.json`。
+3. [src/config/appUpdateConfig.json](src/config/appUpdateConfig.json) 中的 `updaterManifestUrl` 已经指向该地址。
+4. [src-tauri/tauri.conf.json](src-tauri/tauri.conf.json) 中的 updater endpoint 也已对齐该地址。
+
+发布时你需要确保对应版本 release 中至少存在三个核心资产：
+
+1. `MyNote.app.tar.gz`：Tauri updater 真正下载和校验签名的更新包。
+2. `latest.json`：Tauri updater 查询更新时访问的静态 manifest。
+3. 平台安装包，例如 macOS 下的 `MyNote_0.2.3_aarch64.dmg`。
+
+原生 updater 的公钥已经写入配置，默认 provider 也已经切到 `tauri-updater`：
+
+1. [src-tauri/tauri.conf.json](src-tauri/tauri.conf.json) 和 [src/config/appUpdateConfig.json](src/config/appUpdateConfig.json) 已经回填同一份真实 updater 公钥。
+2. 当前默认 provider 已切到 `tauri-updater`，因为 GitHub Release 上的 `latest.json` 和对应安装包资产已经完成首次托管。
+3. 只要后续版本继续沿用同一把 updater 私钥签名，并通过 `release:build` + `release:publish` 发版，这条更新链就能持续工作。
