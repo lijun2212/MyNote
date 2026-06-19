@@ -8,7 +8,7 @@
   "manifestAssetDownloadUrl": "https://github.com/lijun2212/MyNote/releases/download/v0.2.3/latest.json",
   "manifestPlatforms": [
     {
-      "target": "darwin-arm64",
+      "target": "darwin-aarch64",
       "url": "https://github.com/lijun2212/MyNote/releases/download/v0.2.3/MyNote.app.tar.gz",
       "signaturePath": "/Users/lijun/mynote/src-tauri/target/release/bundle/macos/MyNote.app.tar.gz.sig"
     }

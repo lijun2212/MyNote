@@ -1,3 +1,4 @@
+import { getVersion } from "@tauri-apps/api/app";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import appUpdateConfig from "../config/appUpdateConfig.json";
@@ -55,7 +56,7 @@ export async function checkForManualUpdate(overrides?: Partial<AppUpdateConfig>)
   if (!update) {
     return {
       status: "up-to-date",
-      currentVersion: "当前版本",
+      currentVersion: await getVersion(),
     };
   }
 

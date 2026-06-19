@@ -4,6 +4,7 @@
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| 0.9 | 2026-06-19 | 补充 GitHub + 内网 GitLab 双远端同步与发版顺序，明确源码同步与 Release 资产托管的边界。 |
 | 0.8 | 2026-06-19 | 发布链切换到 GitHub Releases：`release:build` 直接生成 GitHub 版 updater 发布计划，`release:publish` 直接创建或覆盖 GitHub Release 资产。 |
 | 0.7 | 2026-06-19 | 新增 `release:publish`，可读取 `publish-plan.json` 自动上传 GitLab package 并同步 Release asset links。 |
 | 0.6 | 2026-06-19 | `release:build` 现可在存在签名 updater bundle 时自动生成 `latest.json` 与 GitLab 发布计划；缺少签名产物时会明确跳过。 |
@@ -27,6 +28,7 @@
 10. [已知限制](#known-limitations)
 11. [手动更新准备](#manual-update-prep)
 12. [GitHub 托管约定](#github-updater-hosting)
+13. [双远端同步顺序](#dual-remote-release-flow)
 
 ## 适用范围 {#scope}
 
@@ -727,3 +729,93 @@ corepack pnpm updater:manifest 0.2.3 \
 1. [src-tauri/tauri.conf.json](src-tauri/tauri.conf.json) 和 [src/config/appUpdateConfig.json](src/config/appUpdateConfig.json) 已经回填同一份真实 updater 公钥。
 2. 当前默认 provider 已切到 `tauri-updater`，因为 GitHub Release 上的 `latest.json` 和对应安装包资产已经完成首次托管。
 3. 只要后续版本继续沿用同一把 updater 私钥签名，并通过 `release:build` + `release:publish` 发版，这条更新链就能持续工作。
+
+## 双远端同步顺序 {#dual-remote-release-flow}
+
+当前仓库同时存在两个远端：
+
+1. `github`：公开仓库，负责托管 GitHub Release 资产与 updater 的 `latest.json`。
+2. `origin`：内网 GitLab 仓库，当前主要作为源码镜像与内网代码同步目标。
+
+这两个远端承担的职责不同：
+
+1. GitHub 负责“源码 + Release 资产”。
+2. GitLab 当前只负责“源码同步”，不再承担 updater 资产托管。
+
+因此，后续每次正式发版建议固定按下面顺序执行。
+
+### 一次完整发版的推荐顺序 {#dual-remote-release-flow-steps}
+
+假设目标版本为 `v0.x.y`：
+
+```bash
+git status
+git push github main
+git push origin main
+corepack pnpm release:build v0.x.y
+corepack pnpm release:publish
+git push github v0.x.y
+git push origin v0.x.y
+```
+
+上面每一步的含义分别是：
+
+1. `git status`
+	确认工作区干净，避免把未提交改动混进发布构建。
+2. `git push github main`
+	先把最新源码推到 GitHub，保证公开仓库的源码与即将发布的 release 对齐。
+3. `git push origin main`
+	再把同一份源码同步到内网 GitLab，保证内网镜像不落后。
+4. `corepack pnpm release:build v0.x.y`
+	同步版本号和发布时间，并生成当前版本的安装包、签名和 `latest.json`。
+5. `corepack pnpm release:publish`
+	自动创建或更新 GitHub Release，并上传 `MyNote.app.tar.gz`、`latest.json`、`dmg` 等资产。
+6. `git push github v0.x.y`
+	把版本 tag 推到 GitHub，保证源码 tag 与 release tag 对齐。
+7. `git push origin v0.x.y`
+	把同一版本 tag 也同步到内网 GitLab，方便内网按 tag 检出源码。
+
+### 最小日常同步顺序 {#dual-remote-release-flow-daily}
+
+如果这次不是正式发版，只是普通开发提交同步，最小步骤就是：
+
+```bash
+git push github main
+git push origin main
+```
+
+### 什么时候只需要推源码，不需要发 Release {#dual-remote-release-flow-source-only}
+
+下面这些情况通常只需要同步源码，不需要执行 `release:build` / `release:publish`：
+
+1. 普通功能开发提交。
+2. 文档、测试、脚本调整，但还不准备生成安装包。
+3. 只是想让 GitHub 与 GitLab 代码保持一致。
+
+### 什么时候必须重新发 GitHub Release {#dual-remote-release-flow-release-required}
+
+下面这些情况不能只推源码，必须重新执行发版链路：
+
+1. 更新了 [src/config/appUpdateConfig.json](src/config/appUpdateConfig.json) 或 [src-tauri/tauri.conf.json](src-tauri/tauri.conf.json) 里的 updater 配置。
+2. 更新了应用版本号或发布时间。
+3. 变更了任何会进入安装包的前端、Rust、Tauri 代码。
+4. 重新生成了 updater 签名 key，或重新生成了签名 bundle / `latest.json`。
+
+### 一个重要边界 {#dual-remote-release-flow-boundary}
+
+即使你已经执行了：
+
+```bash
+git push origin main
+git push origin v0.x.y
+```
+
+也只代表 GitLab 上的“源码”和“tag”同步了。
+
+这并不等于：
+
+1. GitLab 拥有 GitHub Release 上的安装包资产。
+2. GitLab 可以替代 GitHub 提供 `latest.json`。
+3. Tauri updater 会从 GitLab 下载更新。
+
+当前 updater 固定依赖 GitHub Release 资产，所以真正影响用户更新能力的是 GitHub 上的 release 是否完整，而不是 GitLab 是否有同名 tag。

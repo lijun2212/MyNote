@@ -17,7 +17,7 @@ corepack pnpm release:publish
 gh release upload v0.2.3 /Users/lijun/mynote/src-tauri/target/release/bundle/macos/MyNote.app.tar.gz /Users/lijun/mynote/src-tauri/target/release/bundle/dmg/MyNote_0.2.3_aarch64.dmg /Users/lijun/mynote/release/updater/latest.json --repo lijun2212/MyNote --clobber
 
 ## Manifest Command
-corepack pnpm updater:manifest <version> --platform darwin-arm64=https://github.com/lijun2212/MyNote/releases/download/v0.2.3/MyNote.app.tar.gz::/Users/lijun/mynote/src-tauri/target/release/bundle/macos/MyNote.app.tar.gz.sig --output /Users/lijun/mynote/release/updater/latest.json
+corepack pnpm updater:manifest <version> --platform darwin-aarch64=https://github.com/lijun2212/MyNote/releases/download/v0.2.3/MyNote.app.tar.gz::/Users/lijun/mynote/src-tauri/target/release/bundle/macos/MyNote.app.tar.gz.sig --output /Users/lijun/mynote/release/updater/latest.json
 
 ## Latest Release URL
 - https://github.com/lijun2212/MyNote/releases/latest/download/latest.json

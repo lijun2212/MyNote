@@ -10,9 +10,25 @@ function resolveBundleRoot(repoRoot) {
   return path.join(repoRoot, "src-tauri", "target", "release", "bundle");
 }
 
+function normalizeUpdaterArch(arch) {
+  switch (arch) {
+    case "x64":
+      return "x86_64";
+    case "arm64":
+      return "aarch64";
+    case "x32":
+    case "ia32":
+      return "i686";
+    case "arm":
+      return "armv7";
+    default:
+      return arch;
+  }
+}
+
 function getCurrentTarget() {
   const platform = os.platform();
-  const arch = os.arch();
+  const arch = normalizeUpdaterArch(os.arch());
   return `${platform}-${arch}`;
 }
 

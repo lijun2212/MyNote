@@ -117,6 +117,25 @@ describe("AboutDialog", () => {
     });
   });
 
+  it("returns the runtime app version when already up to date", async () => {
+    tauriMocks.getVersion.mockResolvedValue("0.2.3");
+    tauriMocks.updaterCheck.mockResolvedValue(null);
+
+    const result = await checkForManualUpdate({
+      provider: "tauri-updater",
+      releasePageUrl: "https://example.com/releases",
+      updaterManifestUrl: "https://example.com/latest.json",
+      updaterPubkey: "mock-pubkey",
+    });
+
+    expect(tauriMocks.updaterCheck).toHaveBeenCalledOnce();
+    expect(tauriMocks.getVersion).toHaveBeenCalledOnce();
+    expect(result).toEqual({
+      status: "up-to-date",
+      currentVersion: "0.2.3",
+    });
+  });
+
   it("keeps using the release page while provider remains release-page", async () => {
     const result = await checkForManualUpdate({
       provider: "release-page",
