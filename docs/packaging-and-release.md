@@ -4,6 +4,7 @@
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| 1.0 | 2026-06-19 | 修正新版本发布实操顺序：补充本地创建 Git Tag、发布后校验步骤，以及 `pnpm` 可执行性要求，避免 `release:publish` 与 tag 推送阶段踩坑。 |
 | 0.9 | 2026-06-19 | 补充 GitHub + 内网 GitLab 双远端同步与发版顺序，明确源码同步与 Release 资产托管的边界。 |
 | 0.8 | 2026-06-19 | 发布链切换到 GitHub Releases：`release:build` 直接生成 GitHub 版 updater 发布计划，`release:publish` 直接创建或覆盖 GitHub Release 资产。 |
 | 0.7 | 2026-06-19 | 新增 `release:publish`，可读取 `publish-plan.json` 自动上传 GitLab package 并同步 Release asset links。 |
@@ -102,7 +103,7 @@ MyNote 当前使用 Tauri 2、React、TypeScript 和 Rust。
 1. [package.json](package.json) 中使用 `@tauri-apps/cli: ^2`，因此必须使用 Tauri 2 工具链。
 2. [src-tauri/Cargo.toml](src-tauri/Cargo.toml) 中使用 `tauri = { version = "2" }`，因此 Rust 侧也必须匹配 Tauri 2。
 3. [package.json](package.json) 中使用 `vite: ^7.0.4`、`typescript: ~5.8.3`、`vitest: ^4.1.7`，Node.js 过旧时常会在安装或构建阶段出问题。
-4. [src-tauri/tauri.conf.json](src-tauri/tauri.conf.json) 中 `beforeBuildCommand` 为 `pnpm build`，因此即使原生环境正常，只要前端依赖或 Node 环境不符合要求，桌面打包也会失败。
+4. [src-tauri/tauri.conf.json](src-tauri/tauri.conf.json) 中 `beforeBuildCommand` 为 `corepack pnpm build`，因此即使原生环境正常，只要前端依赖或 Node 环境不符合要求，桌面打包也会失败。
 
 ### 安装顺序 {#prerequisite-install-order}
 
@@ -184,6 +185,7 @@ corepack prepare pnpm@11.5.0 --activate
 
 ```bash
 node -v
+pnpm -v
 corepack --version
 corepack pnpm -v
 ```
@@ -191,8 +193,14 @@ corepack pnpm -v
 期望结果：
 
 1. `node -v` 输出 `v22.x.x`。
-2. `corepack pnpm -v` 输出 `11.x.x`。
-3. 三条命令都能在新开的终端里直接执行。
+2. `pnpm -v` 和 `corepack pnpm -v` 都输出 `11.x.x`。
+3. 四条命令都能在新开的终端里直接执行。
+
+额外说明：
+
+1. 当前发布链虽然入口统一写成 `corepack pnpm ...`，但 Tauri/依赖检查链路在某些场景下仍可能直接调用裸 `pnpm`。
+2. 因此正式发版前，不要只验证 `corepack pnpm -v`，还要确认 `pnpm -v` 本身也能直接执行。
+3. 如果 `corepack enable` 因系统目录权限失败，需要先把可执行的 `pnpm` shim 放进当前用户可写且已加入 `PATH` 的目录，再开始正式发版。
 
 ### Rust、Cargo 与 Rustup {#rust-cargo-rustup}
 
@@ -400,6 +408,7 @@ cd src-tauri && cargo fetch
 
 ```bash
 node -v
+pnpm -v
 corepack pnpm -v
 rustc -V
 cargo -V
@@ -476,6 +485,99 @@ corepack pnpm release:publish --dry-run
 ```
 
 `release:publish` 依赖本机已经安装并登录 `gh`。如果只想预演上传哪些资产，可直接执行 `--dry-run`，它不会修改远端 release。
+
+### 新版本完整发版示例 {#macos-release-walkthrough}
+
+下面给出一套可以直接照抄的新版本正式发版顺序。假设这次要发布 `v0.2.5`。
+
+#### 0. 发版前最后核对
+
+```bash
+git status
+pnpm -v
+corepack pnpm -v
+gh auth status
+```
+
+这一轮核对至少要确认四件事：
+
+1. 工作区没有无关改动。
+2. 裸 `pnpm` 命令可直接执行。
+3. `corepack pnpm` 也可正常执行。
+4. `gh` 已经登录到目标 GitHub 账号。
+
+#### 1. 先同步源码分支
+
+```bash
+git push github main
+git push origin main
+```
+
+先把将要发布的源码同步到 GitHub 和 GitLab，避免后面的安装包、源码主分支和内网镜像互相错位。
+
+#### 2. 构建新版本安装包与 updater 产物
+
+```bash
+corepack pnpm release:build v0.2.5
+```
+
+这一步会自动完成：
+
+1. 同步 [package.json](package.json)、[src-tauri/Cargo.toml](src-tauri/Cargo.toml)、[src-tauri/tauri.conf.json](src-tauri/tauri.conf.json) 和 [src/config/appReleaseMetadata.json](src/config/appReleaseMetadata.json) 的版本号与发布时间。
+2. 执行 Tauri 正式构建。
+3. 生成 [release/updater/latest.json](release/updater/latest.json)、[release/updater/publish-plan.json](release/updater/publish-plan.json) 和 [release/updater/publish-plan.md](release/updater/publish-plan.md)。
+
+#### 3. 在本地创建本次版本 tag
+
+```bash
+git rev-parse -q --verify refs/tags/v0.2.5 >/dev/null || git tag v0.2.5
+```
+
+这一行的目的不是马上推 tag，而是先确保本地确实存在 `v0.2.5`。否则后面直接执行 `git push github v0.2.5` 时会报错，因为 `release:build` 只会同步版本号，不会自动在本地创建 Git tag。
+
+#### 4. 发布 GitHub Release 资产
+
+```bash
+corepack pnpm release:publish
+```
+
+当前发布脚本会自动读取 [release/updater/publish-plan.json](release/updater/publish-plan.json)，并完成两件事：
+
+1. 如果 GitHub 上还没有 `v0.2.5` release，就自动创建。
+2. 把 `latest.json`、`MyNote.app.tar.gz` 和本平台安装包上传到该 release。
+
+这里有一个边界要明确：
+
+1. `release:publish` 只读取本地工作区里的 [release/updater/publish-plan.json](release/updater/publish-plan.json)。
+2. 它不会去 GitHub 或 GitLab 读取版本号，也不会根据远端 tag 反推当前应该发布哪个版本。
+3. 因此决定 `release:publish` 发哪个版本的关键，是前一步 `release:build` 在本地生成出来的 `publish-plan.json` 是否已经是目标版本。
+
+如果这一步中途失败，在修复问题后通常可以直接再次执行同一条命令；当前上传逻辑使用 `--clobber`，会覆盖同名资产。
+
+#### 5. 把版本 tag 推到两个远端
+
+```bash
+git push github v0.2.5
+git push origin v0.2.5
+```
+
+到这一步，GitHub 公开仓库、内网 GitLab 镜像和本地仓库，三边的版本 tag 才真正对齐。
+
+#### 6. 发布后校验
+
+```bash
+gh release view v0.2.5 --repo lijun2212/MyNote --json url,assets
+curl -fsSL https://github.com/lijun2212/MyNote/releases/latest/download/latest.json
+```
+
+至少确认下面四件事：
+
+1. GitHub release 页面已经存在 `v0.2.5`。
+2. release 资产里至少有 `latest.json`、`MyNote.app.tar.gz` 和当前平台安装包。
+3. `latest.json` 中的 `version` 已更新到 `0.2.5`。
+4. `latest.json` 中的下载 URL 指向 `v0.2.5` 对应资产，而不是旧版本。
+
+如果你还要验证应用内“检查更新”，建议最后再用上一版本安装包启动应用，手动在“关于”里点一次“检查更新”。
 
 `prepare:release` 会完成两件事：
 
@@ -753,9 +855,11 @@ git status
 git push github main
 git push origin main
 corepack pnpm release:build v0.x.y
+git rev-parse -q --verify refs/tags/v0.x.y >/dev/null || git tag v0.x.y
 corepack pnpm release:publish
 git push github v0.x.y
 git push origin v0.x.y
+git commit -m "Release v0.x.y"
 ```
 
 上面每一步的含义分别是：
@@ -768,12 +872,16 @@ git push origin v0.x.y
 	再把同一份源码同步到内网 GitLab，保证内网镜像不落后。
 4. `corepack pnpm release:build v0.x.y`
 	同步版本号和发布时间，并生成当前版本的安装包、签名和 `latest.json`。
-5. `corepack pnpm release:publish`
+5. `git rev-parse -q --verify refs/tags/v0.x.y >/dev/null || git tag v0.x.y`
+	在本地创建本次发布 tag；这是后续 `git push github v0.x.y` 和 `git push origin v0.x.y` 能成功的前提，这个命令输出可能正常为空，表示 tag 已存在。
+6. `corepack pnpm release:publish`
 	自动创建或更新 GitHub Release，并上传 `MyNote.app.tar.gz`、`latest.json`、`dmg` 等资产。
-6. `git push github v0.x.y`
+7. `git push github v0.x.y`
 	把版本 tag 推到 GitHub，保证源码 tag 与 release tag 对齐。
-7. `git push origin v0.x.y`
+8. `git push origin v0.x.y`
 	把同一版本 tag 也同步到内网 GitLab，方便内网按 tag 检出源码。
+9. `git commit -m "Release v0.x.y"`
+	如果你想要保持代码和发布的版本严格对齐，可以在发版后提交一次专门的 commit，明确说明这是针对 `v0.x.y` 的发布提交。
 
 ### 最小日常同步顺序 {#dual-remote-release-flow-daily}
 

@@ -9,8 +9,10 @@ import { withDefaultUpdaterSigningEnv } from "./lib/updaterSigningEnv.mjs";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..");
-const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
-const releaseMetadata = JSON.parse(fs.readFileSync(path.join(repoRoot, "src", "config", "appReleaseMetadata.json"), "utf8"));
+
+function readJson(relativePath) {
+  return JSON.parse(fs.readFileSync(path.join(repoRoot, relativePath), "utf8"));
+}
 
 const rawArgs = process.argv.slice(2);
 const dryRun = rawArgs.includes("--dry-run");
@@ -44,6 +46,9 @@ execFileSync(process.execPath, prepareArgs, {
   stdio: "inherit",
   env: buildEnv,
 });
+
+const packageJson = readJson("package.json");
+const releaseMetadata = readJson(path.join("src", "config", "appReleaseMetadata.json"));
 
 if (dryRun) {
   console.log("Step 2/3: skipped tauri build because --dry-run was provided");
