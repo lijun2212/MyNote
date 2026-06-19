@@ -20,9 +20,9 @@
       "downloadUrl": "https://github.com/lijun2212/MyNote/releases/download/v0.2.3/MyNote.app.tar.gz"
     },
     {
-      "localPath": "/Users/lijun/mynote/src-tauri/target/release/bundle/dmg/MyNote_0.2.3_aarch64.dmg",
-      "assetName": "MyNote_0.2.3_aarch64.dmg",
-      "downloadUrl": "https://github.com/lijun2212/MyNote/releases/download/v0.2.3/MyNote_0.2.3_aarch64.dmg"
+      "localPath": "/Users/lijun/mynote/src-tauri/target/release/bundle/dmg/MyNote_0.2.4_aarch64.dmg",
+      "assetName": "MyNote_0.2.4_aarch64.dmg",
+      "downloadUrl": "https://github.com/lijun2212/MyNote/releases/download/v0.2.3/MyNote_0.2.4_aarch64.dmg"
     }
   ]
 }
