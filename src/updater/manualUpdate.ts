@@ -1,4 +1,5 @@
 import { getVersion } from "@tauri-apps/api/app";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import appUpdateConfig from "../config/appUpdateConfig.json";
@@ -72,4 +73,5 @@ export async function checkForManualUpdate(overrides?: Partial<AppUpdateConfig>)
 
 export async function installManualUpdate(result: Extract<ManualUpdateCheckResult, { status: "update-available" }>) {
   await result.update.downloadAndInstall();
+  await relaunch();
 }

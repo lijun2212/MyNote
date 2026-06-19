@@ -92,6 +92,39 @@ describe("AboutDialog", () => {
     expect(screen.getByText("修复稳定性问题")).toBeInTheDocument();
   });
 
+  it("relaunches the app after installing an update", async () => {
+    const user = userEvent.setup();
+    const downloadAndInstall = vi.fn().mockResolvedValue(undefined);
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    tauriMocks.getVersion.mockResolvedValue("0.2.5");
+
+    render(
+      <AboutDialog
+        open
+        onClose={vi.fn()}
+        onCheckForUpdates={vi.fn().mockResolvedValue({
+          status: "update-available",
+          currentVersion: "0.2.5",
+          version: "0.2.6",
+          date: "2026 年 6 月 20 日",
+          body: "修复稳定性问题",
+          update: { downloadAndInstall },
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "检查更新" }));
+    await screen.findByText("发现新版本 0.2.6");
+    await user.click(screen.getByRole("button", { name: "立即更新" }));
+
+    expect(confirmSpy).toHaveBeenCalledOnce();
+    expect(downloadAndInstall).toHaveBeenCalledOnce();
+    expect(tauriMocks.relaunch).toHaveBeenCalledOnce();
+
+    confirmSpy.mockRestore();
+  });
+
   it("uses the updater plugin when provider is tauri-updater", async () => {
     tauriMocks.updaterCheck.mockResolvedValue({
       currentVersion: "0.2.3",
