@@ -1,6 +1,6 @@
 [package]
 name = "mynote"
-version = "0.2.5"
+version = "0.2.6"
 description = "MyNote - Personal Knowledge Base"
 authors = ["you"]
 edition = "2021"
