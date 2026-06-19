@@ -57,7 +57,11 @@ function ensureGitHubAuth() {
 
 function releaseExists(plan) {
   try {
-    runGh(["release", "view", plan.releaseTag, "--repo", plan.repository, "--json", "url"], { stdio: ["ignore", "pipe", "pipe"] });
+    execFileSync("gh", ["release", "view", plan.releaseTag, "--repo", plan.repository, "--json", "url"], {
+      cwd: repoRoot,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: process.env,
+    });
     return true;
   } catch {
     return false;
