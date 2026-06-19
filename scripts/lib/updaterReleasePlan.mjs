@@ -26,8 +26,25 @@ function normalizeUpdaterArch(arch) {
   }
 }
 
+function normalizeUpdaterPlatform(platform) {
+  if (platform === "win32") {
+    return "windows";
+  }
+
+  return platform;
+}
+
+function normalizeUpdaterTarget(target) {
+  const [platform, ...archParts] = target.split("-");
+  if (!platform || archParts.length === 0) {
+    return target;
+  }
+
+  return `${normalizeUpdaterPlatform(platform)}-${normalizeUpdaterArch(archParts.join("-"))}`;
+}
+
 function getCurrentTarget() {
-  const platform = os.platform();
+  const platform = normalizeUpdaterPlatform(os.platform());
   const arch = normalizeUpdaterArch(os.arch());
   return `${platform}-${arch}`;
 }
@@ -136,14 +153,15 @@ export function buildGitLabUpdaterPlan({
     fail("repoRoot, version, projectBaseUrl, and projectPath are required.");
   }
 
+  const normalizedTarget = normalizeUpdaterTarget(currentTarget);
   const bundleRoot = resolveBundleRoot(repoRoot);
-  const bundle = findFirstMatchingBundle(bundleRoot, currentTarget);
+  const bundle = findFirstMatchingBundle(bundleRoot, normalizedTarget);
   const normalizedProjectBaseUrl = trimTrailingSlash(projectBaseUrl);
   const encodedProjectPath = encodeURIComponent(projectPath);
   const packageBaseUrl = `${new URL(normalizedProjectBaseUrl).origin}/api/v4/projects/${encodedProjectPath}/packages/generic/${packageName}/${version}`;
   const releaseLinksApiUrl = `${new URL(normalizedProjectBaseUrl).origin}/api/v4/projects/${encodedProjectPath}/releases/${encodeURIComponent(releaseTag)}/assets/links`;
   const fileName = path.basename(bundle.localPath);
-  const releaseAssetFilepath = `/updater/${currentTarget}/${fileName}`;
+  const releaseAssetFilepath = `/updater/${normalizedTarget}/${fileName}`;
   const releaseDownloadUrl = `${normalizedProjectBaseUrl}/-/releases/${releaseTag}/downloads${releaseAssetFilepath}`;
   const latestManifestPackageUrl = `${packageBaseUrl}/latest.json`;
   const latestManifestReleaseFilepath = "/updater/latest.json";
@@ -158,18 +176,18 @@ export function buildGitLabUpdaterPlan({
     latestManifestReleaseUrl,
     manifestPlatforms: [
       {
-        target: currentTarget,
+        target: normalizedTarget,
         url: releaseDownloadUrl,
         signaturePath: bundle.signaturePath,
       },
     ],
     packageUploads: [
       {
-        target: currentTarget,
+        target: normalizedTarget,
         localPath: bundle.localPath,
         signaturePath: bundle.signaturePath,
-        packageUrl: `${packageBaseUrl}/${currentTarget}/${fileName}`,
-        releaseAssetName: `MyNote ${currentTarget} updater`,
+        packageUrl: `${packageBaseUrl}/${normalizedTarget}/${fileName}`,
+        releaseAssetName: `MyNote ${normalizedTarget} updater`,
         releaseAssetFilepath,
         releaseDownloadUrl,
       },
@@ -188,10 +206,11 @@ export function buildGitHubUpdaterPlan({
     fail("repoRoot, version, and repository are required.");
   }
 
+  const normalizedTarget = normalizeUpdaterTarget(currentTarget);
   const bundleRoot = resolveBundleRoot(repoRoot);
-  const bundle = findFirstMatchingBundle(bundleRoot, currentTarget);
+  const bundle = findFirstMatchingBundle(bundleRoot, normalizedTarget);
   const bundleFileName = path.basename(bundle.localPath);
-  const supplementalAssets = findSupplementalReleaseAssets(bundleRoot, currentTarget)
+  const supplementalAssets = findSupplementalReleaseAssets(bundleRoot, normalizedTarget)
     .filter((localPath) => localPath !== bundle.localPath)
     .map((localPath) => ({
       localPath,
@@ -209,7 +228,7 @@ export function buildGitHubUpdaterPlan({
     manifestAssetDownloadUrl: joinGitHubReleaseAssetUrl(repository, releaseTag, "latest.json"),
     manifestPlatforms: [
       {
-        target: currentTarget,
+        target: normalizedTarget,
         url: joinGitHubReleaseAssetUrl(repository, releaseTag, bundleFileName),
         signaturePath: bundle.signaturePath,
       },

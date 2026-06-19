@@ -92,7 +92,7 @@ describe("AboutDialog", () => {
     expect(screen.getByText("修复稳定性问题")).toBeInTheDocument();
   });
 
-  it("relaunches the app after installing an update", async () => {
+  it("prompts the user to restart manually after installing an update", async () => {
     const user = userEvent.setup();
     const downloadAndInstall = vi.fn().mockResolvedValue(undefined);
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
@@ -120,7 +120,7 @@ describe("AboutDialog", () => {
 
     expect(confirmSpy).toHaveBeenCalledOnce();
     expect(downloadAndInstall).toHaveBeenCalledOnce();
-    expect(tauriMocks.relaunch).toHaveBeenCalledOnce();
+    expect(await screen.findByText("版本 0.2.6 已安装，请手动重启应用完成更新。")).toBeInTheDocument();
 
     confirmSpy.mockRestore();
   });

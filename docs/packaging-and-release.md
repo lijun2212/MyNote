@@ -4,6 +4,7 @@
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| 1.1 | 2026-06-19 | 补充 Windows updater 发布说明：修正 Windows target 命名约定，明确 Windows 使用签名后的 `.exe` 或 `.msi` 作为 updater 资产，并补充安装阶段自动退出行为。 |
 | 1.0 | 2026-06-19 | 修正新版本发布实操顺序：补充本地创建 Git Tag、发布后校验步骤，以及 `pnpm` 可执行性要求，避免 `release:publish` 与 tag 推送阶段踩坑。 |
 | 0.9 | 2026-06-19 | 补充 GitHub + 内网 GitLab 双远端同步与发版顺序，明确源码同步与 Release 资产托管的边界。 |
 | 0.8 | 2026-06-19 | 发布链切换到 GitHub Releases：`release:build` 直接生成 GitHub 版 updater 发布计划，`release:publish` 直接创建或覆盖 GitHub Release 资产。 |
@@ -627,6 +628,19 @@ corepack pnpm tauri build
 
 预期会在 Tauri release bundle 目录中生成 Windows 安装产物，通常是 `.msi`，具体取决于宿主机已安装的打包链路。
 
+如果你的目标不是只做本地安装包，而是要让应用内“检查更新”也能真正工作，Windows 主机上的正式发版建议直接执行：
+
+```powershell
+corepack pnpm release:build v0.x.y
+corepack pnpm release:publish
+```
+
+对 Windows 而言，这里有两个容易混淆但必须分开的概念：
+
+1. `.exe` 或 `.msi` 安装器本身既是用户可手动下载的安装包，也是 Tauri updater 在 Windows 上会复用的更新资产。
+2. `release:build` 只有在检测到对应安装器旁边已经生成 `.sig` 文件时，才会把它写进 [release/updater/latest.json](release/updater/latest.json)。
+3. 当前发布脚本已经按 Tauri 静态 manifest 约定，把 Windows 平台键规范化为 `windows-x86_64`、`windows-aarch64` 等格式，而不是 Node.js 自己的 `win32-*` 命名。
+
 建议：
 
 1. 在原生 Windows 机器或 Windows CI runner 上执行。
@@ -638,6 +652,7 @@ corepack pnpm tauri build
 1. Windows 机器上最常见的问题不是 `pnpm build`，而是缺少 MSVC Build Tools，导致 Rust 原生编译或 Tauri bundling 失败。
 2. 如果 `cl.exe` 不存在，先修 Visual Studio Build Tools，不要继续排查业务代码。
 3. 如果要在 CI 中出 Windows 包，建议固定使用包含 Visual Studio 2022 Build Tools 的 runner 镜像。
+4. Windows 上一旦真正执行 updater 安装步骤，应用会先自动退出，再由安装器继续完成更新；这和 macOS、Linux 下“下载后等待重启”的体感不完全一样，发布验收时要按 Windows 的行为预期来检查。
 
 ## Linux 打包 {#linux-build}
 
@@ -724,7 +739,7 @@ corepack pnpm tauri build
 
 ## 手动更新准备 {#manual-update-prep}
 
-当前仓库已经具备“手动更新入口”和“发布元数据生成脚本”，但默认仍使用发布页 fallback。
+当前仓库已经具备“手动更新入口”和“发布元数据生成脚本”，并且默认 provider 已经切到 `tauri-updater`。
 
 如果你要继续推进到真正的 Tauri updater，需要至少准备三样东西：
 
@@ -798,16 +813,16 @@ corepack pnpm updater:manifest 0.2.3 \
 3. `updaterManifestUrl`
 4. `updaterPubkey`
 
-但当前代码默认仍走 `release-page`。
+当前仓库已经不是“预留未启用”状态，而是已经默认走 `tauri-updater`。这一节保留的意义，主要是帮助你判断什么时候这条链路仍然会失效。
 
-原因不是前端没接好，而是如果没有真实可访问的 manifest URL 和签名公钥，直接切到 `tauri-updater` 只会让“检查更新”变成一个必报错入口。
+原因不是前端没接好，而是如果 manifest URL、签名公钥或 release 资产不完整，即使 provider 已经是 `tauri-updater`，“检查更新”仍然会在运行时失败。
 
 建议顺序：
 
 1. 先生成 key。
 2. 再为每个发布版本生成 `latest.json`。
 3. 把 `latest.json` 和安装包放到稳定可公开访问的 URL。
-4. 最后再把 provider 从 `release-page` 切到真正的 `tauri-updater`。
+4. 最后确认 [src/config/appUpdateConfig.json](src/config/appUpdateConfig.json) 与 [src-tauri/tauri.conf.json](src-tauri/tauri.conf.json) 中的 manifest URL、公钥与本次发布资产保持一致。
 
 ## GitHub 托管约定 {#github-updater-hosting}
 
@@ -822,15 +837,16 @@ corepack pnpm updater:manifest 0.2.3 \
 
 发布时你需要确保对应版本 release 中至少存在三个核心资产：
 
-1. `MyNote.app.tar.gz`：Tauri updater 真正下载和校验签名的更新包。
-2. `latest.json`：Tauri updater 查询更新时访问的静态 manifest。
-3. 平台安装包，例如 macOS 下的 `MyNote_0.2.3_aarch64.dmg`。
+1. `latest.json`：Tauri updater 查询更新时访问的静态 manifest。
+2. 当前平台对应的 updater 资产：macOS 下通常是 `MyNote.app.tar.gz`，Windows 下通常是签名后的 `.exe` 或 `.msi`，Linux 下通常是 `.AppImage`。
+3. 当前平台面向手工下载安装的补充安装包，例如 macOS 下的 `.dmg`；Windows 上如果 updater 复用了 `.exe` 或 `.msi`，这个资产本身往往同时承担“手动安装包”和“updater 安装包”两种角色。
 
 原生 updater 的公钥已经写入配置，默认 provider 也已经切到 `tauri-updater`：
 
 1. [src-tauri/tauri.conf.json](src-tauri/tauri.conf.json) 和 [src/config/appUpdateConfig.json](src/config/appUpdateConfig.json) 已经回填同一份真实 updater 公钥。
 2. 当前默认 provider 已切到 `tauri-updater`，因为 GitHub Release 上的 `latest.json` 和对应安装包资产已经完成首次托管。
 3. 只要后续版本继续沿用同一把 updater 私钥签名，并通过 `release:build` + `release:publish` 发版，这条更新链就能持续工作。
+4. Windows 需要额外记住一点：`latest.json` 里的平台键必须是 `windows-*`，不能写成 `win32-*`，否则客户端即使拿到了 manifest 也不会命中对应平台资产。
 
 ## 双远端同步顺序 {#dual-remote-release-flow}
 

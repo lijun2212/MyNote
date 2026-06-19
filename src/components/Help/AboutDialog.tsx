@@ -297,7 +297,7 @@ export function AboutDialog({ open, onClose, onCheckForUpdates = checkForManualU
           )}
           {updateState.status === "installed" && (
             <div style={updateNoticeStyle}>
-              <p style={{ margin: 0 }}>版本 {updateState.version} 已安装，应用即将完成更新。</p>
+              <p style={{ margin: 0 }}>版本 {updateState.version} 已安装，请手动重启应用完成更新。</p>
             </div>
           )}
           {updateState.status === "error" && (

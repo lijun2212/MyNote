@@ -106,6 +106,50 @@ describe("buildGitLabUpdaterPlan", () => {
       },
     });
   });
+
+  it("normalizes the Windows updater target for GitLab package and manifest generation", () => {
+    const tempDir = makeTempDir();
+    const bundleRoot = path.join(tempDir, "src-tauri", "target", "release", "bundle");
+    const nsisDir = path.join(bundleRoot, "nsis");
+    const msiDir = path.join(bundleRoot, "msi");
+    fs.mkdirSync(nsisDir, { recursive: true });
+    fs.mkdirSync(msiDir, { recursive: true });
+
+    const exeFile = path.join(nsisDir, "MyNote_0.2.3_x64-setup.exe");
+    const exeSignatureFile = path.join(nsisDir, "MyNote_0.2.3_x64-setup.exe.sig");
+    const msiFile = path.join(msiDir, "MyNote_0.2.3_x64_en-US.msi");
+    fs.writeFileSync(exeFile, "bundle");
+    fs.writeFileSync(exeSignatureFile, "signature");
+    fs.writeFileSync(msiFile, "msi");
+
+    const plan = buildGitLabUpdaterPlan({
+      repoRoot: tempDir,
+      version: "0.2.3",
+      releaseTag: "v0.2.3",
+      projectBaseUrl: "https://gitlab.totalapp.cn:8991/lijun/mynote",
+      projectPath: "lijun/mynote",
+      currentTarget: "win32-x64",
+    });
+
+    expect(plan.manifestPlatforms).toEqual([
+      {
+        target: "windows-x86_64",
+        url: "https://gitlab.totalapp.cn:8991/lijun/mynote/-/releases/v0.2.3/downloads/updater/windows-x86_64/MyNote_0.2.3_x64-setup.exe",
+        signaturePath: exeSignatureFile,
+      },
+    ]);
+    expect(plan.packageUploads).toEqual([
+      {
+        localPath: exeFile,
+        packageUrl: "https://gitlab.totalapp.cn:8991/api/v4/projects/lijun%2Fmynote/packages/generic/mynote-updater/0.2.3/windows-x86_64/MyNote_0.2.3_x64-setup.exe",
+        releaseAssetName: "MyNote windows-x86_64 updater",
+        releaseAssetFilepath: "/updater/windows-x86_64/MyNote_0.2.3_x64-setup.exe",
+        releaseDownloadUrl: "https://gitlab.totalapp.cn:8991/lijun/mynote/-/releases/v0.2.3/downloads/updater/windows-x86_64/MyNote_0.2.3_x64-setup.exe",
+        signaturePath: exeSignatureFile,
+        target: "windows-x86_64",
+      },
+    ]);
+  });
 });
 
 describe("buildGitHubUpdaterPlan", () => {
@@ -137,7 +181,7 @@ describe("buildGitHubUpdaterPlan", () => {
     expect(plan.manifestAssetDownloadUrl).toBe("https://github.com/lijun2212/MyNote/releases/download/v0.2.3/latest.json");
     expect(plan.manifestPlatforms).toEqual([
       {
-        target: "darwin-arm64",
+        target: "darwin-aarch64",
         url: "https://github.com/lijun2212/MyNote/releases/download/v0.2.3/MyNote.app.tar.gz",
         signaturePath: signatureFile,
       },
@@ -152,6 +196,51 @@ describe("buildGitHubUpdaterPlan", () => {
         localPath: dmgFile,
         assetName: "MyNote_0.2.3_aarch64.dmg",
         downloadUrl: "https://github.com/lijun2212/MyNote/releases/download/v0.2.3/MyNote_0.2.3_aarch64.dmg",
+      },
+    ]);
+  });
+
+  it("normalizes the Windows updater target for static manifest generation", () => {
+    const tempDir = makeTempDir();
+    const bundleRoot = path.join(tempDir, "src-tauri", "target", "release", "bundle");
+    const nsisDir = path.join(bundleRoot, "nsis");
+    const msiDir = path.join(bundleRoot, "msi");
+    fs.mkdirSync(nsisDir, { recursive: true });
+    fs.mkdirSync(msiDir, { recursive: true });
+
+    const exeFile = path.join(nsisDir, "MyNote_0.2.3_x64-setup.exe");
+    const exeSignatureFile = path.join(nsisDir, "MyNote_0.2.3_x64-setup.exe.sig");
+    const msiFile = path.join(msiDir, "MyNote_0.2.3_x64_en-US.msi");
+
+    fs.writeFileSync(exeFile, "bundle");
+    fs.writeFileSync(exeSignatureFile, "signature");
+    fs.writeFileSync(msiFile, "msi");
+
+    const plan = buildGitHubUpdaterPlan({
+      repoRoot: tempDir,
+      version: "0.2.3",
+      releaseTag: "v0.2.3",
+      repository: "lijun2212/MyNote",
+      currentTarget: "win32-x64",
+    });
+
+    expect(plan.manifestPlatforms).toEqual([
+      {
+        target: "windows-x86_64",
+        url: "https://github.com/lijun2212/MyNote/releases/download/v0.2.3/MyNote_0.2.3_x64-setup.exe",
+        signaturePath: exeSignatureFile,
+      },
+    ]);
+    expect(plan.releaseAssets).toEqual([
+      {
+        localPath: exeFile,
+        assetName: "MyNote_0.2.3_x64-setup.exe",
+        downloadUrl: "https://github.com/lijun2212/MyNote/releases/download/v0.2.3/MyNote_0.2.3_x64-setup.exe",
+      },
+      {
+        localPath: msiFile,
+        assetName: "MyNote_0.2.3_x64_en-US.msi",
+        downloadUrl: "https://github.com/lijun2212/MyNote/releases/download/v0.2.3/MyNote_0.2.3_x64_en-US.msi",
       },
     ]);
   });
