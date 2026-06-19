@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { NoteTreeNode } from "../../types";
 import { getDropDirectoryPath } from "./fileTreeDrag";
 
 const ACTION_HIGHLIGHT_BACKGROUND = "#eff6ff";
 const ACTION_HIGHLIGHT_BORDER = "#93c5fd";
 const ACTION_HIGHLIGHT_TEXT = "#0969da";
+const LARGE_DIRECTORY_ANIMATION_THRESHOLD = 40;
 
 const NOTEBOOK_COLOR_STYLES: Record<string, { background: string; color: string }> = {
   blue: { background: "#dbeafe", color: "#1d4ed8" },
@@ -67,6 +68,7 @@ interface Props {
   node: NoteTreeNode;
   depth?: number;
   getDefaultExpanded?: (node: NoteTreeNode, depth: number) => boolean;
+  onDirectoryExpandedChange?: (path: string, expanded: boolean) => void;
   inheritedDirectoryColor?: string;
   onSelectFile: (node: NoteTreeNode) => void;
   selectedPath: string | null;
@@ -111,6 +113,7 @@ export function FileTreeNode({
   node,
   depth = 0,
   getDefaultExpanded,
+  onDirectoryExpandedChange,
   inheritedDirectoryColor = "gray",
   onSelectFile,
   selectedPath,
@@ -168,6 +171,7 @@ export function FileTreeNode({
   const directoryColor = getDirectoryColor(node, inheritedDirectoryColor);
   const directoryPalette = NOTEBOOK_COLOR_STYLES[directoryColor] ?? NOTEBOOK_COLOR_STYLES.gray;
   const noteCount = countNotes(node);
+  const shouldDisableHeightAnimation = node.is_dir && noteCount > LARGE_DIRECTORY_ANIMATION_THRESHOLD;
   const isExpandedState = expanded && dragOverPath !== node.path;
   const directoryBackground = dragOverPath === node.path
     ? "#dbeafe"
@@ -224,7 +228,11 @@ export function FileTreeNode({
   };
 
   const toggleExpanded = () => {
-    setExpanded((currentExpanded) => !currentExpanded);
+    setExpanded((currentExpanded) => {
+      const nextExpanded = !currentExpanded;
+      onDirectoryExpandedChange?.(node.path, nextExpanded);
+      return nextExpanded;
+    });
   };
 
   const submitNotebookRename = () => {
@@ -247,21 +255,71 @@ export function FileTreeNode({
       return;
     }
 
+    if (shouldDisableHeightAnimation) {
+      setShouldRenderChildren(false);
+      return;
+    }
+
     const timeoutId = window.setTimeout(() => {
       setShouldRenderChildren(false);
     }, 160);
 
     return () => window.clearTimeout(timeoutId);
-  }, [expanded]);
+  }, [expanded, shouldDisableHeightAnimation]);
 
-  useEffect(() => {
-    if (!shouldRenderChildren || !contentRef.current) {
+  useLayoutEffect(() => {
+    if (shouldDisableHeightAnimation || !shouldRenderChildren || !contentRef.current) {
       setContentHeight(0);
       return;
     }
 
-    setContentHeight(contentRef.current.scrollHeight);
-  }, [shouldRenderChildren, expanded, node.children]);
+    const contentElement = contentRef.current;
+    let firstFrameId = 0;
+    let secondFrameId = 0;
+
+    const measure = () => {
+      setContentHeight(contentElement.scrollHeight);
+    };
+
+    const scheduleMeasure = () => {
+      window.cancelAnimationFrame(firstFrameId);
+      window.cancelAnimationFrame(secondFrameId);
+      measure();
+      firstFrameId = window.requestAnimationFrame(() => {
+        measure();
+        secondFrameId = window.requestAnimationFrame(measure);
+      });
+    };
+
+    scheduleMeasure();
+
+    const mutationObserver = new MutationObserver(() => {
+      scheduleMeasure();
+    });
+
+    const resizeObserver = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(() => {
+        scheduleMeasure();
+      });
+
+    mutationObserver.observe(contentElement, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ["style", "aria-expanded"],
+    });
+
+    resizeObserver?.observe(contentElement);
+
+    return () => {
+      mutationObserver.disconnect();
+      resizeObserver?.disconnect();
+      window.cancelAnimationFrame(firstFrameId);
+      window.cancelAnimationFrame(secondFrameId);
+    };
+  }, [shouldDisableHeightAnimation, shouldRenderChildren, expanded, node.children]);
 
   useEffect(() => {
     if (!isRenamingNotebook || !renameInputRef.current) {
@@ -756,10 +814,16 @@ export function FileTreeNode({
           data-testid={`directory-content:${node.path}`}
           style={{
             overflow: "hidden",
-            maxHeight: expanded ? `${contentHeight}px` : "0px",
+            maxHeight: shouldDisableHeightAnimation
+              ? (expanded ? "none" : "0px")
+              : (expanded ? `${contentHeight}px` : "0px"),
             opacity: expanded ? 1 : 0,
-            transform: expanded ? "translateY(0px)" : "translateY(-6px)",
-            transition: "max-height 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease, transform 240ms cubic-bezier(0.22, 1, 0.36, 1)",
+            transform: shouldDisableHeightAnimation
+              ? "none"
+              : (expanded ? "translateY(0px)" : "translateY(-6px)"),
+            transition: shouldDisableHeightAnimation
+              ? "none"
+              : "max-height 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease, transform 240ms cubic-bezier(0.22, 1, 0.36, 1)",
           }}
         >
           {shouldRenderChildren && (
@@ -770,6 +834,7 @@ export function FileTreeNode({
                   node={child}
                   depth={depth + 1}
                   getDefaultExpanded={getDefaultExpanded}
+                  onDirectoryExpandedChange={onDirectoryExpandedChange}
                   inheritedDirectoryColor={directoryColor}
                   onSelectFile={onSelectFile}
                   selectedPath={selectedPath}

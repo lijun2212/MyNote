@@ -10,7 +10,7 @@ export function LeftSidebar() {
   const setSelectedTagIds = useAppStore((s) => s.setSelectedTagIds);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
       {/* Tab bar */}
       <div style={{
         display: "flex",
@@ -41,7 +41,7 @@ export function LeftSidebar() {
           </button>
         ))}
       </div>
-      <div style={{ flex: 1, overflow: "auto" }}>
+      <div style={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         {activeTab === "files" ? <FileTreePanel /> : <TagPanel />}
       </div>
     </div>

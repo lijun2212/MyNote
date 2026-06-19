@@ -1372,6 +1372,25 @@ describe("MarkdownEditor", () => {
     expect(tauriMocks.openUrl).toHaveBeenCalledWith("mailto:support@example.com");
   });
 
+  it("shows a lightweight visual hint for ..: Chinese indentation markers in the editor", async () => {
+    const { container } = render(
+      <MarkdownEditor
+        initialContent={"..: 这是一个需要中文首行缩进提示的段落。\n普通段落。"}
+        onChange={vi.fn()}
+      />,
+    );
+
+    const marker = await waitFor(() => {
+      const element = container.querySelector(".cm-cn-indent-marker") as HTMLElement | null;
+      expect(element).not.toBeNull();
+      return element as HTMLElement;
+    });
+
+    expect(marker).toHaveTextContent("..:");
+    expect(marker).toHaveStyle({ color: "#0f766e" });
+    expect(container.querySelector(".cm-cn-indent-line")).toBeInTheDocument();
+  });
+
   it("writes selected text into clipboardData on copy events", () => {
     const { container } = render(
       <ContextMenuProvider>

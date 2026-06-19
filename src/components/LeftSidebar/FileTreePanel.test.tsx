@@ -214,6 +214,352 @@ describe("FileTreePanel", () => {
     expect(screen.getByText("案例.md")).toBeInTheDocument();
   });
 
+  it("expanding a nested directory updates the parent notebook container height", async () => {
+    const user = userEvent.setup();
+    const originalScrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
+
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get() {
+        const wrapperTestId = this.parentElement?.getAttribute("data-testid");
+
+        if (wrapperTestId === "directory-content:notes/民呼我为项目/归档") {
+          return 24;
+        }
+
+        if (wrapperTestId === "directory-content:notes/民呼我为项目") {
+          const nestedContent = this.querySelector<HTMLElement>("[data-testid='directory-content:notes/民呼我为项目/归档']");
+          return nestedContent?.style.maxHeight === "24px" ? 48 : 24;
+        }
+
+        return 0;
+      },
+    });
+
+    try {
+      const tree: NoteTreeNode[] = [
+        {
+          id: null,
+          name: "notes",
+          path: "notes",
+          is_dir: true,
+          children: [
+            {
+              id: null,
+              name: "民呼我为项目",
+              path: "notes/民呼我为项目",
+              is_dir: true,
+              children: [
+                {
+                  id: null,
+                  name: "归档",
+                  path: "notes/民呼我为项目/归档",
+                  is_dir: true,
+                  children: [
+                    {
+                      id: "note-archive-1",
+                      name: "文章1.md",
+                      path: "notes/民呼我为项目/归档/文章1.md",
+                      is_dir: false,
+                      children: [],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ];
+
+      apiMocks.getNoteTree.mockResolvedValue(tree);
+      useAppStore.setState({
+        kb: makeKnowledgeBase(),
+        tree,
+        selectedNodePath: null,
+        selectedTagIds: [],
+        refreshTree: vi.fn().mockResolvedValue(undefined),
+      });
+
+      render(<FileTreePanel />);
+
+      const parentContent = screen.getByTestId("directory-content:notes/民呼我为项目");
+      expect(parentContent).toHaveStyle({ maxHeight: "24px" });
+
+      await user.click(screen.getByRole("button", { name: "归档" }));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("directory-content:notes/民呼我为项目/归档")).toHaveStyle({ maxHeight: "24px" });
+      });
+
+      await waitFor(() => {
+        expect(parentContent).toHaveStyle({ maxHeight: "48px" });
+      });
+    } finally {
+      if (originalScrollHeight) {
+        Object.defineProperty(HTMLElement.prototype, "scrollHeight", originalScrollHeight);
+      } else {
+        delete (HTMLElement.prototype as { scrollHeight?: number }).scrollHeight;
+      }
+    }
+  });
+
+  it("updates notebook container height when content size changes without a DOM mutation", async () => {
+    const originalScrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const resizeObserverCallbacks: Array<() => void> = [];
+    const rafCallbacks = new Map<number, FrameRequestCallback>();
+    let nextRafId = 1;
+    let parentHeight = 24;
+
+    class MockResizeObserver {
+      private readonly callback: ResizeObserverCallback;
+
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback;
+        resizeObserverCallbacks.push(() => this.callback([], this as unknown as ResizeObserver));
+      }
+
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+
+    Object.defineProperty(globalThis, "ResizeObserver", {
+      configurable: true,
+      writable: true,
+      value: MockResizeObserver,
+    });
+
+    window.requestAnimationFrame = (callback: FrameRequestCallback) => {
+      const rafId = nextRafId;
+      nextRafId += 1;
+      rafCallbacks.set(rafId, callback);
+      return rafId;
+    };
+
+    window.cancelAnimationFrame = (rafId: number) => {
+      rafCallbacks.delete(rafId);
+    };
+
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get() {
+        const wrapperTestId = this.parentElement?.getAttribute("data-testid");
+
+        if (wrapperTestId === "directory-content:notes/民呼我为项目") {
+          return parentHeight;
+        }
+
+        return 0;
+      },
+    });
+
+    try {
+      const tree: NoteTreeNode[] = [
+        {
+          id: null,
+          name: "notes",
+          path: "notes",
+          is_dir: true,
+          children: [
+            {
+              id: null,
+              name: "民呼我为项目",
+              path: "notes/民呼我为项目",
+              is_dir: true,
+              children: [
+                {
+                  id: "note-1",
+                  name: "文章1.md",
+                  path: "notes/民呼我为项目/文章1.md",
+                  is_dir: false,
+                  children: [],
+                },
+              ],
+            },
+          ],
+        },
+      ];
+
+      apiMocks.getNoteTree.mockResolvedValue(tree);
+      useAppStore.setState({
+        kb: makeKnowledgeBase(),
+        tree,
+        selectedNodePath: null,
+        selectedTagIds: [],
+        refreshTree: vi.fn().mockResolvedValue(undefined),
+      });
+
+      render(<FileTreePanel />);
+
+      const parentContent = screen.getByTestId("directory-content:notes/民呼我为项目");
+      expect(parentContent).toHaveStyle({ maxHeight: "24px" });
+
+      act(() => {
+        while (rafCallbacks.size > 0) {
+          const pending = [...rafCallbacks.entries()];
+          rafCallbacks.clear();
+          pending.forEach(([rafId, callback]) => {
+            callback(rafId);
+          });
+        }
+      });
+
+      parentHeight = 48;
+      act(() => {
+        resizeObserverCallbacks.forEach((notify) => notify());
+      });
+
+      await waitFor(() => {
+        expect(parentContent).toHaveStyle({ maxHeight: "48px" });
+      });
+    } finally {
+      if (originalResizeObserver) {
+        Object.defineProperty(globalThis, "ResizeObserver", {
+          configurable: true,
+          writable: true,
+          value: originalResizeObserver,
+        });
+      } else {
+        delete (globalThis as typeof globalThis & { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
+      }
+
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+
+      if (originalScrollHeight) {
+        Object.defineProperty(HTMLElement.prototype, "scrollHeight", originalScrollHeight);
+      } else {
+        delete (HTMLElement.prototype as { scrollHeight?: number }).scrollHeight;
+      }
+    }
+  });
+
+  it("keeps a nested directory collapsed when the parent notebook is reopened", async () => {
+    const user = userEvent.setup();
+
+    const tree: NoteTreeNode[] = [
+      {
+        id: null,
+        name: "notes",
+        path: "notes",
+        is_dir: true,
+        children: [
+          {
+            id: null,
+            name: "学习笔记",
+            path: "notes/学习笔记",
+            is_dir: true,
+            children: [
+              {
+                id: null,
+                name: "CFA",
+                path: "notes/学习笔记/CFA",
+                is_dir: true,
+                children: [
+                  {
+                    id: "note-cfa-1",
+                    name: "Reading1.md",
+                    path: "notes/学习笔记/CFA/Reading1.md",
+                    is_dir: false,
+                    children: [],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    apiMocks.getNoteTree.mockResolvedValue(tree);
+    useAppStore.setState({
+      kb: makeKnowledgeBase(),
+      tree,
+      selectedNodePath: null,
+      selectedTagIds: [],
+      refreshTree: vi.fn().mockResolvedValue(undefined),
+    });
+
+    render(<FileTreePanel />);
+
+    const notebookToggle = screen.getByRole("button", { name: "切换笔记本 学习笔记" });
+    const childDirectoryToggle = screen.getByRole("button", { name: "CFA" });
+
+    expect(notebookToggle).toHaveAttribute("aria-expanded", "true");
+    expect(childDirectoryToggle).toHaveAttribute("aria-expanded", "false");
+    await waitFor(() => {
+      expect(screen.queryByText("Reading1.md")).not.toBeInTheDocument();
+    });
+
+    await user.click(notebookToggle);
+    expect(notebookToggle).toHaveAttribute("aria-expanded", "false");
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "CFA" })).not.toBeInTheDocument();
+    });
+
+    await user.click(notebookToggle);
+
+    const remountedChildDirectoryToggle = await screen.findByRole("button", { name: "CFA" });
+    expect(notebookToggle).toHaveAttribute("aria-expanded", "true");
+    expect(remountedChildDirectoryToggle).toHaveAttribute("aria-expanded", "false");
+    await waitFor(() => {
+      expect(screen.queryByText("Reading1.md")).not.toBeInTheDocument();
+    });
+  });
+
+  it("disables height animation for directories with many notes", async () => {
+    const manyNotes = Array.from({ length: 80 }, (_, index) => ({
+      id: `note-many-${index + 1}`,
+      name: `文章${index + 1}.md`,
+      path: `notes/大型目录/文章${index + 1}.md`,
+      is_dir: false,
+      children: [],
+    } satisfies NoteTreeNode));
+
+    const tree: NoteTreeNode[] = [
+      {
+        id: null,
+        name: "notes",
+        path: "notes",
+        is_dir: true,
+        children: [
+          {
+            id: null,
+            name: "大型目录",
+            path: "notes/大型目录",
+            is_dir: true,
+            children: manyNotes,
+          },
+        ],
+      },
+    ];
+
+    apiMocks.getNoteTree.mockResolvedValue(tree);
+    useAppStore.setState({
+      kb: makeKnowledgeBase(),
+      tree,
+      selectedNodePath: null,
+      selectedTagIds: [],
+      refreshTree: vi.fn().mockResolvedValue(undefined),
+    });
+
+    render(<FileTreePanel />);
+
+    const directoryContent = screen.getByTestId("directory-content:notes/大型目录");
+
+    await waitFor(() => {
+      expect(directoryContent).toHaveStyle({
+        maxHeight: "none",
+        transform: "none",
+      });
+    });
+    expect(directoryContent.style.transition).toBe("none");
+    expect(screen.getByText("文章80.md")).toBeInTheDocument();
+  });
+
   it("keeps notebook rows neutral and only uses notebook color on the leading color trigger", () => {
     render(<FileTreePanel />);
 
@@ -1052,6 +1398,46 @@ describe("FileTreePanel", () => {
     expect(importButton).not.toBeVisible();
     expect(newNotebookButton).not.toBeVisible();
     expect(newNoteButton).not.toBeVisible();
+  });
+
+  it("keeps the toolbar stack and tree list as separate scroll regions whether the toolbar is collapsed or expanded", async () => {
+    const user = userEvent.setup();
+
+    render(<FileTreePanel />);
+
+    const controlPanel = screen.getByTestId("file-tree-control-panel");
+    const treeScrollRegion = screen.getByTestId("file-tree-blank-area");
+
+    expect(controlPanel).toHaveStyle({
+      overflowY: "auto",
+      borderBottom: "1px solid #e0e2e7",
+    });
+    expect(treeScrollRegion).toHaveStyle({
+      overflowY: "auto",
+      minHeight: "0",
+    });
+
+    await user.hover(screen.getByTestId("file-tree-toolbar-header"));
+
+    expect(controlPanel).toHaveStyle({
+      overflowY: "auto",
+      borderBottom: "1px solid #e0e2e7",
+    });
+    expect(treeScrollRegion).toHaveStyle({
+      overflowY: "auto",
+      minHeight: "0",
+    });
+
+    await user.unhover(screen.getByTestId("file-tree-toolbar-header"));
+
+    expect(controlPanel).toHaveStyle({
+      overflowY: "auto",
+      borderBottom: "1px solid #e0e2e7",
+    });
+    expect(treeScrollRegion).toHaveStyle({
+      overflowY: "auto",
+      minHeight: "0",
+    });
   });
 
   it("highlights toolbar icon buttons on hover and restores them on mouse leave", async () => {

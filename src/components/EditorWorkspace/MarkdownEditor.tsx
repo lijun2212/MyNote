@@ -48,8 +48,11 @@ function logTagDrag(event: string, details: Record<string, unknown>) {
 const inlineTagDecoration = Decoration.mark({ class: "cm-inline-tag-token" });
 const inlineTagNavigationDecoration = Decoration.mark({ class: "cm-inline-tag-token cm-inline-tag-navigation-target" });
 const searchNavigationDecoration = Decoration.mark({ class: "cm-search-navigation-target" });
+const chineseIndentMarkerDecoration = Decoration.mark({ class: "cm-cn-indent-marker" });
+const chineseIndentLineDecoration = Decoration.line({ class: "cm-cn-indent-line" });
 const AUTO_LINK_URL_PATTERN = /\bhttps?:\/\/[^\s<>()\[\]{}]+/giu;
 const AUTO_LINK_EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu;
+const CHINESE_INDENT_MARKER_PREFIX = "..: ";
 
 const setTagNavigationTargetEffect = StateEffect.define<TagNavigationTarget | null>();
 const setSearchNavigationTargetEffect = StateEffect.define<SearchNavigationTarget | null>();
@@ -201,6 +204,40 @@ class InlineTagPluginValue {
 }
 
 const inlineTagPlugin = ViewPlugin.fromClass(InlineTagPluginValue, {
+  decorations: (plugin) => plugin.decorations,
+});
+
+class ChineseIndentMarkerPluginValue {
+  decorations: DecorationSet;
+
+  constructor(view: EditorView) {
+    this.decorations = this.buildDecorations(view);
+  }
+
+  update(update: ViewUpdate) {
+    if (update.docChanged || update.viewportChanged) {
+      this.decorations = this.buildDecorations(update.view);
+    }
+  }
+
+  private buildDecorations(view: EditorView): DecorationSet {
+    const builder = new RangeSetBuilder<Decoration>();
+
+    for (let lineNumber = 1; lineNumber <= view.state.doc.lines; lineNumber += 1) {
+      const line = view.state.doc.line(lineNumber);
+      if (!line.text.startsWith(CHINESE_INDENT_MARKER_PREFIX)) {
+        continue;
+      }
+
+      builder.add(line.from, line.from, chineseIndentLineDecoration);
+      builder.add(line.from, line.from + CHINESE_INDENT_MARKER_PREFIX.length - 1, chineseIndentMarkerDecoration);
+    }
+
+    return builder.finish();
+  }
+}
+
+const chineseIndentMarkerPlugin = ViewPlugin.fromClass(ChineseIndentMarkerPluginValue, {
   decorations: (plugin) => plugin.decorations,
 });
 
@@ -1041,6 +1078,7 @@ export function MarkdownEditor({
           ...historyKeymap,
         ]),
         inlineTagPlugin,
+        chineseIndentMarkerPlugin,
         autoLinkPlugin,
         searchNavigationPlugin,
         EditorView.domEventHandlers({
@@ -1190,6 +1228,17 @@ export function MarkdownEditor({
             color: "#0969da",
             textDecoration: "underline",
             textUnderlineOffset: "2px",
+          },
+          ".cm-cn-indent-line": {
+            borderLeft: "2px solid rgba(15, 118, 110, 0.22)",
+            paddingLeft: "6px",
+            marginLeft: "-8px",
+          },
+          ".cm-cn-indent-marker": {
+            color: "#0f766e",
+            backgroundColor: "rgba(15, 118, 110, 0.08)",
+            borderRadius: "4px",
+            padding: "0 2px",
           },
         }),
       ],

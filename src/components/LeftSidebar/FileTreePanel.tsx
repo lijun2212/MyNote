@@ -244,7 +244,7 @@ export function FileTreePanel() {
   const pointerDragSourcePathRef = useRef<string | null>(null);
   const internalNoteDragRef = useRef<InternalNoteDrag | null>(null);
   const fullTreeRef = useRef<NoteTreeNode[]>(tree);
-  const knownDirectoryPathsRef = useRef<Set<string>>(new Set());
+  const directoryExpandedStateRef = useRef<Map<string, boolean>>(new Map());
   const [importSourcePickerOpen, setImportSourcePickerOpen] = useState(false);
   const [importSources, setImportSources] = useState<MarkdownImportSource[] | null>(null);
   const [hoveredToolbarAction, setHoveredToolbarAction] = useState<"import" | "new-notebook" | "new-note" | null>(null);
@@ -369,13 +369,14 @@ function getNoteTitleFromPath(notePath: string): string {
 
   useEffect(() => {
     const nextPaths = collectDirectoryPaths(tree);
-    const knownPaths = knownDirectoryPathsRef.current;
-    if (knownPaths.size === 0) {
-      nextPaths.forEach((path) => knownPaths.add(path));
-      return;
-    }
+    const nextPathSet = new Set(nextPaths);
+    const expansionState = directoryExpandedStateRef.current;
 
-    nextPaths.forEach((path) => knownPaths.add(path));
+    for (const path of [...expansionState.keys()]) {
+      if (!nextPathSet.has(path)) {
+        expansionState.delete(path);
+      }
+    }
   }, [tree]);
 
   useEffect(() => {
@@ -634,10 +635,18 @@ function getNoteTitleFromPath(notePath: string): string {
 
   function getDefaultExpanded(node: NoteTreeNode, depth: number) {
     if (!node.is_dir) return true;
+    const rememberedState = directoryExpandedStateRef.current.get(node.path);
+    if (typeof rememberedState === "boolean") {
+      return rememberedState;
+    }
     if (depth === 0 || isTopLevelNotebookPath(node.path)) {
       return true;
     }
-    return knownDirectoryPathsRef.current.has(node.path);
+    return false;
+  }
+
+  function handleDirectoryExpandedChange(path: string, expanded: boolean) {
+    directoryExpandedStateRef.current.set(path, expanded);
   }
 
   async function handleSelect(node: NoteTreeNode) {
@@ -1199,23 +1208,32 @@ function getNoteTitleFromPath(notePath: string): string {
   }
 
   return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+    <div style={{ height: "100%", minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <div
-        data-testid="file-tree-toolbar-header"
-        onMouseEnter={() => setIsToolbarHovered(true)}
-        onMouseLeave={() => setIsToolbarHovered(false)}
+        data-testid="file-tree-control-panel"
         style={{
-          minHeight: isToolbarExpanded ? 39 : 10,
-          padding: isToolbarExpanded ? "8px 12px" : "2px 12px",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
+          flex: "0 1 auto",
+          minHeight: 0,
+          overflowY: "auto",
           borderBottom: "1px solid #e0e2e7",
-          overflow: "hidden",
-          transition: "min-height 180ms ease, padding 180ms ease, background 180ms ease",
-          background: isToolbarExpanded ? "rgba(248, 250, 252, 0.92)" : "rgba(248, 250, 252, 0.32)",
+          background: "#fff",
         }}
       >
+        <div
+          data-testid="file-tree-toolbar-header"
+          onMouseEnter={() => setIsToolbarHovered(true)}
+          onMouseLeave={() => setIsToolbarHovered(false)}
+          style={{
+            minHeight: isToolbarExpanded ? 39 : 10,
+            padding: isToolbarExpanded ? "8px 12px" : "2px 12px",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            overflow: "hidden",
+            transition: "min-height 180ms ease, padding 180ms ease, background 180ms ease",
+            background: isToolbarExpanded ? "rgba(248, 250, 252, 0.92)" : "rgba(248, 250, 252, 0.32)",
+          }}
+        >
         <span style={{
           fontSize: 11,
           fontWeight: 600,
@@ -1269,19 +1287,19 @@ function getNoteTitleFromPath(notePath: string): string {
             <NewNoteIcon />
           </button>
         </div>
-      </div>
-      {importSourcePickerOpen && (
-        <div
-          role="menu"
-          aria-label="导入来源"
-          style={{
-            padding: 6,
-            borderBottom: "1px solid #e0e2e7",
-            background: "#fff",
-            boxSizing: "border-box",
-            width: "100%",
-          }}
-        >
+        </div>
+        {importSourcePickerOpen && (
+          <div
+            role="menu"
+            aria-label="导入来源"
+            style={{
+              padding: 6,
+              borderTop: "1px solid #e0e2e7",
+              background: "#fff",
+              boxSizing: "border-box",
+              width: "100%",
+            }}
+          >
           <button
             type="button"
             role="menuitem"
@@ -1322,24 +1340,24 @@ function getNoteTitleFromPath(notePath: string): string {
           >
             导入文件夹
           </button>
-        </div>
-      )}
-      {creationHint && (
-        <div style={{ padding: "6px 8px", borderBottom: "1px solid #e0e2e7", fontSize: 12, color: "#b54708", background: "#fffaeb" }}>
-          {creationHint}
-        </div>
-      )}
-      {notebookInputVisible && (
-        <div
-          style={{
-            padding: "8px",
-            borderBottom: "1px solid #e0e2e7",
-            background: "linear-gradient(180deg, #fcfdff 0%, #f8fafc 100%)",
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-          }}
-        >
+          </div>
+        )}
+        {creationHint && (
+          <div style={{ padding: "6px 8px", borderTop: "1px solid #e0e2e7", fontSize: 12, color: "#b54708", background: "#fffaeb" }}>
+            {creationHint}
+          </div>
+        )}
+        {notebookInputVisible && (
+          <div
+            style={{
+              padding: "8px",
+              borderTop: "1px solid #e0e2e7",
+              background: "linear-gradient(180deg, #fcfdff 0%, #f8fafc 100%)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+            }}
+          >
           <input
             aria-label="笔记本名称"
             autoFocus
@@ -1449,10 +1467,10 @@ function getNoteTitleFromPath(notePath: string): string {
               取消
             </button>
           </div>
-        </div>
-      )}
-      {inputVisible && (
-        <div style={{ padding: "6px 8px", borderBottom: "1px solid #e0e2e7" }}>
+          </div>
+        )}
+        {inputVisible && (
+          <div style={{ padding: "6px 8px", borderTop: "1px solid #e0e2e7" }}>
           <select
             aria-label="目标笔记本"
             value={targetNotebookPath}
@@ -1490,14 +1508,15 @@ function getNoteTitleFromPath(notePath: string): string {
               outline: "none",
             }}
           />
-        </div>
-      )}
+          </div>
+        )}
+      </div>
       <div
         onContextMenu={handleBlankAreaContextMenu}
         onPointerUp={handlePointerDragEnd}
         onPointerCancel={handlePointerDragEnd}
         data-testid="file-tree-blank-area"
-        style={{ flex: 1, overflowY: "auto", paddingTop: 4, position: "relative" }}
+        style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingTop: 4, position: "relative" }}
       >
         {treeView.map((node) => {
           const isNotebook = node.is_dir && isTopLevelNotebookPath(node.path);
@@ -1510,6 +1529,7 @@ function getNoteTitleFromPath(notePath: string): string {
               node={node}
               depth={0}
               getDefaultExpanded={getDefaultExpanded}
+              onDirectoryExpandedChange={handleDirectoryExpandedChange}
               isNotebook={isNotebook}
               isRenamingNotebook={renamingNotebookPath === node.path}
               isPickingNotebookColor={colorPickerNotebookPath === node.path}

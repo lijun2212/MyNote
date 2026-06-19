@@ -42,6 +42,7 @@ import type { BeautifyReviewState } from "../../store/useEditorStore";
 
 const md = new MarkdownIt({ html: true, linkify: true, typographer: true });
 const SOURCE_LINE_TAGS = new Set(["blockquote", "h1", "h2", "h3", "h4", "h5", "h6", "li", "ol", "p", "table", "tr", "ul"]);
+const CHINESE_INDENT_MARKER_PATTERN = /^\.\.:\s*/;
 type MermaidRuntime = Awaited<typeof import("mermaid")>["default"];
 type HighlightLanguage = Parameters<typeof hljs.registerLanguage>[1];
 
@@ -128,6 +129,33 @@ md.core.ruler.push("source_line_attrs", (state) => {
       token.attrSet("data-source-end-line", String(token.map[1]));
     }
   });
+});
+
+md.core.ruler.push("cn_indent_marker", (state) => {
+  for (let index = 0; index < state.tokens.length - 1; index += 1) {
+    const openToken = state.tokens[index];
+    const inlineToken = state.tokens[index + 1];
+
+    if (openToken.type !== "paragraph_open" || inlineToken.type !== "inline") {
+      continue;
+    }
+
+     if (openToken.level !== 0) {
+      continue;
+    }
+
+    if (!CHINESE_INDENT_MARKER_PATTERN.test(inlineToken.content)) {
+      continue;
+    }
+
+    const nextContent = inlineToken.content.replace(CHINESE_INDENT_MARKER_PATTERN, "");
+    inlineToken.content = nextContent;
+    openToken.attrJoin("class", "markdown-cn-indent-paragraph");
+
+    const nextChildren = [];
+    state.md.inline.parse(nextContent, state.md, state.env, nextChildren);
+    inlineToken.children = nextChildren;
+  }
 });
 
 const ALLOWED_MARKDOWN_TAGS = [
@@ -1982,6 +2010,32 @@ export function MarkdownPreview({
         .markdown-preview-content p {
           margin-block: 0.85em;
         }
+        .markdown-preview-content .markdown-cn-indent-paragraph {
+          text-indent: 2em;
+        }
+        .markdown-preview-content sup {
+          color: #2563eb;
+        }
+        .markdown-preview-content sub {
+          color: #16a34a;
+        }
+        .markdown-preview-content kbd {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 1.55em;
+          padding: 0.16em 0.48em;
+          margin-inline: 0.08em;
+          border-radius: 0.45em;
+          border: 1px solid #bcc7d6;
+          background: linear-gradient(180deg, #ffffff 0%, #e7ecf3 100%);
+          color: #475569;
+          font-size: 0.9em;
+          font-weight: 600;
+          line-height: 1.1;
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.96), 0 1px 0 rgba(148, 163, 184, 0.5), 0 2px 5px rgba(15, 23, 42, 0.09);
+          vertical-align: middle;
+        }
         .markdown-preview-content .katex-display {
           margin: 0.85em 0;
           text-align: left;
@@ -2022,10 +2076,41 @@ export function MarkdownPreview({
           padding-left: 0;
         }
         .markdown-preview-content .markdown-task-list-checkbox {
-          width: 1em;
-          height: 1em;
-          margin: 0 0.55em 0 0;
-          vertical-align: text-top;
+          appearance: none;
+          -webkit-appearance: none;
+          width: 1.12em;
+          height: 1.12em;
+          margin: 0 0.62em 0 0;
+          vertical-align: middle;
+          border-radius: 0.28em;
+          border: 1.5px solid #c8d1dc;
+          background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 1px 2px rgba(15, 23, 42, 0.08);
+          display: inline-grid;
+          place-content: center;
+          position: relative;
+          top: -0.02em;
+          flex: 0 0 auto;
+        }
+        .markdown-preview-content .markdown-task-list-checkbox::after {
+          content: "";
+          width: 0.3em;
+          height: 0.56em;
+          border-right: 2px solid #fff;
+          border-bottom: 2px solid #fff;
+          transform: rotate(45deg) translate(-0.01em, -0.04em);
+          opacity: 0;
+        }
+        .markdown-preview-content .markdown-task-list-checkbox:checked {
+          border-color: #60a5fa;
+          background: linear-gradient(180deg, #93c5fd 0%, #60a5fa 100%);
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 1px 2px rgba(96, 165, 250, 0.28);
+        }
+        .markdown-preview-content .markdown-task-list-checkbox:checked::after {
+          opacity: 1;
+        }
+        .markdown-preview-content .markdown-task-list-checkbox:disabled {
+          opacity: 1;
         }
         .markdown-preview-content table {
           width: 100%;

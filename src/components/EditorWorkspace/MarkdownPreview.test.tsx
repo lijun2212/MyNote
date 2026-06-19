@@ -301,6 +301,12 @@ describe("MarkdownPreview", () => {
     expect(checkboxes[1]).toBeChecked();
     expect(checkboxes[2]).toBeChecked();
     expect(checkboxes[0]).toBeDisabled();
+    expect(checkboxes[0]).toHaveStyle({
+      width: "1.12em",
+      height: "1.12em",
+      verticalAlign: "middle",
+      borderRadius: "0.28em",
+    });
 
     const items = Array.from(container.querySelectorAll("li")).map((item) => item.textContent ?? "");
     expect(items[0]).toContain("Pending task");
@@ -994,12 +1000,67 @@ describe("MarkdownPreview", () => {
 
     expect(container.querySelector("sub")).toHaveTextContent("2");
     expect(container.querySelector("sup")).toHaveTextContent("2");
+    expect(container.querySelector("sub")).toHaveStyle({ color: "#16a34a" });
+    expect(container.querySelector("sup")).toHaveStyle({ color: "#2563eb" });
+    expect(container.querySelector("sub")).not.toHaveStyle({ fontWeight: "600" });
+    expect(container.querySelector("sup")).not.toHaveStyle({ fontWeight: "600" });
     expect(container.querySelector("kbd")).toHaveTextContent("Cmd");
+    expect(container.querySelector("kbd")).toHaveStyle({
+      padding: "0.16em 0.48em",
+      borderRadius: "0.45em",
+      background: "linear-gradient(180deg, #ffffff 0%, #e7ecf3 100%)",
+      border: "1px solid #bcc7d6",
+      color: "#475569",
+    });
     expect(container.querySelector("mark")).toHaveTextContent("重点");
     expect(container.querySelector("p span[title='note']")).toHaveTextContent("内联说明");
     expect(container.querySelector("p br")).toBeInTheDocument();
     expect(container.querySelector("details[open] summary")).toHaveTextContent("展开说明");
     expect(container.querySelector("img[alt='示例图']")).toHaveAttribute("src", "notes/assets/demo.png");
+  });
+
+  it("supports ..: as a paragraph-level marker for Chinese first-line indentation", () => {
+    const { container } = render(
+      <MarkdownPreview
+        content={[
+          "..: 这是一个需要首行缩进的段落，支持 **Markdown** 内联格式。",
+          "同一个段落的第二行仍然属于这个缩进段落。",
+          "",
+          "这是一个普通段落。",
+          "",
+          "..: 第二个缩进段落。",
+        ].join("\n")}
+      />,
+    );
+
+    const paragraphs = container.querySelectorAll("p");
+    expect(paragraphs).toHaveLength(3);
+    expect(paragraphs[0]).toHaveClass("markdown-cn-indent-paragraph");
+    expect(paragraphs[0]).toHaveStyle({ textIndent: "2em" });
+    expect(paragraphs[0]).toHaveTextContent("这是一个需要首行缩进的段落，支持 Markdown 内联格式。 同一个段落的第二行仍然属于这个缩进段落。");
+    expect(paragraphs[0].textContent).not.toContain("..:");
+    expect(paragraphs[1]).not.toHaveClass("markdown-cn-indent-paragraph");
+    expect(paragraphs[1]).toHaveTextContent("这是一个普通段落。");
+    expect(paragraphs[2]).toHaveClass("markdown-cn-indent-paragraph");
+    expect(paragraphs[2]).toHaveTextContent("第二个缩进段落。");
+  });
+
+  it("does not treat ..: inside list items as a Chinese indentation paragraph marker", () => {
+    const { container } = render(
+      <MarkdownPreview
+        content={[
+          "- ..: 这是列表项，不应该触发中文段首缩进语法。",
+          "",
+          "..: 这是普通段落，应该继续触发缩进。",
+        ].join("\n")}
+      />,
+    );
+
+    const paragraphs = container.querySelectorAll("p");
+    expect(paragraphs).toHaveLength(1);
+    expect(paragraphs[0]).toHaveClass("markdown-cn-indent-paragraph");
+    expect(container.querySelector("li .markdown-cn-indent-paragraph")).toBeNull();
+    expect(container.querySelector("li")).toHaveTextContent("这是列表项，不应该触发中文段首缩进语法。");
   });
 
   it("removes raw HTML tags outside the whitelist without disabling markdown-generated elements", () => {

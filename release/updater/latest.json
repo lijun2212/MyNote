@@ -1,11 +1,11 @@
 {
   "version": "0.2.7",
   "notes": "Release v0.2.7 (2026 年 6 月 19 日)",
-  "pub_date": "2026-06-19T01:26:11.429Z",
+  "pub_date": "2026-06-19T10:35:57.403Z",
   "platforms": {
     "darwin-aarch64": {
       "url": "https://github.com/lijun2212/MyNote/releases/download/v0.2.7/MyNote.app.tar.gz",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRUGFFZDgzK0Q1TGpoY083ZnFMZjMwRzJKUWwyQmtqNVRCRDlHREV3WUtIeElVVzZ4NmxTckhabE5YUnl4Zzl2ZkdiMXdTcGdWa0MxS2dnUG1NNUdRc0FmcE16OU51d1FnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgxODMyMzcxCWZpbGU6TXlOb3RlLmFwcC50YXIuZ3oKTlcrTVp1eDN5ZzRKSEwxZkdrcmxkNHBjK0JNOUN2Zm1JNGJEN0FEZUNuSThWRWxST3FkOThzclVZM0dFYzBla01ZRU9FZ1FTTjVpVmJjbHI2czAwREE9PQo="
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRUGFFZDgzK0Q1TGw0aTJReEVkS3VYa0tHcjZadGh3Y1pDRW5ZYkJLNm5ua0pSdTRLci8vOEkyeVlwSkJjWjFjWk5aYWpEaGpZamJDM0NjUjYrVEZJWTFpbTNJd0ZCRHdnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgxODY1MzU3CWZpbGU6TXlOb3RlLmFwcC50YXIuZ3oKUEFyMDNFSmU2NzNPdjFEUTE0eHFqTWh4ejNRUWd5VkNOSkppQXhEZWVJcFd1VVFMemRpd3VQeUt0UHBqMVVua0VFTTlFOGs1U0hCQXAyaUxiM2dZQ0E9PQo="
     }
   }
 }
