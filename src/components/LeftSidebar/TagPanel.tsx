@@ -7,7 +7,6 @@ import { useOpenNote } from "../../hooks/useOpenNote";
 import { scheduleClearActiveDraggedTagName, setActiveDraggedTagName } from "../EditorWorkspace/tagDragState";
 import { useContextMenu } from "../ContextMenu/useContextMenu";
 
-const INSERT_TAG_EVENT = "mynote:insert-tag";
 const TAG_DRAG_DEBUG_PREFIX = "[mynote:tag-drag]";
 const TAG_DRAG_SOURCE_SELECTOR = "[data-tag-drag-name]";
 const TAG_DRAG_THRESHOLD_PX = 4;
@@ -39,6 +38,7 @@ export function TagPanel() {
   const [tags, setTags] = useState<Tag[]>([]);
   const [isCreatingTag, setIsCreatingTag] = useState(false);
   const [newTagName, setNewTagName] = useState("");
+  const [addTagNotice, setAddTagNotice] = useState<string | null>(null);
   const [dragPreview, setDragPreview] = useState<InternalTagDrag | null>(null);
   const latestTagContextRequestId = useRef(0);
   const internalTagDragRef = useRef<InternalTagDrag | null>(null);
@@ -59,6 +59,12 @@ export function TagPanel() {
     if (!kb) return;
     api.listTags().then(setTags).catch(console.error);
   }, [kb, currentNote?.content_hash]);
+
+  useEffect(() => {
+    if (currentNote) {
+      setAddTagNotice(null);
+    }
+  }, [currentNote]);
 
   useEffect(() => {
     logTagDrag("global-source-listener-ready", { mode: "pointer+mouse" });
@@ -264,30 +270,40 @@ export function TagPanel() {
   };
 
   const handleAddTag = () => {
-    if (!currentNote) return;
+    if (!currentNote) {
+      setIsCreatingTag(false);
+      setAddTagNotice("请先从左侧文件树打开或新建一篇笔记，然后再为它添加标签。");
+      return;
+    }
 
+    setAddTagNotice(null);
     setIsCreatingTag(true);
     setNewTagName("");
   };
 
-  const submitNewTag = () => {
+  const submitNewTag = async () => {
     const tagName = newTagName.trim();
-    if (!tagName) return;
+    if (!tagName || !currentNote) return;
 
-    setTags((currentTags) => {
-      if (currentTags.some((tag) => tag.name === tagName)) {
-        return currentTags;
-      }
-      return [...currentTags, { id: `draft:${tagName}`, name: tagName, note_count: 1 }]
-        .sort((left, right) => left.name.localeCompare(right.name, "zh-CN"));
-    });
-
-    window.dispatchEvent(new CustomEvent(INSERT_TAG_EVENT, {
-      detail: { tagName, source: "panel-add" },
-    }));
+    try {
+      const detail = await api.addTagToNote(currentNote.id, tagName);
+      setCurrentNote(detail.note);
+      setContent(detail.content);
+      setTags((currentTags) => {
+        if (currentTags.some((tag) => tag.name === tagName)) {
+          return currentTags;
+        }
+        return [...currentTags, { id: `draft:${tagName}`, name: tagName, note_count: 1 }]
+          .sort((left, right) => left.name.localeCompare(right.name, "zh-CN"));
+      });
+    } catch (error) {
+      console.error("Failed to add tag to note:", error);
+      return;
+    }
 
     setNewTagName("");
     setIsCreatingTag(false);
+    setAddTagNotice(null);
   };
 
   const cancelNewTag = () => {
@@ -337,117 +353,132 @@ export function TagPanel() {
     <div
       data-testid="tag-panel-surface"
       onContextMenu={handleTagBlankContextMenu}
-      style={{ padding: "8px 0", minHeight: "100%" }}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        minHeight: 0,
+        height: "100%",
+      }}
     >
-      {tags.length === 0 && (
-        <div style={{ padding: "16px 12px", fontSize: 13, color: "#999" }}>
-          暂无标签。在笔记 Front Matter 中添加 <code>tags: [标签名]</code> 或在正文中使用 #标签 语法。
-        </div>
-      )}
-      <div data-testid="tag-panel-list">
-      {tags.map((tag) => (
-        <div
-          key={tag.id}
-          data-tag-panel-tag-row="true"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "4px 12px",
-            background: selectedTagIds.includes(tag.id) ? "#e8f0fe" : "transparent",
-            borderRadius: 4,
-            margin: "1px 4px",
-            gap: 8,
-          }}
-        >
-          <button
-            type="button"
-            onClick={(e) => toggleTag(tag, e)}
-            draggable={false}
-            data-tag-drag-name={tag.name}
-            onPointerDown={(event) => {
-              if (event.button !== 0) return;
-              setActiveDraggedTagName(tag.name);
-              logTagDrag("pointer-start", {
-                tagName: tag.name,
-                pointerType: event.pointerType,
-                clientX: event.clientX,
-                clientY: event.clientY,
-              });
-            }}
-            onPointerUp={() => {
-              scheduleClearActiveDraggedTagName();
-            }}
-            onPointerCancel={() => {
-              scheduleClearActiveDraggedTagName();
-            }}
-            onDragStart={(event) => {
-              setActiveDraggedTagName(tag.name);
-              event.dataTransfer.setData("application/x-mynote-tag", tag.name);
-              event.dataTransfer.setData("text/plain", `#${tag.name}`);
-              event.dataTransfer.effectAllowed = "copy";
-              logTagDrag("dragstart", {
-                tagName: tag.name,
-                dataTypes: getDataTransferTypes(event.dataTransfer),
-                effectAllowed: event.dataTransfer.effectAllowed,
-              });
-            }}
-            onDragEnd={() => {
-              logTagDrag("dragend", { tagName: tag.name });
-              scheduleClearActiveDraggedTagName();
-            }}
-            onContextMenu={(event) => handleTagContextMenu(tag, event)}
-            aria-label={`标签 ${tag.name} ${tag.note_count ?? 0}`}
+      <div
+        data-testid="tag-panel-scroll-region"
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: "auto",
+          overflowX: "hidden",
+          padding: "8px 0 4px",
+        }}
+      >
+        {tags.length === 0 && (
+          <div style={{ padding: "16px 12px", fontSize: 13, color: "#999" }}>
+            暂无标签。在笔记 Front Matter 中添加 <code>tags: [标签名]</code>，正文中的 <code>[[#标签名]]</code> 仅作为标签引用展示，不会自动建立标签归属。
+          </div>
+        )}
+        <div data-testid="tag-panel-list">
+        {tags.map((tag) => (
+          <div
+            key={tag.id}
+            data-tag-panel-tag-row="true"
             style={{
-              flex: 1,
-              minWidth: 0,
               display: "flex",
               alignItems: "center",
+              justifyContent: "space-between",
+              padding: "4px 12px",
+              background: selectedTagIds.includes(tag.id) ? "#e8f0fe" : "transparent",
+              borderRadius: 4,
+              margin: "1px 4px",
               gap: 8,
-              border: "none",
-              background: "transparent",
-              padding: 0,
-              cursor: "pointer",
-              textAlign: "left",
             }}
           >
-            <span style={{ fontSize: 13, color: selectedTagIds.includes(tag.id) ? "#1a73e8" : "#333" }}>
-              # {tag.name}
-            </span>
-          </button>
-          {selectedTagIds.includes(tag.id) && (
             <button
               type="button"
-              aria-label={`删除标签 ${tag.name}`}
-              onClick={(event) => {
-                event.stopPropagation();
-                void handleDeleteTag(tag);
+              onClick={(e) => toggleTag(tag, e)}
+              draggable={false}
+              data-tag-drag-name={tag.name}
+              onPointerDown={(event) => {
+                if (event.button !== 0) return;
+                setActiveDraggedTagName(tag.name);
+                logTagDrag("pointer-start", {
+                  tagName: tag.name,
+                  pointerType: event.pointerType,
+                  clientX: event.clientX,
+                  clientY: event.clientY,
+                });
               }}
+              onPointerUp={() => {
+                scheduleClearActiveDraggedTagName();
+              }}
+              onPointerCancel={() => {
+                scheduleClearActiveDraggedTagName();
+              }}
+              onDragStart={(event) => {
+                setActiveDraggedTagName(tag.name);
+                event.dataTransfer.setData("application/x-mynote-tag", tag.name);
+                event.dataTransfer.setData("text/plain", `[[#${tag.name}]]`);
+                event.dataTransfer.effectAllowed = "copy";
+                logTagDrag("dragstart", {
+                  tagName: tag.name,
+                  dataTypes: getDataTransferTypes(event.dataTransfer),
+                  effectAllowed: event.dataTransfer.effectAllowed,
+                });
+              }}
+              onDragEnd={() => {
+                logTagDrag("dragend", { tagName: tag.name });
+                scheduleClearActiveDraggedTagName();
+              }}
+              onContextMenu={(event) => handleTagContextMenu(tag, event)}
+              aria-label={`标签 ${tag.name} ${tag.note_count ?? 0}`}
               style={{
-                width: 20,
-                height: 20,
-                flexShrink: 0,
-                borderRadius: 999,
-                border: "1px solid #c9d2e3",
-                background: "#fff",
-                color: "#6b7280",
-                cursor: "pointer",
-                lineHeight: 1,
-                display: "inline-flex",
+                flex: 1,
+                minWidth: 0,
+                display: "flex",
                 alignItems: "center",
-                justifyContent: "center",
-                fontSize: 12,
+                gap: 8,
+                border: "none",
+                background: "transparent",
+                padding: 0,
+                cursor: "pointer",
+                textAlign: "left",
               }}
             >
-              ×
+              <span style={{ fontSize: 13, color: selectedTagIds.includes(tag.id) ? "#1a73e8" : "#333" }}>
+                # {tag.name}
+              </span>
             </button>
-          )}
-          <span style={{ fontSize: 11, color: "#999", flexShrink: 0 }}>{tag.note_count ?? 0}</span>
+            {selectedTagIds.includes(tag.id) && (
+              <button
+                type="button"
+                aria-label={`删除标签 ${tag.name}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void handleDeleteTag(tag);
+                }}
+                style={{
+                  width: 20,
+                  height: 20,
+                  flexShrink: 0,
+                  borderRadius: 999,
+                  border: "1px solid #c9d2e3",
+                  background: "#fff",
+                  color: "#6b7280",
+                  cursor: "pointer",
+                  lineHeight: 1,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 12,
+                }}
+              >
+                ×
+              </button>
+            )}
+            <span style={{ fontSize: 11, color: "#999", flexShrink: 0 }}>{tag.note_count ?? 0}</span>
+          </div>
+        ))}
         </div>
-      ))}
-      </div>
-      {activeTagContext && selectedTagIds.includes(activeTagContext.tag_id) && (
-        <div style={{ padding: "12px", display: "grid", gap: 8 }}>
+        {activeTagContext && selectedTagIds.includes(activeTagContext.tag_id) && (
+          <div style={{ padding: "12px", display: "grid", gap: 8 }}>
           <div style={{ fontSize: 12, color: "#667085", fontWeight: 600 }}>
             {activeTagContext.tag_name} · {activeTagContext.total_notes} 篇
           </div>
@@ -487,10 +518,11 @@ export function TagPanel() {
               </div>
             )}
           </div>
-        </div>
-      )}
+          </div>
+        )}
+      </div>
       {isCreatingTag && currentNote && (
-        <div style={{ padding: "8px 12px 4px", display: "grid", gap: 8 }}>
+        <div style={{ padding: "8px 12px 4px", display: "grid", gap: 8, flexShrink: 0 }}>
           <label style={{ display: "grid", gap: 6, fontSize: 12, color: "#667085" }}>
             <span>新标签名称</span>
             <input
@@ -557,20 +589,24 @@ export function TagPanel() {
           </div>
         </div>
       )}
-      <div style={{ padding: "8px 12px 2px" }}>
+      {addTagNotice && (
+        <div style={{ padding: "4px 12px 0", fontSize: 12, color: "#667085", flexShrink: 0 }}>
+          {addTagNotice}
+        </div>
+      )}
+      <div style={{ padding: "8px 12px 2px", flexShrink: 0 }}>
         <button
           type="button"
           onClick={handleAddTag}
-          disabled={!currentNote}
           aria-label="新增标签"
           style={{
             width: "100%",
             border: "1px dashed #cfd6e4",
             borderRadius: 6,
-            background: currentNote ? "#f8fafc" : "#f3f4f6",
-            color: currentNote ? "#516076" : "#9aa3b2",
+            background: "#f8fafc",
+            color: "#516076",
             padding: "8px 10px",
-            cursor: currentNote ? "pointer" : "not-allowed",
+            cursor: "pointer",
             fontSize: 13,
           }}
         >

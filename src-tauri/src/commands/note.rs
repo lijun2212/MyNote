@@ -11,6 +11,7 @@ use crate::services::ai::{
     load_ai_profile_with_secret, resolve_ai_profile_selection, AiOrchestrator, SystemSecretStore,
 };
 use crate::services::note::{
+    add_tag_to_note_service,
     create_note_service, create_notebook_service, delete_note_service, delete_notebook_service,
     get_note_by_path_service, get_note_outline_service, get_note_tree_service,
     import_markdown_sources_service, import_note_service, insert_image_for_note_from_selected_path,
@@ -119,6 +120,15 @@ pub async fn save_note(
     expected_hash: Option<String>,
 ) -> Result<SaveNoteResult, AppError> {
     save_note_service(&state, SaveNoteInput { note_id, content, expected_hash })
+}
+
+#[tauri::command]
+pub async fn add_tag_to_note(
+    state: State<'_, AppState>,
+    note_id: String,
+    tag_name: String,
+) -> Result<NoteDetail, AppError> {
+    add_tag_to_note_service(&state, &note_id, &tag_name)
 }
 
 #[tauri::command]

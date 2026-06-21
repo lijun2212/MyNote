@@ -450,6 +450,9 @@ export const api = {
   saveNote: (noteId: string, content: string, expectedHash?: string) =>
     invoke<SaveNoteResult>("save_note", { noteId, content, expectedHash }),
 
+  addTagToNote: (noteId: string, tagName: string) =>
+    invoke<NoteDetail>("add_tag_to_note", { noteId, tagName }),
+
   getNoteTree: () =>
     invoke<NoteTreeNode[]>("get_note_tree"),
 

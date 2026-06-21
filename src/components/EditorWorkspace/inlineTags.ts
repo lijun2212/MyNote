@@ -5,6 +5,8 @@ export interface InlineTagMatch {
 }
 
 const INLINE_TAG_NAME = /[\p{L}\p{N}_-]/u;
+const INLINE_TAG_PREFIX = "[[#";
+const INLINE_TAG_SUFFIX = "]]";
 
 export function findInlineTagMatches(text: string): InlineTagMatch[] {
   const matches: InlineTagMatch[] = [];
@@ -19,28 +21,31 @@ export function findInlineTagMatches(text: string): InlineTagMatch[] {
   offsets.push(codeUnitOffset);
 
   for (let index = 0; index < symbols.length; index += 1) {
-    if (symbols[index] !== "#") continue;
+    if (symbols[index] !== "[" || symbols[index + 1] !== "[" || symbols[index + 2] !== "#") {
+      continue;
+    }
 
     const start = offsets[index];
-    const prefix = text.slice(0, start);
-    if (prefix.endsWith("://") || prefix.endsWith("/")) continue;
-
-    const previous = index === 0 ? null : symbols[index - 1];
-    if (previous !== null && !/\s/u.test(previous)) continue;
-
-    let endIndex = index + 1;
+    let endIndex = index + 3;
     while (endIndex < symbols.length && INLINE_TAG_NAME.test(symbols[endIndex])) {
       endIndex += 1;
     }
-    if (endIndex === index + 1) continue;
+    if (endIndex === index + 3) continue;
+    if (symbols[endIndex] !== "]" || symbols[endIndex + 1] !== "]") continue;
 
-    const end = offsets[endIndex];
+    const end = offsets[endIndex + 2];
     matches.push({
       start,
       end,
-      name: text.slice(offsets[index + 1], end),
+      name: text.slice(offsets[index + 3], offsets[endIndex]),
     });
+
+    index = endIndex + 1;
   }
 
   return matches;
+}
+
+export function buildInlineTagText(tagName: string): string {
+  return `${INLINE_TAG_PREFIX}${tagName}${INLINE_TAG_SUFFIX}`;
 }

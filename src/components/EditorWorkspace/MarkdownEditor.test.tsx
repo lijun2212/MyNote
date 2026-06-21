@@ -88,7 +88,7 @@ describe("MarkdownEditor", () => {
       expect(onChange).toHaveBeenCalled();
     });
 
-    expect(onChange.mock.lastCall?.[0]).toContain("#阶段一");
+    expect(onChange.mock.lastCall?.[0]).toContain("[[#阶段一]]");
   });
 
   it("accepts a dragged tag from text/plain when custom drag mime is unavailable", async () => {
@@ -107,7 +107,7 @@ describe("MarkdownEditor", () => {
       preventDefault: vi.fn(),
       dataTransfer: {
         types: ["text/plain"],
-        getData: (type: string) => (type === "text/plain" ? "#法律适用" : ""),
+        getData: (type: string) => (type === "text/plain" ? "[[#法律适用]]" : ""),
       },
     });
 
@@ -117,7 +117,7 @@ describe("MarkdownEditor", () => {
       preventDefault: vi.fn(),
       dataTransfer: {
         types: ["text/plain"],
-        getData: (type: string) => (type === "text/plain" ? "#法律适用" : ""),
+        getData: (type: string) => (type === "text/plain" ? "[[#法律适用]]" : ""),
       },
     });
 
@@ -125,7 +125,7 @@ describe("MarkdownEditor", () => {
       expect(onChange).toHaveBeenCalled();
     });
 
-    expect(onChange.mock.lastCall?.[0]).toContain("#法律适用");
+    expect(onChange.mock.lastCall?.[0]).toContain("[[#法律适用]]");
   });
 
   it("falls back to the shared dragged tag when drag payload data is unavailable", async () => {
@@ -164,7 +164,7 @@ describe("MarkdownEditor", () => {
       expect(onChange).toHaveBeenCalled();
     });
 
-    expect(onChange.mock.lastCall?.[0]).toContain("#阶段一");
+    expect(onChange.mock.lastCall?.[0]).toContain("[[#阶段一]]");
   });
 
   it("inserts a dragged tag through the pointer fallback when native drag events are unavailable", async () => {
@@ -190,7 +190,7 @@ describe("MarkdownEditor", () => {
       expect(onChange).toHaveBeenCalled();
     });
 
-    expect(onChange.mock.lastCall?.[0]).toContain("#阶段一");
+    expect(onChange.mock.lastCall?.[0]).toContain("[[#阶段一]]");
   });
 
   it("inserts a dragged tag through the global pointer fallback", async () => {
@@ -220,7 +220,7 @@ describe("MarkdownEditor", () => {
       expect(onChange).toHaveBeenCalled();
     });
 
-    expect(onChange.mock.lastCall?.[0]).toContain("#阶段一");
+    expect(onChange.mock.lastCall?.[0]).toContain("[[#阶段一]]");
   });
 
   it("inserts a dragged tag through the global mouse fallback", async () => {
@@ -269,7 +269,7 @@ describe("MarkdownEditor", () => {
       expect(onChange).toHaveBeenCalled();
     });
 
-    expect(onChange.mock.lastCall?.[0]).toContain("#项目报告");
+    expect(onChange.mock.lastCall?.[0]).toContain("[[#项目报告]]");
   });
 
   it("tracks IME composition state so autosave can wait for committed input", () => {
@@ -301,14 +301,14 @@ describe("MarkdownEditor", () => {
       line_start: 3,
       line_end: 3,
       heading_context: null,
-      context_snippet: "Body #阶段一",
+      context_snippet: "Body [[#阶段一]]",
       tag_name: "阶段一",
       revision: 1,
     };
 
     const { container } = render(
       <MarkdownEditor
-        initialContent={["# Title", "", "Body #阶段一"].join("\n")}
+        initialContent={["# Title", "", "Body [[#阶段一]]"].join("\n")}
         onChange={onChange}
         tagNavigationTarget={tagNavigationTarget}
       />,
@@ -316,7 +316,7 @@ describe("MarkdownEditor", () => {
 
     await waitFor(() => {
       const highlightedTag = container.querySelector(".cm-inline-tag-navigation-target");
-      expect(highlightedTag).toHaveTextContent("#阶段一");
+      expect(highlightedTag).toHaveTextContent("[[#阶段一]]");
     });
   });
 

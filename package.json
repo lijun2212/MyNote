@@ -12,6 +12,7 @@
     "release:publish:gitlab": "node scripts/publish-updater-to-gitlab.mjs",
     "updater:keygen": "node scripts/generate-updater-key.mjs",
     "updater:manifest": "node scripts/generate-updater-manifest.mjs",
+    "migrate:tags": "node scripts/migrate-inline-tags.mjs",
     "prepare:release": "node scripts/prepare-release-from-tag.mjs",
     "sync:version": "node scripts/sync-version.mjs",
     "preview": "vite preview",

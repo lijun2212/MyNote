@@ -308,7 +308,7 @@ pub fn render_note(fm: &FrontMatter, body: &str) -> AppResult<String> {
     Ok(format!("---\n{}---\n\n{}", fm_str, body))
 }
 
-/// 从正文提取内联标签（#标签），跳过代码块和 URL 片段
+/// 从正文提取显式标签引用（[[#标签名]]），跳过代码块
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InlineTagOccurrence {
     pub tag_name: String,
@@ -320,63 +320,6 @@ pub struct InlineTagOccurrence {
 
 fn is_tag_name_char(ch: char) -> bool {
     ch.is_alphanumeric() || ch == '-' || ch == '_'
-}
-
-fn is_tag_boundary(previous: Option<char>) -> bool {
-    previous.map(|ch| !is_tag_name_char(ch)).unwrap_or(true)
-}
-
-fn is_inside_markdown_link_destination(chars: &[char], index: usize) -> bool {
-    let mut paren_depth = 0usize;
-
-    for cursor in (0..index).rev() {
-        match chars[cursor] {
-            ')' => paren_depth += 1,
-            '(' => {
-                if paren_depth == 0 {
-                    return cursor > 0 && chars[cursor - 1] == ']';
-                }
-                paren_depth -= 1;
-            }
-            _ => {}
-        }
-    }
-
-    false
-}
-
-fn is_explicit_heading_anchor_id(chars: &[char], hash_index: usize, tag_end: usize) -> bool {
-    hash_index > 0
-        && chars[hash_index - 1] == '{'
-        && chars.get(tag_end).copied() == Some('}')
-}
-
-fn is_parenthesized_musical_sharp_notation(
-    chars: &[char],
-    hash_index: usize,
-    tag_end: usize,
-) -> bool {
-    if hash_index == 0 || chars.get(tag_end).copied().is_none() {
-        return false;
-    }
-
-    let Some(opening) = chars.get(hash_index - 1).copied() else {
-        return false;
-    };
-    let Some(closing) = chars.get(tag_end).copied() else {
-        return false;
-    };
-
-    if !matches!((opening, closing), ('(', ')') | ('（', '）')) {
-        return false;
-    }
-
-    let tag_chars = &chars[(hash_index + 1)..tag_end];
-    if tag_chars.len() != 1 {
-        return false;
-    }
-
-    matches!(tag_chars[0], 'A'..='G' | '1'..='7')
 }
 
 fn extract_inline_tags_from_line(line: &str) -> Vec<String> {
@@ -397,25 +340,8 @@ fn extract_inline_tags_from_line(line: &str) -> Vec<String> {
             continue;
         }
 
-        if chars[i] == '#' {
-            let prefix: String = chars[..i].iter().collect();
-            if prefix.ends_with("://") || prefix.ends_with('/') {
-                i += 1;
-                continue;
-            }
-
-            if is_inside_markdown_link_destination(&chars, i) {
-                i += 1;
-                continue;
-            }
-
-            let previous = if i == 0 { None } else { Some(chars[i - 1]) };
-            if !is_tag_boundary(previous) {
-                i += 1;
-                continue;
-            }
-
-            let start = i + 1;
+        if chars[i] == '[' && chars.get(i + 1).copied() == Some('[') && chars.get(i + 2).copied() == Some('#') {
+            let start = i + 3;
             let mut end = start;
             while end < chars.len() {
                 let current = chars[end];
@@ -426,17 +352,9 @@ fn extract_inline_tags_from_line(line: &str) -> Vec<String> {
                 }
             }
 
-            if end > start {
-                if is_explicit_heading_anchor_id(&chars, i, end) {
-                    i = end + 1;
-                    continue;
-                }
-                if is_parenthesized_musical_sharp_notation(&chars, i, end) {
-                    i = end + 1;
-                    continue;
-                }
+            if end > start && chars.get(end).copied() == Some(']') && chars.get(end + 1).copied() == Some(']') {
                 tags.push(chars[start..end].iter().collect());
-                i = end;
+                i = end + 2;
                 continue;
             }
         }
@@ -842,44 +760,23 @@ fn remove_inline_tag_mentions(body: &str, tag_name: &str) -> String {
                 continue;
             }
 
-            if chars[i] == '#' {
-                let prefix: String = chars[..i].iter().collect();
-                let previous = if i == 0 { None } else { Some(chars[i - 1]) };
-                if is_tag_boundary(previous) && !prefix.ends_with("://") && !prefix.ends_with('/') {
-                    let start = i + 1;
-                    let mut end = start;
-                    while end < chars.len() {
-                        let c = chars[end];
-                        if is_tag_name_char(c) {
-                            end += 1;
-                        } else {
-                            break;
-                        }
+            if chars[i] == '[' && chars.get(i + 1).copied() == Some('[') && chars.get(i + 2).copied() == Some('#') {
+                let start = i + 3;
+                let mut end = start;
+                while end < chars.len() {
+                    let c = chars[end];
+                    if is_tag_name_char(c) {
+                        end += 1;
+                    } else {
+                        break;
                     }
+                }
 
-                    if end > start {
-                        if is_explicit_heading_anchor_id(&chars, i, end) {
-                            result.push(chars[i]);
-                            i += 1;
-                            continue;
-                        }
-                        if is_parenthesized_musical_sharp_notation(&chars, i, end) {
-                            result.push(chars[i]);
-                            i += 1;
-                            continue;
-                        }
-
-                        let current_tag: String = chars[start..end].iter().collect();
-                        if current_tag == tag_name {
-                            let next_char = chars.get(end).copied();
-                            let previous_is_whitespace = result.chars().last().map(|c| c.is_whitespace()).unwrap_or(false);
-                            if (previous_is_whitespace || i == 0) && next_char.map(|c| c.is_whitespace()).unwrap_or(false) {
-                                i = end + 1;
-                            } else {
-                                i = end;
-                            }
-                            continue;
-                        }
+                if end > start && chars.get(end).copied() == Some(']') && chars.get(end + 1).copied() == Some(']') {
+                    let current_tag: String = chars[start..end].iter().collect();
+                    if current_tag == tag_name {
+                        i = end + 2;
+                        continue;
                     }
                 }
             }
@@ -957,6 +854,10 @@ pub fn extract_links(body: &str) -> Vec<RawLink> {
             let rest = &line[search_from + start + 2..];
             if let Some(end) = rest.find("]]") {
                 let inner = &rest[..end];
+                if inner.starts_with('#') {
+                    search_from = search_from + start + 2 + end + 2;
+                    continue;
+                }
                 let abs_end = abs_start + 2 + end + 2;
                 let (target_part, display) = if let Some(pipe) = inner.find('|') {
                     (&inner[..pipe], Some(inner[pipe + 1..].to_string()))
@@ -1278,15 +1179,16 @@ mod tests {
 
     #[test]
     fn test_extract_inline_tags_basic() {
-        let body = "Hello #rust and #tauri are great.\nNo tag in `#code` block.";
+        let body = "Hello [[#rust]] and [[#tauri]] are great.\nNo tag in `[[#code]]` block.";
         let tags = extract_inline_tags(body);
         assert!(tags.contains(&"rust".to_string()));
         assert!(tags.contains(&"tauri".to_string()));
+        assert!(!tags.contains(&"code".to_string()));
     }
 
     #[test]
     fn test_extract_inline_tags_skips_code_block() {
-        let body = "```\n#notag\n```\n#realtag";
+        let body = "```\n[[#notag]]\n```\n[[#realtag]]";
         let tags = extract_inline_tags(body);
         assert!(!tags.contains(&"notag".to_string()));
         assert!(tags.contains(&"realtag".to_string()));
@@ -1294,7 +1196,7 @@ mod tests {
 
     #[test]
     fn test_extract_inline_tags_accepts_punctuation_boundaries() {
-        let body = "Alpha(#项目报告)，还有 [#阶段一]。";
+        let body = "Alpha([[#项目报告]])，还有 [[#阶段一]]。";
         let tags = extract_inline_tags(body);
 
         assert!(tags.contains(&"项目报告".to_string()));
@@ -1306,7 +1208,7 @@ mod tests {
         let body = [
             "[项目概览](#项目概览)",
             "[相对路径](docs/plan.md#执行计划)",
-            "真实标签 #项目报告",
+            "真实标签 [[#项目报告]]",
         ]
         .join("\n");
 
@@ -1320,7 +1222,7 @@ mod tests {
         let body = [
             "## 常见问题 {#faq}",
             "### 为什么有些图片是链接而不是直接显示？ {#faq-images}",
-            "真实标签 #项目报告",
+            "真实标签 [[#项目报告]]",
         ]
         .join("\n");
 
@@ -1334,7 +1236,7 @@ mod tests {
         let body = [
             "三弦一品就是升G（#G）或者是降A（bA）。",
             "升do（#1）和降re（b2）的音高一样。",
-            "真实标签 #项目报告",
+            "真实标签 [[#项目报告]]",
         ]
         .join("\n");
 
@@ -1348,12 +1250,12 @@ mod tests {
         let body = [
             "# Title",
             "",
-            "Alpha #项目报告 here.",
+            "Alpha [[#项目报告]] here.",
             "```md",
-            "#项目报告",
+            "[[#项目报告]]",
             "```",
             "## Section",
-            "Beta #项目报告 again.",
+            "Beta [[#项目报告]] again.",
         ]
         .join("\n");
 
@@ -1364,7 +1266,7 @@ mod tests {
         assert_eq!(occurrences[0].line_start, 3);
         assert_eq!(occurrences[0].line_end, 3);
         assert_eq!(occurrences[0].heading_context.as_deref(), Some("Title"));
-        assert_eq!(occurrences[0].context_snippet, "Alpha #项目报告 here.");
+        assert_eq!(occurrences[0].context_snippet, "Alpha [[#项目报告]] here.");
         assert_eq!(occurrences[1].heading_context.as_deref(), Some("Section"));
     }
 
@@ -1396,7 +1298,7 @@ mod tests {
             "",
             "# 标题",
             "",
-            "这里有 #项目报告 和 #阶段一 两个标签。",
+            "这里有 [[#项目报告]] 和 [[#阶段一]] 两个标签。",
         ]
         .join("\n");
 
@@ -1404,12 +1306,12 @@ mod tests {
 
         assert!(updated.contains("- 阶段一"));
         assert!(!updated.contains("- 项目报告"));
-        assert!(!updated.contains("#项目报告"));
-        assert!(updated.contains("#阶段一"));
+        assert!(!updated.contains("[[#项目报告]]"));
+        assert!(updated.contains("[[#阶段一]]"));
     }
 
     #[test]
-    fn test_remove_tag_from_note_content_skips_headings_urls_and_code() {
+    fn test_remove_tag_from_note_content_skips_plain_hash_content_and_code() {
         let content = [
             "# 项目报告",
             "",
@@ -1417,10 +1319,10 @@ mod tests {
             "",
             "`#项目报告` 应该保留",
             "",
-            "真实标签 #项目报告 需要删除",
+            "真实标签 [[#项目报告]] 需要删除",
             "",
             "```md",
-            "#项目报告",
+            "[[#项目报告]]",
             "```",
         ]
         .join("\n");
@@ -1430,16 +1332,16 @@ mod tests {
         assert!(updated.contains("# 项目报告"));
         assert!(updated.contains("http://example.com/#项目报告"));
         assert!(updated.contains("`#项目报告` 应该保留"));
-        assert!(!updated.contains("真实标签 #项目报告 需要删除"));
-        assert!(updated.contains("```md\n#项目报告\n```"));
+        assert!(!updated.contains("真实标签 [[#项目报告]] 需要删除"));
+        assert!(updated.contains("```md\n[[#项目报告]]\n```"));
     }
 
     #[test]
-    fn test_remove_tag_from_note_content_preserves_musical_sharp_notation() {
+    fn test_remove_tag_from_note_content_preserves_plain_sharp_notation() {
         let content = [
             "三弦一品就是升G（#G）或者是降A（bA）。",
             "升do（#1）和降re（b2）的音高一样。",
-            "真实标签 #项目报告 需要删除",
+            "真实标签 [[#项目报告]] 需要删除",
         ]
         .join("\n");
 
@@ -1447,7 +1349,7 @@ mod tests {
 
         assert!(updated.contains("升G（#G）"));
         assert!(updated.contains("升do（#1）"));
-        assert!(!updated.contains("真实标签 #项目报告 需要删除"));
+        assert!(!updated.contains("真实标签 [[#项目报告]] 需要删除"));
     }
 
     #[test]
@@ -1459,6 +1361,15 @@ mod tests {
         assert_eq!(links[0].link_type, "wiki");
         assert_eq!(links[1].display_text, Some("显示文本".to_string()));
         assert_eq!(links[2].anchor, Some("章节".to_string()));
+    }
+
+    #[test]
+    fn test_extract_links_skips_explicit_tag_references() {
+        let body = "See [[另一篇笔记]] and [[#项目报告]] and [[标题#章节]].";
+        let links = extract_links(body);
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].target_raw, "另一篇笔记");
+        assert_eq!(links[1].target_raw, "标题");
     }
 
     #[test]

@@ -436,6 +436,10 @@ function processWikiLinks(html: string): string {
         continue;
       }
 
+      if (title.startsWith("#")) {
+        continue;
+      }
+
       if (matchIndex > cursor) {
         fragment.appendChild(document.createTextNode(text.slice(cursor, matchIndex)));
       }
@@ -1117,7 +1121,7 @@ function enhanceInlineTags(
 
   let currentNode = walker.nextNode();
   while (currentNode) {
-    if (!shouldSkipInlineTagEnhancement(currentNode.parentNode) && currentNode.textContent?.includes("#")) {
+    if (!shouldSkipInlineTagEnhancement(currentNode.parentNode) && currentNode.textContent?.includes("[[#")) {
       textNodes.push(currentNode as Text);
     }
     currentNode = walker.nextNode();

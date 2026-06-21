@@ -7,7 +7,7 @@ use crate::domain::note::{
 use crate::error::{AppError, AppResult};
 use crate::infrastructure::fs::{atomic_write, normalize_kb_relative_path, normalize_relative, resolve_kb_path, safe_filename};
 use crate::infrastructure::markdown::{
-    extract_links, extract_note_outline_blocks_from_content, render_note, FrontMatter,
+    extract_links, extract_note_outline_blocks_from_content, parse_front_matter, render_note, split_front_matter, FrontMatter,
 };
 use crate::services::index::{index_note_full, mark_note_deleted_by_path};
 use crate::services::notebook_visual::{
@@ -350,6 +350,74 @@ pub fn save_note_service(state: &State<AppState>, input: SaveNoteInput) -> AppRe
     let conn = db_guard.as_mut().ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
 
     save_note_in_root(conn, root, input)
+}
+
+fn add_tag_to_note_in_root(
+    conn: &rusqlite::Connection,
+    root: &Path,
+    note_id: &str,
+    tag_name: &str,
+) -> AppResult<NoteDetail> {
+    let normalized_tag = tag_name.trim();
+    if normalized_tag.is_empty() {
+        return Err(AppError::InvalidInput("Tag name cannot be empty".into()));
+    }
+
+    let path: String = conn
+        .query_row(
+            "SELECT path FROM notes WHERE id = ?1 AND deleted_at IS NULL",
+            params![note_id],
+            |row| row.get(0),
+        )
+        .map_err(|_| AppError::NotFound(format!("Note not found: {}", note_id)))?;
+
+    let abs = resolve_kb_path(root, &path)?;
+    let original_content = std::fs::read_to_string(&abs)?;
+    let (front_matter_raw, body) = split_front_matter(&original_content);
+    let mut front_matter = if let Some(raw) = front_matter_raw {
+        parse_front_matter(raw)?
+    } else {
+        FrontMatter::default()
+    };
+
+    let mut tags = front_matter.tags.unwrap_or_default();
+    let normalized_key = normalized_tag.to_lowercase();
+    let already_exists = tags
+        .iter()
+        .any(|existing| existing.trim().to_lowercase() == normalized_key);
+
+    if already_exists {
+        let note = get_note_by_path_service_inner(conn, root, &path)?;
+        return Ok(NoteDetail {
+            note,
+            content: original_content,
+        });
+    }
+
+    tags.push(normalized_tag.to_string());
+    front_matter.tags = Some(tags);
+
+    let updated_content = render_note(&front_matter, body)?;
+    atomic_write(&abs, &updated_content)?;
+
+    let note = index_note_full(conn, root, &path, &updated_content)?;
+    Ok(NoteDetail {
+        note,
+        content: updated_content,
+    })
+}
+
+pub fn add_tag_to_note_service(
+    state: &State<AppState>,
+    note_id: &str,
+    tag_name: &str,
+) -> AppResult<NoteDetail> {
+    let root_guard = state.kb_root_guard();
+    let root = root_guard.as_ref().ok_or_else(|| AppError::InvalidInput("No knowledge base open".into()))?;
+    let db_guard = state.db_guard();
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::InvalidInput("No database open".into()))?;
+
+    add_tag_to_note_in_root(conn, root, note_id, tag_name)
 }
 
 fn get_note_by_path_service_inner(conn: &rusqlite::Connection, _root: &Path, rel_path: &str) -> AppResult<Note> {
@@ -2108,6 +2176,7 @@ pub fn import_note_service(
 #[cfg(test)]
 mod tests {
     use super::{
+        add_tag_to_note_in_root,
         build_imported_image_filename, build_markdown_asset_path_for_note, build_tree,
         build_tree_with_directories, build_tree_with_visuals, create_note_in_root, create_notebook_in_root,
         convert_pasted_html_to_text,
@@ -2153,6 +2222,31 @@ mod tests {
         assert_eq!(supported_image_extension(Path::new("/tmp/demo.jpeg")).unwrap(), "jpeg");
         assert_eq!(supported_image_extension(Path::new("/tmp/demo.GIF")).unwrap(), "gif");
         assert_eq!(supported_image_extension(Path::new("/tmp/demo.WebP")).unwrap(), "webp");
+    }
+
+    #[test]
+    fn add_tag_to_note_in_root_writes_front_matter_tags_and_reindexes() {
+        let root = TempDir::new().unwrap();
+        let conn = open_and_migrate(&root.path().join("test.sqlite")).unwrap();
+        std::fs::create_dir_all(root.path().join("notes")).unwrap();
+
+        let content = "# Current\n\nBody [[#项目报告]]";
+        std::fs::write(root.path().join("notes/current.md"), content).unwrap();
+        let note = index_note_full(&conn, root.path(), "notes/current.md", content).unwrap();
+
+        let detail = add_tag_to_note_in_root(&conn, root.path(), &note.id, "项目报告").unwrap();
+
+        assert_eq!(detail.note.path, "notes/current.md");
+        assert!(detail.content.contains("tags:\n- 项目报告") || detail.content.contains("tags:\n  - 项目报告"));
+
+        let note_tag_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM note_tags nt JOIN tags t ON t.id = nt.tag_id WHERE nt.note_id = ?1 AND t.normalized_name = '项目报告'",
+                params![note.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(note_tag_count, 1);
     }
 
     #[test]

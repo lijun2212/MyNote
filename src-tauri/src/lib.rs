@@ -82,6 +82,7 @@ pub fn run() {
             commands::note::get_note_by_path,
             commands::note::get_note_outline,
             commands::note::save_note,
+            commands::note::add_tag_to_note,
             commands::note::get_note_tree,
             commands::note::import_note,
             commands::note::import_markdown_sources,

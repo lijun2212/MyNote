@@ -22,6 +22,7 @@ const apiMocks = vi.hoisted(() => ({
   listTags: vi.fn(),
   getTagContext: vi.fn(),
   getNoteByPath: vi.fn(),
+  addTagToNote: vi.fn(),
   deleteTag: vi.fn(),
 }));
 
@@ -34,6 +35,7 @@ describe("TagPanel", () => {
     apiMocks.listTags.mockReset();
     apiMocks.getTagContext.mockReset();
     apiMocks.getNoteByPath.mockReset();
+    apiMocks.addTagToNote.mockReset();
     apiMocks.deleteTag.mockReset();
     vi.restoreAllMocks();
 
@@ -55,6 +57,10 @@ describe("TagPanel", () => {
     apiMocks.getNoteByPath.mockResolvedValue({
       note: makeNote({ id: "note-1", path: "notes/current.md", title: "Current" }),
       content: "# Current\n\nBody",
+    });
+    apiMocks.addTagToNote.mockResolvedValue({
+      note: makeNote({ id: "note-1", path: "notes/current.md", title: "Current", content_hash: "hash-with-tag" }),
+      content: "---\ntags:\n  - 法律适用\n---\n\n# Current\n\nBody",
     });
     clearActiveDraggedTagName();
   });
@@ -210,12 +216,55 @@ describe("TagPanel", () => {
     expect(screen.getByRole("button", { name: "添加标签" })).toBeInTheDocument();
   });
 
-  it("adds a new tag to the sidebar immediately after confirming the inline creator", async () => {
-    const user = userEvent.setup();
-    const insertListener = vi.fn();
-
+  it("keeps the tag panel content in a dedicated scroll region", async () => {
     apiMocks.listTags.mockResolvedValue([{ id: "tag-1", name: "项目报告", note_count: 3 }]);
-    window.addEventListener("mynote:insert-tag", insertListener as EventListener);
+
+    render(<TagPanel />);
+
+    await screen.findByRole("button", { name: "标签 项目报告 3" });
+
+    expect(screen.getByTestId("tag-panel-scroll-region")).toHaveStyle({
+      overflowY: "auto",
+      minHeight: "0",
+      flex: "1 1 0%",
+    });
+  });
+
+  it("lets users click add-tag without an open note and shows guidance instead of disabling the button", async () => {
+    const user = userEvent.setup();
+
+    useEditorStore.setState({
+      currentNote: null,
+      content: "",
+      isDirty: false,
+      isSaving: false,
+      saveError: null,
+      saveStatus: "saved",
+      showPreview: true,
+      tagNavigationTarget: null,
+    });
+    apiMocks.listTags.mockResolvedValue([]);
+
+    render(<TagPanel />);
+
+    const addButton = screen.getByRole("button", { name: "新增标签" });
+    expect(addButton).not.toBeDisabled();
+
+    await user.click(addButton);
+
+    expect(screen.getByText("请先从左侧文件树打开或新建一篇笔记，然后再为它添加标签。")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "新标签名称" })).not.toBeInTheDocument();
+  });
+
+  it("adds a new tag to the current note front matter and updates the sidebar immediately", async () => {
+    const user = userEvent.setup();
+
+    apiMocks.listTags
+      .mockResolvedValueOnce([{ id: "tag-1", name: "项目报告", note_count: 3 }])
+      .mockResolvedValueOnce([
+        { id: "tag-1", name: "项目报告", note_count: 3 },
+        { id: "tag-2", name: "法律适用", note_count: 1 },
+      ]);
 
     render(<TagPanel />);
 
@@ -225,14 +274,14 @@ describe("TagPanel", () => {
     await user.type(screen.getByRole("textbox", { name: "新标签名称" }), "法律适用");
     await user.click(screen.getByRole("button", { name: "添加标签" }));
 
-    expect(insertListener).toHaveBeenCalledTimes(1);
-    const event = insertListener.mock.calls[0][0] as CustomEvent;
-    expect(event.detail).toEqual({ tagName: "法律适用", source: "panel-add" });
+    expect(apiMocks.addTagToNote).toHaveBeenCalledWith("note-1", "法律适用");
+    expect(useEditorStore.getState().content).toContain("tags:");
+    expect(useEditorStore.getState().content).toContain("法律适用");
 
-    const list = screen.getByTestId("tag-panel-list");
-    expect(within(list).getByRole("button", { name: "标签 法律适用 1" })).toBeInTheDocument();
-
-    window.removeEventListener("mynote:insert-tag", insertListener as EventListener);
+    await waitFor(() => {
+      const list = screen.getByTestId("tag-panel-list");
+      expect(within(list).getByRole("button", { name: "标签 法律适用 1" })).toBeInTheDocument();
+    });
   });
 
   it("stores the dragged tag name in shared drag state on drag start", async () => {

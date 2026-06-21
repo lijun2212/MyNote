@@ -10,18 +10,10 @@ fn list_tags_in_conn(conn: &Connection) -> Result<Vec<TagSummary>, String> {
             "SELECT t.id,
                     t.name,
                     COALESCE((
-                        SELECT COUNT(*)
+                                                SELECT COUNT(DISTINCT nt.note_id)
                         FROM note_tags nt
                         JOIN notes n ON n.id = nt.note_id
                         WHERE nt.tag_id = t.id
-                          AND nt.source = 'front_matter'
-                          AND n.deleted_at IS NULL
-                    ), 0)
-                    + COALESCE((
-                        SELECT COUNT(*)
-                        FROM tag_occurrences o
-                        JOIN notes n ON n.id = o.note_id
-                        WHERE o.tag_id = t.id
                           AND n.deleted_at IS NULL
                     ), 0) AS note_count
              FROM tags t
@@ -130,7 +122,7 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn list_tags_counts_front_matter_and_each_inline_occurrence() {
+    fn list_tags_counts_only_front_matter_note_associations() {
         let root = TempDir::new().unwrap();
         let conn = open_and_migrate(&root.path().join("index.sqlite")).unwrap();
 
@@ -138,13 +130,13 @@ mod tests {
             &conn,
             root.path(),
             "notes/demo.md",
-            "---\ntitle: Demo\ntags:\n  - 测试\n---\n\n# Demo\n\n#测试\n再次出现 #测试",
+            "---\ntitle: Demo\ntags:\n  - 测试\n---\n\n# Demo\n\n[[#测试]]\n再次出现 [[#测试]]",
         )
         .unwrap();
 
         let tags = list_tags_in_conn(&conn).unwrap();
         let testing = tags.iter().find(|tag| tag.name == "测试").unwrap();
 
-        assert_eq!(testing.note_count, 3);
+        assert_eq!(testing.note_count, 1);
     }
 }

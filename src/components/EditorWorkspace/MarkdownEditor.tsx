@@ -5,7 +5,7 @@ import { Decoration, type DecorationSet, EditorView, keymap, lineNumbers, ViewPl
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import type { SourceLineSyncSignal } from "./sourceLineSync";
-import { findInlineTagMatches } from "./inlineTags";
+import { buildInlineTagText, findInlineTagMatches } from "./inlineTags";
 import { clearActiveDraggedTagName, getActiveDraggedTagName } from "./tagDragState";
 import type { SearchNavigationTarget, TagNavigationTarget } from "../../types";
 import type { SearchResult } from "../../types";
@@ -379,7 +379,7 @@ function findAutoLinkMatches(text: string): AutoLinkMatch[] {
 }
 
 function buildTagInsertText(tagName: string): string {
-  return `#${tagName} `;
+  return `${buildInlineTagText(tagName)} `;
 }
 
 function buildImageInsertText(markdownPath: string): string {
@@ -704,7 +704,8 @@ function readDraggedTagName(dataTransfer: DataTransfer | null): string {
 
   const plainText = dataTransfer?.getData("text/plain")?.trim() ?? "";
   if (plainText) {
-    const tagName = plainText.startsWith("#") ? plainText.slice(1).trim() : plainText;
+    const match = findInlineTagMatches(plainText)[0] ?? null;
+    const tagName = match?.name ?? plainText;
     logTagDrag("read-payload", { source: "text/plain", plainText, tagName });
     return tagName;
   }

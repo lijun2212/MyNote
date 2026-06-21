@@ -4,9 +4,10 @@ use crate::infrastructure::fs::{normalize_kb_relative_path, resolve_kb_path};
 use crate::infrastructure::hash::sha256_str;
 use crate::infrastructure::markdown::{
     InlineTagOccurrence, body_line_offset, extract_inline_tag_occurrences_with_offset,
-    extract_inline_tags, extract_links, parse_note,
+    extract_links, parse_note,
 };
 use rusqlite::{params, Connection, OptionalExtension};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use ulid::Ulid;
 
@@ -36,11 +37,17 @@ pub fn index_note_full(
     let summary = parsed.front_matter.summary.clone();
     let word_count = parsed.word_count as i64;
     let fm_tags = parsed.front_matter.tags.clone().unwrap_or_default();
-    let inline_tags = extract_inline_tags(&parsed.body);
+    let fm_tag_names = fm_tags
+        .iter()
+        .map(|tag| tag.trim().to_lowercase())
+        .collect::<HashSet<_>>();
     let inline_occurrences = extract_inline_tag_occurrences_with_offset(
         &parsed.body,
         body_line_offset(content),
-    );
+    )
+    .into_iter()
+    .filter(|occurrence| fm_tag_names.contains(&occurrence.tag_name.trim().to_lowercase()))
+    .collect::<Vec<_>>();
     let raw_links = extract_links(&parsed.body);
 
     // ── single transaction ──────────────────────────────────────────────────
@@ -72,11 +79,6 @@ pub fn index_note_full(
     tx.execute("DELETE FROM note_tags WHERE note_id = ?1", params![actual_id])?;
     for tag_name in &fm_tags {
         upsert_tag_and_link(&tx, &actual_id, tag_name, "front_matter", &now)?;
-    }
-    for tag_name in &inline_tags {
-        if !fm_tags.contains(tag_name) {
-            upsert_tag_and_link(&tx, &actual_id, tag_name, "inline", &now)?;
-        }
     }
 
     // 3. Rebuild tag_occurrences
@@ -465,14 +467,14 @@ mod tests {
             &conn,
             root.path(),
             "notes/source.md",
-            "# Title\n\nAlpha #项目报告 here.\n```md\n#项目报告\n```\n## Section\nBeta #项目报告 again.",
+            "---\ntags:\n  - 项目报告\n---\n\n# Title\n\nAlpha [[#项目报告]] here.\n```md\n[[#项目报告]]\n```\n## Section\nBeta [[#项目报告]] again.",
         )
         .unwrap();
 
         let occurrences = occurrence_rows(&conn, "Title", "项目报告");
         assert_eq!(occurrences.len(), 2);
-        assert_eq!(occurrences[0], (3, 3, Some("Title".to_string()), "Alpha #项目报告 here.".to_string(), 1));
-        assert_eq!(occurrences[1], (8, 8, Some("Section".to_string()), "Beta #项目报告 again.".to_string(), 2));
+        assert_eq!(occurrences[0], (8, 8, Some("Title".to_string()), "Alpha [[#项目报告]] here.".to_string(), 1));
+        assert_eq!(occurrences[1], (13, 13, Some("Section".to_string()), "Beta [[#项目报告]] again.".to_string(), 2));
     }
 
     #[test]
@@ -483,13 +485,13 @@ mod tests {
             &conn,
             root.path(),
             "notes/source.md",
-            "---\ntitle: Demo\n---\n\n# Title\n\nAlpha(#项目报告) here.",
+            "---\ntitle: Demo\ntags:\n  - 项目报告\n---\n\n# Title\n\nAlpha([[#项目报告]]) here.",
         )
         .unwrap();
 
         let occurrences = occurrence_rows(&conn, "Demo", "项目报告");
         assert_eq!(occurrences.len(), 1);
-        assert_eq!(occurrences[0], (7, 7, Some("Title".to_string()), "Alpha(#项目报告) here.".to_string(), 1));
+        assert_eq!(occurrences[0], (9, 9, Some("Title".to_string()), "Alpha([[#项目报告]]) here.".to_string(), 1));
     }
 
     #[test]
@@ -500,7 +502,7 @@ mod tests {
             &conn,
             root.path(),
             "notes/source.md",
-            "# Title\n\n真实标签 #项目报告",
+            "---\ntags:\n  - 项目报告\n---\n\n# Title\n\n真实标签 [[#项目报告]]",
         )
         .unwrap();
 

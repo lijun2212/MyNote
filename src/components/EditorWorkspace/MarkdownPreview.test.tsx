@@ -118,12 +118,14 @@ describe("MarkdownPreview", () => {
   });
 
   it("renders inline tags as preview tag chips", () => {
-    const { container } = render(<MarkdownPreview content={["#项目报告", "", "普通正文 #阶段一"].join("\n")} />);
+    const { container } = render(
+      <MarkdownPreview content={["#项目报告", "", "普通正文 [[#阶段一]]", "另一个 [[#项目报告]]"].join("\n")} />,
+    );
 
     const chips = container.querySelectorAll(".inline-tag-chip");
     expect(chips).toHaveLength(2);
-    expect(chips[0]).toHaveTextContent("项目报告");
-    expect(chips[1]).toHaveTextContent("阶段一");
+    expect(chips[0]).toHaveTextContent("阶段一");
+    expect(chips[1]).toHaveTextContent("项目报告");
   });
 
   it("renders inline LaTeX formulas in markdown content", () => {
@@ -1265,7 +1267,7 @@ describe("MarkdownPreview", () => {
       line_start: 7,
       line_end: 7,
       heading_context: null,
-      context_snippet: "Body #阶段一",
+      context_snippet: "Body [[#阶段一]]",
       tag_name: "阶段一",
       revision: 1,
     };
@@ -1279,7 +1281,7 @@ describe("MarkdownPreview", () => {
           "  - private",
           "---",
           "",
-          "Body #阶段一",
+          "Body [[#阶段一]]",
         ].join("\n")}
         tagNavigationTarget={tagNavigationTarget}
       />,

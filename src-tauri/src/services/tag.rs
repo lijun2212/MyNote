@@ -234,10 +234,10 @@ mod tests {
             "",
             "# Tagged",
             "",
-            "正文里还有 #项目报告 标签",
+            "正文里还有 [[#项目报告]] 标签",
         ]
         .join("\n");
-        let untouched_content = "# Untouched\n\n这里只有 #阶段一";
+        let untouched_content = "# Untouched\n\n这里只有 [[#阶段一]]";
 
         std::fs::write(root.path().join("notes/tagged.md"), &tagged_content).unwrap();
         std::fs::write(root.path().join("notes/untouched.md"), untouched_content).unwrap();
@@ -277,7 +277,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(remaining_tag_count, 2);
+        assert_eq!(remaining_tag_count, 1);
     }
 
         #[test]
@@ -286,7 +286,7 @@ mod tests {
             let notes = [
                 (
                     "notes/newest-inline.md",
-                    "# Newest Inline\n\nFirst #项目报告 hit.\nLater #项目报告 again.",
+                    "---\ntags:\n  - 项目报告\n---\n\n# Newest Inline\n\nFirst [[#项目报告]] hit.\nLater [[#项目报告]] again.",
                     "2026-06-01T09:00:00Z",
                 ),
                 (
@@ -296,22 +296,22 @@ mod tests {
                 ),
                 (
                     "notes/recent-three.md",
-                    "# Recent Three\n\nAlpha #项目报告.",
+                    "---\ntags:\n  - 项目报告\n---\n\n# Recent Three\n\nAlpha [[#项目报告]].",
                     "2026-06-01T07:00:00Z",
                 ),
                 (
                     "notes/recent-four.md",
-                    "# Recent Four\n\nAlpha #项目报告.",
+                    "---\ntags:\n  - 项目报告\n---\n\n# Recent Four\n\nAlpha [[#项目报告]].",
                     "2026-06-01T06:00:00Z",
                 ),
                 (
                     "notes/recent-five.md",
-                    "# Recent Five\n\nAlpha #项目报告.",
+                    "---\ntags:\n  - 项目报告\n---\n\n# Recent Five\n\nAlpha [[#项目报告]].",
                     "2026-06-01T05:00:00Z",
                 ),
                 (
                     "notes/oldest-six.md",
-                    "# Oldest Six\n\nAlpha #项目报告.",
+                    "---\ntags:\n  - 项目报告\n---\n\n# Oldest Six\n\nAlpha [[#项目报告]].",
                     "2026-06-01T04:00:00Z",
                 ),
             ];
@@ -353,17 +353,17 @@ mod tests {
             let newest = &context.items[0];
             assert_eq!(newest.source, "inline");
             assert_eq!(newest.occurrence_order, 1);
-            assert_eq!(newest.line_start, 3);
-            assert_eq!(newest.line_end, 3);
+            assert_eq!(newest.line_start, 8);
+            assert_eq!(newest.line_end, 8);
             assert_eq!(newest.heading_context.as_deref(), Some("Newest Inline"));
-            assert_eq!(newest.context_snippet, "First #项目报告 hit.");
+            assert_eq!(newest.context_snippet, "First [[#项目报告]] hit.");
 
             let newest_second = &context.items[1];
             assert_eq!(newest_second.source, "inline");
             assert_eq!(newest_second.occurrence_order, 2);
-            assert_eq!(newest_second.line_start, 4);
-            assert_eq!(newest_second.line_end, 4);
-            assert_eq!(newest_second.context_snippet, "Later #项目报告 again.");
+            assert_eq!(newest_second.line_start, 9);
+            assert_eq!(newest_second.line_end, 9);
+            assert_eq!(newest_second.context_snippet, "Later [[#项目报告]] again.");
 
             let front_matter = &context.items[2];
             assert_eq!(front_matter.source, "front_matter");
