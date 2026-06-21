@@ -302,11 +302,16 @@ describe("MarkdownPreview", () => {
     expect(checkboxes[2]).toBeChecked();
     expect(checkboxes[0]).toBeDisabled();
     expect(checkboxes[0]).toHaveStyle({
-      width: "1.12em",
-      height: "1.12em",
+      width: "1.5em",
+      height: "1.5em",
       verticalAlign: "middle",
       borderRadius: "0.28em",
     });
+
+    const styleTagText = container.querySelector("style")?.textContent ?? "";
+    expect(styleTagText).toContain(".markdown-preview-content .markdown-task-list-checkbox::after");
+    expect(styleTagText).toContain("width: 0.5em");
+    expect(styleTagText).toContain("height: 0.8em");
 
     const items = Array.from(container.querySelectorAll("li")).map((item) => item.textContent ?? "");
     expect(items[0]).toContain("Pending task");
@@ -405,6 +410,20 @@ describe("MarkdownPreview", () => {
     const { container } = render(
       <MarkdownPreview
         content="![图片](../../assets/20260610-092845-01ktrd.png)"
+      />,
+    );
+
+    const image = container.querySelector("img") as HTMLImageElement | null;
+    expect(image).not.toBeNull();
+    expect(image?.getAttribute("src")).toBe("asset:///Users/lijun/KnowledgeBase/assets/20260610-092845-01ktrd.png");
+  });
+
+  it("rewrites local markdown image paths from explicit preview context even without editor store state", () => {
+    const { container } = render(
+      <MarkdownPreview
+        content="![图片](../../assets/20260610-092845-01ktrd.png)"
+        notePath="notes/project/demo.md"
+        kbRootPath="/Users/lijun/KnowledgeBase"
       />,
     );
 
@@ -1061,6 +1080,34 @@ describe("MarkdownPreview", () => {
     expect(paragraphs[0]).toHaveClass("markdown-cn-indent-paragraph");
     expect(container.querySelector("li .markdown-cn-indent-paragraph")).toBeNull();
     expect(container.querySelector("li")).toHaveTextContent("这是列表项，不应该触发中文段首缩进语法。");
+  });
+
+  it("renders ..(password).. as an inline embedded password-like field with a fixed six-star mask", () => {
+    const { container } = render(
+      <MarkdownPreview
+        content={[
+          "登录密码：..(P@ssw0rd-2026)..，请勿外传。",
+          "代码示例：`..(demo-code)..` 不应被转换。",
+        ].join("\n\n")}
+      />,
+    );
+
+    const passwordField = container.querySelector("input[type='text']") as HTMLInputElement | null;
+    expect(passwordField).not.toBeNull();
+    expect(passwordField).toHaveClass("markdown-password-field");
+    expect(passwordField).toHaveAttribute("value", "******");
+    expect(passwordField).toHaveAttribute("size", "6");
+    expect(passwordField).toHaveAttribute("readonly");
+    expect(passwordField).toHaveAttribute("tabindex", "-1");
+    expect(passwordField).toHaveStyle({ width: "8.2ch" });
+    expect(passwordField).toHaveStyle({
+      background: "#f8fafc",
+      border: "1px solid #d8e1ec",
+      borderRadius: "6px",
+      boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.96)",
+    });
+    expect(container.querySelector("code")).toHaveTextContent("..(demo-code)..");
+    expect(container.querySelector("code input[type='text']")).toBeNull();
   });
 
   it("removes raw HTML tags outside the whitelist without disabling markdown-generated elements", () => {

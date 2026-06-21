@@ -51,6 +51,7 @@ function makeStateSyncPayload(
     revision: 1,
     notePath: "notes/current.md",
     noteTitle: "Current Note",
+    kbRootPath: null,
     content: "# Current Note\n\nBody",
     searchNavigationTarget: makeSearchNavigationTarget(),
     tagNavigationTarget: makeTagNavigationTarget(),

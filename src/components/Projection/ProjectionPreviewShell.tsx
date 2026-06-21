@@ -17,6 +17,8 @@ const MAIN_WINDOW_LABEL = "main";
 
 export function ProjectionPreviewShell() {
   const projectionSessionId = useProjectionStore((state) => state.projectionSessionId);
+  const notePath = useProjectionStore((state) => state.notePath);
+  const kbRootPath = useProjectionStore((state) => state.kbRootPath);
   const content = useProjectionStore((state) => state.content);
   const searchNavigationTarget = useProjectionStore((state) => state.searchNavigationTarget);
   const tagNavigationTarget = useProjectionStore((state) => state.tagNavigationTarget);
@@ -133,6 +135,8 @@ export function ProjectionPreviewShell() {
       >
         <MarkdownPreview
           content={content}
+          notePath={notePath}
+          kbRootPath={kbRootPath}
           searchNavigationTarget={searchNavigationTarget}
           tagNavigationTarget={tagNavigationTarget}
           sourceLineSyncSignal={sourceLineSyncSignal}

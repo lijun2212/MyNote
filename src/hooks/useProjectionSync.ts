@@ -12,6 +12,7 @@ import type { SearchNavigationTarget, TagNavigationTarget } from "../types";
 type ProjectionScrollSource = "main-editor" | "main-preview";
 
 interface UseProjectionSyncOptions {
+  kbRootPath: string | null;
   notePath: string | null;
   noteTitle: string | null;
   content: string;
@@ -47,6 +48,7 @@ async function recoverClosedWindowOnly() {
 }
 
 export function useProjectionSync({
+  kbRootPath,
   notePath,
   noteTitle,
   content,
@@ -76,6 +78,7 @@ export function useProjectionSync({
     void emitProjectionState(PROJECTION_STATE_SYNC_EVENT, {
       sessionId: store.projectionSessionId,
       revision: revisionRef.current,
+      kbRootPath,
       notePath,
       noteTitle,
       content,
@@ -84,7 +87,7 @@ export function useProjectionSync({
     }).catch((error) => {
       void recoverIfProjectionWindowClosed(error);
     });
-  }, [content, notePath, noteTitle, searchNavigationTarget, tagNavigationTarget]);
+  }, [content, kbRootPath, notePath, noteTitle, searchNavigationTarget, tagNavigationTarget]);
 
   useEffect(() => {
     if (!projectionEnabled || !projectionWindowReady) {

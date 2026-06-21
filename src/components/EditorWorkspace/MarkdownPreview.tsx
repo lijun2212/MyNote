@@ -22,6 +22,7 @@ import typescript from "highlight.js/lib/languages/typescript";
 import xml from "highlight.js/lib/languages/xml";
 import yaml from "highlight.js/lib/languages/yaml";
 import MarkdownIt from "markdown-it";
+import Token from "markdown-it/lib/token.mjs";
 import * as markdownItEmoji from "markdown-it-emoji";
 import markdownItFootnote from "markdown-it-footnote";
 import texmath from "markdown-it-texmath";
@@ -43,6 +44,8 @@ import type { BeautifyReviewState } from "../../store/useEditorStore";
 const md = new MarkdownIt({ html: true, linkify: true, typographer: true });
 const SOURCE_LINE_TAGS = new Set(["blockquote", "h1", "h2", "h3", "h4", "h5", "h6", "li", "ol", "p", "table", "tr", "ul"]);
 const CHINESE_INDENT_MARKER_PATTERN = /^\.\.:\s*/;
+const PASSWORD_FIELD_PATTERN = /(?:\.\.|…)\((.+?)\)(?:\.\.|…)/g;
+const PASSWORD_FIELD_MASK = "******";
 type MermaidRuntime = Awaited<typeof import("mermaid")>["default"];
 type HighlightLanguage = Parameters<typeof hljs.registerLanguage>[1];
 
@@ -95,6 +98,60 @@ function escapeHtmlAttr(value: string): string {
     .replace(/>/g, "&gt;");
 }
 
+function createPasswordFieldHtml(_value: string): string {
+  return `<input class="markdown-password-field" type="text" value="${PASSWORD_FIELD_MASK}" readonly tabindex="-1" aria-label="密码字段" size="6" autocomplete="off" spellcheck="false">`;
+}
+
+function replacePasswordFieldTokens(children: Token[]): Token[] {
+  const nextChildren: Token[] = [];
+
+  for (const child of children) {
+    if (child.type !== "text") {
+      nextChildren.push(child);
+      continue;
+    }
+
+    const text = child.content;
+    let lastIndex = 0;
+    let hasMatch = false;
+    PASSWORD_FIELD_PATTERN.lastIndex = 0;
+
+    for (let match = PASSWORD_FIELD_PATTERN.exec(text); match; match = PASSWORD_FIELD_PATTERN.exec(text)) {
+      hasMatch = true;
+      const [rawMatch, passwordValue] = match;
+      const matchIndex = match.index;
+
+      if (matchIndex > lastIndex) {
+        const textToken = new Token("text", "", 0);
+        textToken.content = text.slice(lastIndex, matchIndex);
+        textToken.level = child.level;
+        nextChildren.push(textToken);
+      }
+
+      const htmlToken = new Token("html_inline", "", 0);
+      htmlToken.content = createPasswordFieldHtml(passwordValue);
+      htmlToken.level = child.level;
+      nextChildren.push(htmlToken);
+
+      lastIndex = matchIndex + rawMatch.length;
+    }
+
+    if (!hasMatch) {
+      nextChildren.push(child);
+      continue;
+    }
+
+    if (lastIndex < text.length) {
+      const textToken = new Token("text", "", 0);
+      textToken.content = text.slice(lastIndex);
+      textToken.level = child.level;
+      nextChildren.push(textToken);
+    }
+  }
+
+  return nextChildren;
+}
+
 const defaultFenceRenderer = md.renderer.rules.fence;
 
 md.renderer.rules.fence = (tokens, idx, options, env, self) => {
@@ -140,7 +197,7 @@ md.core.ruler.push("cn_indent_marker", (state) => {
       continue;
     }
 
-     if (openToken.level !== 0) {
+    if (openToken.level !== 0) {
       continue;
     }
 
@@ -152,15 +209,25 @@ md.core.ruler.push("cn_indent_marker", (state) => {
     inlineToken.content = nextContent;
     openToken.attrJoin("class", "markdown-cn-indent-paragraph");
 
-    const nextChildren = [];
+    const nextChildren: Token[] = [];
     state.md.inline.parse(nextContent, state.md, state.env, nextChildren);
     inlineToken.children = nextChildren;
   }
 });
 
+md.core.ruler.push("password_field", (state) => {
+  state.tokens.forEach((token) => {
+    if (token.type !== "inline" || !token.children?.length) {
+      return;
+    }
+
+    token.children = replacePasswordFieldTokens(token.children);
+  });
+});
+
 const ALLOWED_MARKDOWN_TAGS = [
   "a", "abbr", "blockquote", "br", "code", "del", "details", "em", "hr", "h1", "h2", "h3", "h4", "h5", "h6", "img",
-  "kbd", "li", "mark", "ol", "p", "pre", "section", "span", "strong", "sub", "summary", "sup", "table", "tbody", "td", "th", "thead", "tr", "ul",
+  "input", "kbd", "li", "mark", "ol", "p", "pre", "section", "span", "strong", "sub", "summary", "sup", "table", "tbody", "td", "th", "thead", "tr", "ul",
   "math", "annotation", "mrow", "mi", "mn", "mo", "msup", "msub", "msubsup", "mfrac", "mspace", "mtext", "semantics",
 ];
 
@@ -185,7 +252,7 @@ const ALLOWED_RAW_HTML_IMAGE_SRC = /^(?:(?:https?):|(?:data:image\/(?:gif|png|jp
 
 const ALLOWED_MARKDOWN_ATTR = [
   "alt", "href", "src", "title", "class", "id", "style", "aria-hidden", "xmlns", "display", "encoding",
-  "data-title", "data-source-line", "data-source-end-line", "open",
+  "data-title", "data-source-line", "data-source-end-line", "open", "type", "value", "readonly", "tabindex", "aria-label", "size", "autocomplete", "spellcheck",
 ];
 const ALLOWED_MARKDOWN_URI = /^(?:(?:https?):|(?:data:image\/(?:gif|png|jpe?g|webp);base64,)|(?:notes\/)|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i;
 const MIN_TABLE_COLUMN_PERCENT = 8;
@@ -1293,6 +1360,8 @@ function readColumnWidths(cols: HTMLTableColElement[]): number[] {
 interface Props {
   content: string;
   beautifyReview?: BeautifyReviewState | null;
+  notePath?: string | null;
+  kbRootPath?: string | null;
   projectionMode?: boolean;
   searchNavigationTarget?: SearchNavigationTarget | null;
   tagNavigationTarget?: TagNavigationTarget | null;
@@ -1451,6 +1520,8 @@ function renderBeautifyDiffHtml(review: BeautifyReviewState): string {
 export function MarkdownPreview({
   content,
   beautifyReview,
+  notePath,
+  kbRootPath,
   projectionMode = false,
   searchNavigationTarget,
   tagNavigationTarget,
@@ -1477,7 +1548,9 @@ export function MarkdownPreview({
   const currentEditorContent = useEditorStore((s) => s.content);
   const selectedNodePath = useAppStore((s) => s.selectedNodePath);
   const setRightSidebarVisible = useAppStore((s) => s.setRightSidebarVisible);
-  const kbRootPath = useAppStore((s) => s.kb?.root_path);
+  const storeKbRootPath = useAppStore((s) => s.kb?.root_path);
+  const effectiveNotePath = notePath ?? currentNote?.path ?? undefined;
+  const effectiveKbRootPath = kbRootPath ?? storeKbRootPath ?? undefined;
 
   const showCopiedNotice = () => {
     setStatusNotice("已拷贝");
@@ -1630,8 +1703,8 @@ export function MarkdownPreview({
     if (!containerRef.current) {
       return;
     }
-    rewriteLocalImageSourcesForTauri(containerRef.current, kbRootPath, currentNote?.path ?? undefined);
-  }, [beautifyReview, content, kbRootPath, currentNote?.path]);
+    rewriteLocalImageSourcesForTauri(containerRef.current, effectiveKbRootPath, effectiveNotePath);
+  }, [beautifyReview, content, effectiveKbRootPath, effectiveNotePath]);
 
   useEffect(() => {
     if (!containerRef.current) {
@@ -2036,6 +2109,26 @@ export function MarkdownPreview({
           box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.96), 0 1px 0 rgba(148, 163, 184, 0.5), 0 2px 5px rgba(15, 23, 42, 0.09);
           vertical-align: middle;
         }
+        .markdown-preview-content .markdown-password-field {
+          display: inline-block;
+          width: 8.2ch;
+          min-width: 0;
+          max-width: 100%;
+          padding: 0.08em 0.38em;
+          margin-inline: 0.08em;
+          border-radius: 6px;
+          border: 1px solid #d8e1ec;
+          background: #f8fafc;
+          color: #64748b;
+          font: inherit;
+          font-family: var(--font-mono);
+          font-size: 0.8em;
+          letter-spacing: 0.04em;
+          line-height: 1.2;
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.96);
+          vertical-align: middle;
+          pointer-events: none;
+        }
         .markdown-preview-content .katex-display {
           margin: 0.85em 0;
           text-align: left;
@@ -2078,8 +2171,8 @@ export function MarkdownPreview({
         .markdown-preview-content .markdown-task-list-checkbox {
           appearance: none;
           -webkit-appearance: none;
-          width: 1.12em;
-          height: 1.12em;
+          width: 1.5em;
+          height: 1.5em;
           margin: 0 0.62em 0 0;
           vertical-align: middle;
           border-radius: 0.28em;
@@ -2094,11 +2187,11 @@ export function MarkdownPreview({
         }
         .markdown-preview-content .markdown-task-list-checkbox::after {
           content: "";
-          width: 0.3em;
-          height: 0.56em;
-          border-right: 2px solid #fff;
-          border-bottom: 2px solid #fff;
-          transform: rotate(45deg) translate(-0.01em, -0.04em);
+          width: 0.5em;
+          height: 0.8em;
+          border-right: 2.4px solid #fff;
+          border-bottom: 2.4px solid #fff;
+          transform: rotate(45deg) translate(-0.01em, -0.05em);
           opacity: 0;
         }
         .markdown-preview-content .markdown-task-list-checkbox:checked {

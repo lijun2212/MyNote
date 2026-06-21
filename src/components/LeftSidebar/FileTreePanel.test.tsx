@@ -228,7 +228,7 @@ describe("FileTreePanel", () => {
         }
 
         if (wrapperTestId === "directory-content:notes/民呼我为项目") {
-          const nestedContent = this.querySelector<HTMLElement>("[data-testid='directory-content:notes/民呼我为项目/归档']");
+          const nestedContent = this.querySelector("[data-testid='directory-content:notes/民呼我为项目/归档']") as HTMLElement | null;
           return nestedContent?.style.maxHeight === "24px" ? 48 : 24;
         }
 
@@ -423,7 +423,11 @@ describe("FileTreePanel", () => {
           value: originalResizeObserver,
         });
       } else {
-        delete (globalThis as typeof globalThis & { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
+        Object.defineProperty(globalThis, "ResizeObserver", {
+          configurable: true,
+          writable: true,
+          value: undefined,
+        });
       }
 
       window.requestAnimationFrame = originalRequestAnimationFrame;

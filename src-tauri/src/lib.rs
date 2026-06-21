@@ -6,6 +6,53 @@ pub mod services;
 pub mod state;
 
 use state::AppState;
+use tauri::Manager;
+
+const MAIN_WINDOW_LABEL: &str = "main";
+const PROJECTION_WINDOW_LABEL: &str = "projection-preview";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ManagedWindowLifecycleEvent {
+    CloseRequested,
+    Destroyed,
+    Other,
+}
+
+fn classify_window_lifecycle_event(event: &tauri::WindowEvent) -> ManagedWindowLifecycleEvent {
+    match event {
+        tauri::WindowEvent::CloseRequested { .. } => ManagedWindowLifecycleEvent::CloseRequested,
+        tauri::WindowEvent::Destroyed => ManagedWindowLifecycleEvent::Destroyed,
+        _ => ManagedWindowLifecycleEvent::Other,
+    }
+}
+
+fn should_close_projection_with_main_window(
+    window_label: &str,
+    event: ManagedWindowLifecycleEvent,
+) -> bool {
+    window_label == MAIN_WINDOW_LABEL
+        && matches!(
+            event,
+            ManagedWindowLifecycleEvent::CloseRequested | ManagedWindowLifecycleEvent::Destroyed
+        )
+}
+
+fn close_projection_with_main_window<R: tauri::Runtime>(
+    window: &tauri::Window<R>,
+    event: &tauri::WindowEvent,
+) {
+    if !should_close_projection_with_main_window(
+        window.label(),
+        classify_window_lifecycle_event(event),
+    ) {
+        return;
+    }
+
+    if let Some(projection_window) = window.app_handle().get_webview_window(PROJECTION_WINDOW_LABEL)
+    {
+        let _ = projection_window.close();
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -67,6 +114,44 @@ pub fn run() {
             commands::summary::generate_summary_candidate_with_ai_stream,
             commands::summary::save_note_summary,
         ])
+        .on_window_event(close_projection_with_main_window)
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{should_close_projection_with_main_window, ManagedWindowLifecycleEvent};
+
+    #[test]
+    fn closes_projection_when_main_window_close_is_requested() {
+        assert!(should_close_projection_with_main_window(
+            "main",
+            ManagedWindowLifecycleEvent::CloseRequested,
+        ));
+    }
+
+    #[test]
+    fn closes_projection_when_main_window_is_destroyed() {
+        assert!(should_close_projection_with_main_window(
+            "main",
+            ManagedWindowLifecycleEvent::Destroyed,
+        ));
+    }
+
+    #[test]
+    fn does_not_close_projection_for_other_main_window_events() {
+        assert!(!should_close_projection_with_main_window(
+            "main",
+            ManagedWindowLifecycleEvent::Other,
+        ));
+    }
+
+    #[test]
+    fn does_not_close_projection_when_projection_window_closes_itself() {
+        assert!(!should_close_projection_with_main_window(
+            "projection-preview",
+            ManagedWindowLifecycleEvent::CloseRequested,
+        ));
+    }
 }

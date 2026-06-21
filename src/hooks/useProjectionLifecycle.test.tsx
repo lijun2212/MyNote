@@ -108,6 +108,30 @@ describe("useProjectionLifecycle", () => {
     });
   });
 
+  it("marks projection closed when the window is manually destroyed before the ready event returns", async () => {
+    const listeners = mockProjectionListeners();
+    tauriMocks.getWebviewWindowByLabel.mockResolvedValue(null);
+
+    renderHook(() => useProjectionLifecycle());
+
+    await flushListenerRegistration();
+
+    useProjectionStore.getState().beginSession();
+
+    const destroyedListener = listeners.get("tauri://destroyed");
+    expect(destroyedListener).toBeTypeOf("function");
+
+    await act(async () => {
+      await destroyedListener?.({ event: "tauri://destroyed", id: -1, payload: null });
+    });
+
+    expect(useProjectionStore.getState()).toMatchObject({
+      projectionEnabled: false,
+      projectionSessionRequested: false,
+      projectionWindowReady: false,
+    });
+  });
+
   it("marks projection closed and stores the error after the error event", async () => {
     const listeners = mockProjectionListeners();
 

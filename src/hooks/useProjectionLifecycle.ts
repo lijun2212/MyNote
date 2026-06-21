@@ -64,7 +64,7 @@ export function useProjectionLifecycle() {
         async () => {
           const store = useProjectionStore.getState();
 
-          if (!store.projectionSessionRequested || !store.projectionWindowReady) {
+          if (!store.projectionSessionRequested) {
             return;
           }
 

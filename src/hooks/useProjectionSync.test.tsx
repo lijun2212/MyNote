@@ -72,6 +72,7 @@ describe("useProjectionSync", () => {
     useProjectionStore.getState().setReady(true);
 
     renderHook(() => useProjectionSync({
+        kbRootPath: "/Users/lijun/KnowledgeBase",
       notePath: "notes/demo.md",
       noteTitle: "Demo",
       content: "# Demo",
@@ -85,6 +86,7 @@ describe("useProjectionSync", () => {
         expect.objectContaining({
           sessionId: 1,
           revision: 1,
+            kbRootPath: "/Users/lijun/KnowledgeBase",
           notePath: "notes/demo.md",
           noteTitle: "Demo",
           content: "# Demo",
@@ -100,6 +102,7 @@ describe("useProjectionSync", () => {
     useProjectionStore.getState().setReady(true);
 
     const { rerender } = renderHook(({ noteTitle }) => useProjectionSync({
+        kbRootPath: "/Users/lijun/KnowledgeBase",
       notePath: "notes/demo.md",
       noteTitle,
       content: "# Demo",
@@ -122,6 +125,7 @@ describe("useProjectionSync", () => {
 
   it("does not emit a projection state snapshot when no projection session is active", async () => {
     renderHook(() => useProjectionSync({
+        kbRootPath: "/Users/lijun/KnowledgeBase",
       notePath: "notes/demo.md",
       noteTitle: "Demo",
       content: "# Demo",
@@ -140,6 +144,7 @@ describe("useProjectionSync", () => {
     useProjectionStore.getState().beginSession();
 
     renderHook(() => useProjectionSync({
+        kbRootPath: "/Users/lijun/KnowledgeBase",
       notePath: "notes/demo.md",
       noteTitle: "Demo",
       content: "# Demo",
@@ -160,6 +165,7 @@ describe("useProjectionSync", () => {
     useProjectionStore.getState().setReady(true);
 
     const { result } = renderHook(() => useProjectionSync({
+        kbRootPath: "/Users/lijun/KnowledgeBase",
       notePath: "notes/demo.md",
       noteTitle: "Demo",
       content: "# Demo",
@@ -202,6 +208,7 @@ describe("useProjectionSync", () => {
     useProjectionStore.getState().setReady(true);
 
     renderHook(() => useProjectionSync({
+        kbRootPath: "/Users/lijun/KnowledgeBase",
       notePath: "notes/demo.md",
       noteTitle: "Demo",
       content: "# Demo",
@@ -220,6 +227,7 @@ describe("useProjectionSync", () => {
     useProjectionStore.getState().setReady(true);
 
     renderHook(() => useProjectionSync({
+        kbRootPath: "/Users/lijun/KnowledgeBase",
       notePath: "notes/demo.md",
       noteTitle: "Demo",
       content: "# Demo",
@@ -249,6 +257,7 @@ describe("useProjectionSync", () => {
     useProjectionStore.getState().setReady(true);
 
     renderHook(() => useProjectionSync({
+        kbRootPath: "/Users/lijun/KnowledgeBase",
       notePath: "notes/demo.md",
       noteTitle: "Demo",
       content: "# Demo",
@@ -279,6 +288,7 @@ describe("useProjectionSync", () => {
     });
 
     renderHook(() => useProjectionSync({
+        kbRootPath: "/Users/lijun/KnowledgeBase",
       notePath: "notes/demo.md",
       noteTitle: "Demo",
       content: "# Demo",

@@ -20,6 +20,7 @@ export interface ProjectionStateSyncPayload {
   revision: number;
   notePath: string | null;
   noteTitle: string | null;
+  kbRootPath: string | null;
   content: string;
   searchNavigationTarget: SearchNavigationTarget | null;
   tagNavigationTarget: TagNavigationTarget | null;

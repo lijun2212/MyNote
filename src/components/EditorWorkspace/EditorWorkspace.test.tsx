@@ -270,9 +270,23 @@ describe("EditorWorkspace", () => {
 
     expect(screen.getByTestId("mock-editor")).toBeInTheDocument();
     expect(screen.getByTestId("mock-preview")).toBeInTheDocument();
-    expect(screen.getByRole("separator")).toBeInTheDocument();
+    const separator = screen.getByRole("separator");
+    const separatorVisualLine = separator.firstElementChild;
+    expect(separator).toBeInTheDocument();
+    expect(separatorVisualLine).toHaveStyle({ borderLeft: "1px solid #e0e2e7" });
+    expect(separatorVisualLine).not.toHaveStyle({ borderRight: "1px solid #e0e2e7" });
     expect(screen.getByRole("button", { name: "阅读模式" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "返回双列模式" })).not.toBeInTheDocument();
+  });
+
+  it("starts split resizing from mouse down on the separator", () => {
+    useEditorStore.getState().setViewMode("split");
+
+    render(<EditorWorkspace />);
+
+    fireEvent.mouseDown(screen.getByRole("separator"), { clientX: 500 });
+
+    expect(splitResizeState.startResize).toHaveBeenCalledTimes(1);
   });
 
   it("renders preview mode with only preview and a return-to-split icon button", () => {
@@ -471,6 +485,51 @@ describe("EditorWorkspace", () => {
       projectionEnabled: false,
       projectionWindowReady: false,
     });
+  });
+
+  it("resets the toolbar projection state even when closing the projection window reports an error", async () => {
+    const user = userEvent.setup();
+    projectionWindowApiMocks.closeProjectionWindow.mockRejectedValue(new Error("关闭投影失败"));
+
+    render(<EditorWorkspace />);
+
+    await user.click(screen.getByRole("button", { name: "开启投影" }));
+    expect(screen.getByRole("button", { name: "关闭投影" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "关闭投影" }));
+
+    expect(projectionWindowApiMocks.closeProjectionWindow).toHaveBeenCalledTimes(1);
+    expect(useProjectionStore.getState()).toMatchObject({
+      projectionSessionRequested: false,
+      projectionEnabled: false,
+      projectionWindowReady: false,
+    });
+    expect(screen.getByRole("button", { name: "开启投影" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(useProjectionStore.getState().projectionLastError).toBe("关闭投影失败");
+    });
+  });
+
+  it("resets the toolbar projection state immediately when the close request is still pending", async () => {
+    const pendingClose = deferred<void>();
+    projectionWindowApiMocks.closeProjectionWindow.mockReturnValue(pendingClose.promise);
+
+    render(<EditorWorkspace />);
+
+    await userEvent.click(screen.getByRole("button", { name: "开启投影" }));
+    expect(screen.getByRole("button", { name: "关闭投影" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭投影" }));
+
+    expect(projectionWindowApiMocks.closeProjectionWindow).toHaveBeenCalledTimes(1);
+    expect(useProjectionStore.getState()).toMatchObject({
+      projectionSessionRequested: false,
+      projectionEnabled: false,
+      projectionWindowReady: false,
+    });
+    expect(screen.getByRole("button", { name: "开启投影" })).toBeInTheDocument();
+
+    pendingClose.resolve();
   });
 
   it("highlights toolbar buttons on hover and restores them on mouse leave", async () => {

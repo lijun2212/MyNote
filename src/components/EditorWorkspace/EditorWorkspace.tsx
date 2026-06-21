@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "../../api/commands";
 import { mapMarkdownBeautifyStreamEvent } from "../../api/commands";
+import { useAppStore } from "../../store/useAppStore";
 import { useEditorStore } from "../../store/useEditorStore";
 import { useProjectionStore } from "../../store/useProjectionStore";
 import { useSearchSessionStore } from "../../store/useSearchSessionStore";
@@ -155,6 +157,7 @@ export function EditorWorkspace() {
     applyBeautifyContent,
   } = useEditorStore();
   const session = useSearchSessionStore((state) => state.session);
+  const kbRootPath = useAppStore((state) => state.kb?.root_path ?? null);
   const setCurrentIndex = useSearchSessionStore((state) => state.setCurrentIndex);
   const clearSession = useSearchSessionStore((state) => state.clearSession);
   const projectionEnabled = useProjectionStore((state) => state.projectionEnabled);
@@ -169,6 +172,7 @@ export function EditorWorkspace() {
     ? tagNavigationTarget
     : null;
   const { syncProjectionScroll } = useProjectionSync({
+    kbRootPath,
     notePath: currentNote?.path ?? null,
     noteTitle: currentNote?.title ?? null,
     content,
@@ -299,8 +303,12 @@ export function EditorWorkspace() {
 
   const handleToggleProjection = useCallback(async () => {
     if (useProjectionStore.getState().projectionEnabled) {
-      await closeProjectionWindow();
-      useProjectionStore.getState().markClosed();
+      flushSync(() => {
+        useProjectionStore.getState().markClosed();
+      });
+      void closeProjectionWindow().catch((error) => {
+        useProjectionStore.getState().setError(error instanceof Error ? error.message : "关闭投影失败");
+      });
       return;
     }
 
@@ -768,6 +776,7 @@ export function EditorWorkspace() {
         />
       )}
       <div
+        ref={splitContainerRef}
         style={{
           flex: 1,
           display: "flex",
@@ -806,19 +815,34 @@ export function EditorWorkspace() {
               tabIndex={0}
               onPointerEnter={() => setIsSeparatorHovered(true)}
               onPointerLeave={() => setIsSeparatorHovered(false)}
+              onMouseDown={startResize}
               onPointerDown={startResize}
               onPointerMove={resize}
               onPointerUp={stopResize}
               onPointerCancel={stopResize}
               style={{
-                width: 6,
+                width: 14,
                 flexShrink: 0,
+                alignSelf: "stretch",
                 cursor: "col-resize",
-                background: isResizing || isSeparatorHovered ? "#d9ddff" : "#eef0f5",
-                borderLeft: "1px solid #e0e2e7",
-                borderRight: "1px solid #e0e2e7",
+                display: "flex",
+                alignItems: "stretch",
+                justifyContent: "center",
+                position: "relative",
+                zIndex: 2,
+                touchAction: "none",
               }}
-            />
+            >
+              <div
+                aria-hidden="true"
+                style={{
+                  width: 6,
+                  background: isResizing || isSeparatorHovered ? "#d9ddff" : "#eef0f5",
+                  borderLeft: "1px solid #e0e2e7",
+                  pointerEvents: "none",
+                }}
+              />
+            </div>
           </>
         )}
         {showPreviewPane && (
@@ -845,6 +869,8 @@ export function EditorWorkspace() {
               <MarkdownPreview
                 content={previewContent}
                 beautifyReview={beautifyReview}
+                notePath={currentNote?.path ?? null}
+                kbRootPath={kbRootPath}
                 searchNavigationTarget={activeSearchNavigationTarget}
                 tagNavigationTarget={activeTagNavigationTarget}
                 sourceLineSyncSignal={sourceLineSyncSignal}

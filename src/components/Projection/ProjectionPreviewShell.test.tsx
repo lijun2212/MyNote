@@ -16,6 +16,7 @@ type ProjectionStateSyncHandler = (event: { payload: {
   revision: number;
   notePath: string | null;
   noteTitle: string | null;
+  kbRootPath?: string | null;
   content: string;
   searchNavigationTarget: null;
   tagNavigationTarget: null;
@@ -94,6 +95,7 @@ describe("ProjectionPreviewShell", () => {
       syncHandler?.({
         payload: {
           sessionId: 7,
+          kbRootPath: null,
           notePath: "notes/demo.md",
           noteTitle: "演示稿",
           content: "# Hello Projection",
@@ -114,6 +116,7 @@ describe("ProjectionPreviewShell", () => {
 
     expect(projectionStore.getState()).toMatchObject({
       projectionSessionId: 7,
+      kbRootPath: null,
       notePath: "notes/demo.md",
       noteTitle: "演示稿",
       content: "# Hello Projection",
@@ -257,6 +260,7 @@ describe("ProjectionPreviewShell", () => {
       syncHandler?.({
         payload: {
           sessionId: 9,
+          kbRootPath: null,
           notePath: "notes/projection.md",
           noteTitle: "Projection",
           content: [
@@ -340,6 +344,7 @@ describe("ProjectionPreviewShell", () => {
       syncHandler?.({
         payload: {
           sessionId: 11,
+          kbRootPath: null,
           notePath: "notes/diagram.md",
           noteTitle: "Diagram",
           content: [
@@ -360,6 +365,55 @@ describe("ProjectionPreviewShell", () => {
 
     await waitFor(() => {
       expect(diagramBlock?.querySelector("svg")).not.toBeNull();
+    });
+  });
+
+  it("rewrites local markdown image paths in the projection window using synced note and knowledge-base context", async () => {
+    vi.resetModules();
+    vi.doUnmock("../EditorWorkspace/MarkdownPreview");
+
+    const { ProjectionPreviewShell } = await import("./ProjectionPreviewShell");
+
+    let syncHandler: ProjectionStateSyncHandler | undefined;
+
+    tauriMocks.listen.mockImplementation(async (eventName: string, handler: unknown) => {
+      if (eventName === PROJECTION_STATE_SYNC_EVENT) {
+        syncHandler = handler as ProjectionStateSyncHandler;
+      }
+
+      return () => undefined;
+    });
+
+    const { container } = render(
+      <ContextMenuProvider>
+        <ProjectionPreviewShell />
+        <ContextMenuHost />
+      </ContextMenuProvider>,
+    );
+
+    await waitFor(() => {
+      expect(syncHandler).toBeTypeOf("function");
+    });
+
+    await act(async () => {
+      syncHandler?.({
+        payload: {
+          sessionId: 13,
+          notePath: "notes/project/demo.md",
+          noteTitle: "Projection Image",
+          kbRootPath: "/Users/lijun/KnowledgeBase",
+          content: "![图片](../../assets/20260610-092845-01ktrd.png)",
+          searchNavigationTarget: null,
+          tagNavigationTarget: null,
+          revision: 1,
+        },
+      });
+    });
+
+    await waitFor(() => {
+      const image = container.querySelector("img") as HTMLImageElement | null;
+      expect(image).not.toBeNull();
+      expect(image?.getAttribute("src")).toBe("asset:///Users/lijun/KnowledgeBase/assets/20260610-092845-01ktrd.png");
     });
   });
 
@@ -414,6 +468,7 @@ describe("ProjectionPreviewShell", () => {
 
     projectionStore.getState().beginSession();
     renderHookWrapper(() => useProjectionSync({
+      kbRootPath: "/Users/lijun/KnowledgeBase",
       notePath: "notes/demo.md",
       noteTitle: "延迟挂载",
       content: "# Late mount snapshot",
@@ -426,6 +481,7 @@ describe("ProjectionPreviewShell", () => {
         syncHandler?.({
           payload: {
             sessionId: 1,
+            kbRootPath: "/Users/lijun/KnowledgeBase",
             notePath: "notes/demo.md",
             noteTitle: "延迟挂载",
             content: "# Late mount snapshot",

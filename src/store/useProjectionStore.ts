@@ -11,6 +11,7 @@ interface ProjectionStoreState {
   projectionLastError: string | null;
   notePath: string | null;
   noteTitle: string | null;
+  kbRootPath: string | null;
   content: string;
   searchNavigationTarget: SearchNavigationTarget | null;
   tagNavigationTarget: TagNavigationTarget | null;
@@ -35,6 +36,7 @@ const initialState = {
   projectionLastError: null,
   notePath: null,
   noteTitle: null,
+  kbRootPath: null,
   content: "",
   searchNavigationTarget: null,
   tagNavigationTarget: null,
@@ -78,6 +80,7 @@ export const useProjectionStore = create<ProjectionStoreState>((set) => ({
     projectionWindowReady: false,
     notePath: initialState.notePath,
     noteTitle: initialState.noteTitle,
+    kbRootPath: initialState.kbRootPath,
     content: initialState.content,
     searchNavigationTarget: initialState.searchNavigationTarget,
     tagNavigationTarget: initialState.tagNavigationTarget,
@@ -93,6 +96,7 @@ export const useProjectionStore = create<ProjectionStoreState>((set) => ({
       projectionSessionId: payload.sessionId,
       notePath: payload.notePath,
       noteTitle: payload.noteTitle,
+      kbRootPath: payload.kbRootPath,
       content: payload.content,
       searchNavigationTarget: payload.searchNavigationTarget,
       tagNavigationTarget: payload.tagNavigationTarget,

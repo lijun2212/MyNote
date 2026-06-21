@@ -36,14 +36,28 @@ interface UseEditorSplitResizeOptions {
   containerRef: React.RefObject<HTMLElement | null>;
 }
 
+type ResizeStartEvent = {
+  clientX: number;
+  preventDefault: () => void;
+};
+
+type ResizeMoveEvent = {
+  clientX: number;
+};
+
 export function useEditorSplitResize({ containerRef }: UseEditorSplitResizeOptions) {
   const [editorRatio, setEditorRatio] = useState(readStoredRatio);
   const [isResizing, setIsResizing] = useState(false);
   const latestRatioRef = useRef(editorRatio);
+  const isResizingRef = useRef(false);
 
   useEffect(() => {
     latestRatioRef.current = editorRatio;
   }, [editorRatio]);
+
+  useEffect(() => {
+    isResizingRef.current = isResizing;
+  }, [isResizing]);
 
   const updateRatioFromClientX = useCallback((clientX: number) => {
     const container = containerRef.current;
@@ -57,27 +71,60 @@ export function useEditorSplitResize({ containerRef }: UseEditorSplitResizeOptio
     setEditorRatio(nextRatio);
   }, [containerRef]);
 
-  const startResize = useCallback((event: React.PointerEvent<HTMLElement>) => {
+  const startResize = useCallback((event: ResizeStartEvent) => {
     event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
     setIsResizing(true);
     updateRatioFromClientX(event.clientX);
   }, [updateRatioFromClientX]);
 
-  const resize = useCallback((event: React.PointerEvent<HTMLElement>) => {
-    if (!isResizing) return;
+  const resize = useCallback((event: ResizeMoveEvent) => {
+    if (!isResizingRef.current) return;
     updateRatioFromClientX(event.clientX);
-  }, [isResizing, updateRatioFromClientX]);
+  }, [updateRatioFromClientX]);
 
-  const stopResize = useCallback((event: React.PointerEvent<HTMLElement>) => {
-    if (!isResizing) return;
-
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
+  const stopResize = useCallback(() => {
+    if (!isResizingRef.current) return;
     setIsResizing(false);
     writeStoredRatio(latestRatioRef.current);
-  }, [isResizing]);
+  }, []);
+
+  useEffect(() => {
+    const handlePointerMove = (event: PointerEvent) => {
+      if (!isResizingRef.current) return;
+      updateRatioFromClientX(event.clientX);
+    };
+
+    const handlePointerUp = () => {
+      if (!isResizingRef.current) return;
+      setIsResizing(false);
+      writeStoredRatio(latestRatioRef.current);
+    };
+
+    const handleMouseMove = (event: MouseEvent) => {
+      if (!isResizingRef.current) return;
+      updateRatioFromClientX(event.clientX);
+    };
+
+    const handleMouseUp = () => {
+      if (!isResizingRef.current) return;
+      setIsResizing(false);
+      writeStoredRatio(latestRatioRef.current);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [updateRatioFromClientX]);
 
   return {
     editorRatio,
