@@ -527,8 +527,8 @@ git commit -m "Release v0.2.5"
 #### 2. 同步源码分支
 
 ```bash
-git push github main
 git push origin main
+git push gitlab main
 ```
 
 先把将要发布的源码同步到 GitHub 和 GitLab，避免后面的安装包、源码主分支和内网镜像互相错位。
@@ -537,8 +537,8 @@ git push origin main
 
 ```bash
 git rev-parse -q --verify refs/tags/v0.2.5 >/dev/null || git tag v0.2.5
-git push github v0.2.5
 git push origin v0.2.5
+git push gitlab v0.2.5
 ```
 
 这里要确保 tag 指向的就是上一步刚提交并已推送的 release commit。
@@ -876,11 +876,11 @@ corepack pnpm updater:manifest 0.2.3 \
 corepack pnpm prepare:release v0.x.y
 git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json src/config/appReleaseMetadata.json
 git commit -m "Release v0.x.y"
-git push github main
 git push origin main
+git push gitlab main
 git rev-parse -q --verify refs/tags/v0.x.y >/dev/null || git tag v0.x.y
-git push github v0.x.y
 git push origin v0.x.y
+git push gitlab v0.x.y
 ```
 
 这一步完成后，后续 macOS 和 Windows 打包机都应该基于同一个 release commit 或同一个 `v0.x.y` tag 来构建。
@@ -950,8 +950,8 @@ corepack pnpm updater:manifest 0.x.y \
 
 当前仓库同时存在两个远端：
 
-1. `github`：公开仓库，负责托管 GitHub Release 资产与 updater 的 `latest.json`。
-2. `origin`：内网 GitLab 仓库，当前主要作为源码镜像与内网代码同步目标。
+1. `origin`：公开 GitHub 仓库，负责托管 GitHub Release 资产与 updater 的 `latest.json`。
+2. `gitlab`：内网 GitLab 仓库，当前主要作为源码镜像与内网代码同步目标。
 
 这两个远端承担的职责不同：
 
@@ -969,11 +969,11 @@ git status
 corepack pnpm prepare:release v0.x.y
 git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json src/config/appReleaseMetadata.json
 git commit -m "Release v0.x.y"
-git push github main
 git push origin main
+git push gitlab main
 git rev-parse -q --verify refs/tags/v0.x.y >/dev/null || git tag v0.x.y
-git push github v0.x.y
 git push origin v0.x.y
+git push gitlab v0.x.y
 ```
 
 如果这次只做单平台 updater，后续再在对应平台机器上继续执行：
@@ -993,15 +993,15 @@ corepack pnpm release:publish
 	先把版本号和发布时间同步到受版本控制的文件里，但这一步本身还不创建 tag，也不上传任何资产。
 3. `git add ... && git commit -m "Release v0.x.y"`
 	先把 release 元数据固定成一个明确 commit；后面的 tag 和 GitHub Release 都应对齐到这个 commit，而不是对齐到一份未提交工作区修改。
-4. `git push github main`
+4. `git push origin main`
 	先把 release commit 推到 GitHub，保证后面 GitHub Release 如果自动创建，`--target HEAD` 指向的是 GitHub 已可见的 commit。
-5. `git push origin main`
+5. `git push gitlab main`
 	再把同一份源码同步到内网 GitLab，保证内网镜像不落后。
 6. `git rev-parse -q --verify refs/tags/v0.x.y >/dev/null || git tag v0.x.y`
-	在本地创建本次发布 tag；这是后续 `git push github v0.x.y` 和 `git push origin v0.x.y` 能成功的前提，这个命令输出可能正常为空，表示 tag 已存在。
-7. `git push github v0.x.y`
+	在本地创建本次发布 tag；这是后续 `git push origin v0.x.y` 和 `git push gitlab v0.x.y` 能成功的前提，这个命令输出可能正常为空，表示 tag 已存在。
+7. `git push origin v0.x.y`
 	把版本 tag 推到 GitHub，保证源码 tag 与 release tag 对齐。
-8. `git push origin v0.x.y`
+8. `git push gitlab v0.x.y`
 	把同一版本 tag 也同步到内网 GitLab，方便内网按 tag 检出源码。
 
 后续平台构建和 GitHub Release 资产上传，应根据你是做单平台 updater，还是做 macOS + Windows 双平台 updater，分别进入上面的对应流程。
@@ -1011,8 +1011,8 @@ corepack pnpm release:publish
 如果这次不是正式发版，只是普通开发提交同步，最小步骤就是：
 
 ```bash
-git push github main
 git push origin main
+git push gitlab main
 ```
 
 ### 什么时候只需要推源码，不需要发 Release {#dual-remote-release-flow-source-only}
@@ -1037,8 +1037,8 @@ git push origin main
 即使你已经执行了：
 
 ```bash
-git push origin main
-git push origin v0.x.y
+git push gitlab main
+git push gitlab v0.x.y
 ```
 
 也只代表 GitLab 上的“源码”和“tag”同步了。
