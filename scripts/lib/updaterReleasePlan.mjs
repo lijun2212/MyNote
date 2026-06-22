@@ -114,15 +114,21 @@ function findFilesMatchingSuffixes(directory, suffixes) {
     .map((entry) => path.join(directory, entry.name));
 }
 
-function findSupplementalReleaseAssets(bundleRoot, target) {
+function isVersionedBundleAsset(filePath, version) {
+  const fileName = path.basename(filePath);
+  return fileName.includes(`_${version}_`);
+}
+
+function findSupplementalReleaseAssets(bundleRoot, target, version) {
   if (target.startsWith("darwin-")) {
-    return findFilesMatchingSuffixes(path.join(bundleRoot, "dmg"), [".dmg"]);
+    return findFilesMatchingSuffixes(path.join(bundleRoot, "dmg"), [".dmg"])
+      .filter((filePath) => isVersionedBundleAsset(filePath, version));
   }
   if (target.startsWith("windows-")) {
     return [
       ...findFilesMatchingSuffixes(path.join(bundleRoot, "nsis"), [".exe"]),
       ...findFilesMatchingSuffixes(path.join(bundleRoot, "msi"), [".msi"]),
-    ];
+    ].filter((filePath) => isVersionedBundleAsset(filePath, version));
   }
   return [];
 }
@@ -210,7 +216,7 @@ export function buildGitHubUpdaterPlan({
   const bundleRoot = resolveBundleRoot(repoRoot);
   const bundle = findFirstMatchingBundle(bundleRoot, normalizedTarget);
   const bundleFileName = path.basename(bundle.localPath);
-  const supplementalAssets = findSupplementalReleaseAssets(bundleRoot, normalizedTarget)
+  const supplementalAssets = findSupplementalReleaseAssets(bundleRoot, normalizedTarget, version)
     .filter((localPath) => localPath !== bundle.localPath)
     .map((localPath) => ({
       localPath,

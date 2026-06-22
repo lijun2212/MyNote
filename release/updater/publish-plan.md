@@ -1,9 +1,9 @@
 # Updater Publish Plan
 
 ## Files
-- Release asset: /Users/lijun/mynote/src-tauri/target/release/bundle/macos/MyNote.app.tar.gz
-- Release asset: /Users/lijun/mynote/src-tauri/target/release/bundle/dmg/MyNote_0.2.8_aarch64.dmg
-- Manifest output: /Users/lijun/mynote/release/updater/latest.json
+- Release asset: D:\apps\mynote\src-tauri\target\release\bundle\nsis\MyNote_0.2.8_x64-setup.exe
+- Release asset: D:\apps\mynote\src-tauri\target\release\bundle\msi\MyNote_0.2.8_x64_en-US.msi
+- Manifest output: D:\apps\mynote\release\updater\latest.json
 
 ## Preferred Command
 corepack pnpm release:publish
@@ -14,10 +14,10 @@ corepack pnpm release:publish
 - Release page: https://github.com/lijun2212/MyNote/releases
 
 ## Upload Command
-gh release upload v0.2.8 /Users/lijun/mynote/src-tauri/target/release/bundle/macos/MyNote.app.tar.gz /Users/lijun/mynote/src-tauri/target/release/bundle/dmg/MyNote_0.2.8_aarch64.dmg /Users/lijun/mynote/release/updater/latest.json --repo lijun2212/MyNote --clobber
+gh release upload v0.2.8 D:\apps\mynote\src-tauri\target\release\bundle\nsis\MyNote_0.2.8_x64-setup.exe D:\apps\mynote\src-tauri\target\release\bundle\msi\MyNote_0.2.8_x64_en-US.msi D:\apps\mynote\release\updater\latest.json --repo lijun2212/MyNote --clobber
 
 ## Manifest Command
-corepack pnpm updater:manifest <version> --platform darwin-aarch64=https://github.com/lijun2212/MyNote/releases/download/v0.2.8/MyNote.app.tar.gz::/Users/lijun/mynote/src-tauri/target/release/bundle/macos/MyNote.app.tar.gz.sig --output /Users/lijun/mynote/release/updater/latest.json
+corepack pnpm updater:manifest <version> --platform windows-x86_64=https://github.com/lijun2212/MyNote/releases/download/v0.2.8/MyNote_0.2.8_x64-setup.exe::D:\apps\mynote\src-tauri\target\release\bundle\nsis\MyNote_0.2.8_x64-setup.exe.sig --output D:\apps\mynote\release\updater\latest.json
 
 ## Latest Release URL
 - https://github.com/lijun2212/MyNote/releases/latest/download/latest.json

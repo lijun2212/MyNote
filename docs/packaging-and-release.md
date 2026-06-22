@@ -4,6 +4,7 @@
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| 1.2 | 2026-06-22 | 修正双平台发版说明：明确 `release:build` / `release:publish` 当前只面向单宿主机单平台 updater 计划，补充 macOS + Windows 合并 `latest.json` 的发布流程，并修正源码、commit、tag 与 Release 的先后顺序。 |
 | 1.1 | 2026-06-19 | 补充 Windows updater 发布说明：修正 Windows target 命名约定，明确 Windows 使用签名后的 `.exe` 或 `.msi` 作为 updater 资产，并补充安装阶段自动退出行为。 |
 | 1.0 | 2026-06-19 | 修正新版本发布实操顺序：补充本地创建 Git Tag、发布后校验步骤，以及 `pnpm` 可执行性要求，避免 `release:publish` 与 tag 推送阶段踩坑。 |
 | 0.9 | 2026-06-19 | 补充 GitHub + 内网 GitLab 双远端同步与发版顺序，明确源码同步与 Release 资产托管的边界。 |
@@ -464,9 +465,15 @@ corepack pnpm release:build
 
 当真实构建成功且当前平台已经产出带 `.sig` 的 updater bundle 后，`release:build` 还会额外在 `release/updater/` 下生成三份发布辅助文件：
 
-1. `latest.json`：当前平台对应的 Tauri updater 静态 manifest，直接读取 `.sig` 文件内容生成。
+1. `latest.json`：当前这台构建机对应平台的 Tauri updater 静态 manifest，直接读取 `.sig` 文件内容生成。
 2. `publish-plan.json`：结构化的 GitHub updater 发布计划，包含当前平台安装包、补充安装包资产、manifest 输出路径、GitHub 仓库和 release tag。
 3. `publish-plan.md`：可直接照着执行的文本化发布指引，包含 manifest 生成命令、`gh release upload` 命令模板，以及 `latest` 固定下载地址。
+
+这里要特别注意当前脚本的边界：
+
+1. 一次 `release:build` 只会为当前宿主机平台生成一份 `latest.json` 和一份 `publish-plan.json`。
+2. 一次 `release:publish` 也只会上传当前工作区里这份单平台计划引用的资产。
+3. 如果你的 updater 需要同时支持 macOS 和 Windows，不能把两台机器各自执行一次 `release:publish` 当作最终流程；否则后执行的平台会覆盖前一个平台的 `latest.json`。
 
 如果你已经拿到了 `publish-plan.json`，后续优先执行：
 
@@ -487,9 +494,9 @@ corepack pnpm release:publish --dry-run
 
 `release:publish` 依赖本机已经安装并登录 `gh`。如果只想预演上传哪些资产，可直接执行 `--dry-run`，它不会修改远端 release。
 
-### 新版本完整发版示例 {#macos-release-walkthrough}
+### macOS 单平台发版示例 {#macos-release-walkthrough}
 
-下面给出一套可以直接照抄的新版本正式发版顺序。假设这次要发布 `v0.2.5`。
+下面给出一套可以直接照抄的 macOS 单平台正式发版顺序。假设这次要发布 `v0.2.5`。
 
 #### 0. 发版前最后核对
 
@@ -507,7 +514,17 @@ gh auth status
 3. `corepack pnpm` 也可正常执行。
 4. `gh` 已经登录到目标 GitHub 账号。
 
-#### 1. 先同步源码分支
+#### 1. 先同步版本元数据并提交
+
+```bash
+corepack pnpm prepare:release v0.2.5
+git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json src/config/appReleaseMetadata.json
+git commit -m "Release v0.2.5"
+```
+
+这一步的目的，是先把版本号和发布时间对应的源码状态固定成一个明确 commit。后面的 tag、GitHub Release 和安装包，都应该对齐到这个 commit，而不是对齐到一份尚未提交的工作区修改。
+
+#### 2. 同步源码分支
 
 ```bash
 git push github main
@@ -516,7 +533,17 @@ git push origin main
 
 先把将要发布的源码同步到 GitHub 和 GitLab，避免后面的安装包、源码主分支和内网镜像互相错位。
 
-#### 2. 构建新版本安装包与 updater 产物
+#### 3. 在本地创建并推送本次版本 tag
+
+```bash
+git rev-parse -q --verify refs/tags/v0.2.5 >/dev/null || git tag v0.2.5
+git push github v0.2.5
+git push origin v0.2.5
+```
+
+这里要确保 tag 指向的就是上一步刚提交并已推送的 release commit。
+
+#### 4. 构建新版本安装包与 updater 产物
 
 ```bash
 corepack pnpm release:build v0.2.5
@@ -528,15 +555,7 @@ corepack pnpm release:build v0.2.5
 2. 执行 Tauri 正式构建。
 3. 生成 [release/updater/latest.json](release/updater/latest.json)、[release/updater/publish-plan.json](release/updater/publish-plan.json) 和 [release/updater/publish-plan.md](release/updater/publish-plan.md)。
 
-#### 3. 在本地创建本次版本 tag
-
-```bash
-git rev-parse -q --verify refs/tags/v0.2.5 >/dev/null || git tag v0.2.5
-```
-
-这一行的目的不是马上推 tag，而是先确保本地确实存在 `v0.2.5`。否则后面直接执行 `git push github v0.2.5` 时会报错，因为 `release:build` 只会同步版本号，不会自动在本地创建 Git tag。
-
-#### 4. 发布 GitHub Release 资产
+#### 5. 发布 GitHub Release 资产
 
 ```bash
 corepack pnpm release:publish
@@ -554,15 +573,6 @@ corepack pnpm release:publish
 3. 因此决定 `release:publish` 发哪个版本的关键，是前一步 `release:build` 在本地生成出来的 `publish-plan.json` 是否已经是目标版本。
 
 如果这一步中途失败，在修复问题后通常可以直接再次执行同一条命令；当前上传逻辑使用 `--clobber`，会覆盖同名资产。
-
-#### 5. 把版本 tag 推到两个远端
-
-```bash
-git push github v0.2.5
-git push origin v0.2.5
-```
-
-到这一步，GitHub 公开仓库、内网 GitLab 镜像和本地仓库，三边的版本 tag 才真正对齐。
 
 #### 6. 发布后校验
 
@@ -634,6 +644,11 @@ corepack pnpm tauri build
 corepack pnpm release:build v0.x.y
 corepack pnpm release:publish
 ```
+
+这套两步命令只适用于下面两类场景：
+
+1. 这次只发布 Windows 单平台 updater。
+2. 你只是想先把 Windows 安装包和 `.sig` 产物构建出来，后面还会再和 macOS 产物一起手工合并 `latest.json`。
 
 对 Windows 而言，这里有两个容易混淆但必须分开的概念：
 
@@ -841,11 +856,94 @@ corepack pnpm updater:manifest 0.2.3 \
 2. 当前平台对应的 updater 资产：macOS 下通常是 `MyNote.app.tar.gz`，Windows 下通常是签名后的 `.exe` 或 `.msi`，Linux 下通常是 `.AppImage`。
 3. 当前平台面向手工下载安装的补充安装包，例如 macOS 下的 `.dmg`；Windows 上如果 updater 复用了 `.exe` 或 `.msi`，这个资产本身往往同时承担“手动安装包”和“updater 安装包”两种角色。
 
+### 当前脚本边界 {#github-updater-hosting-script-boundary}
+
+当前仓库里 `release:build` / `release:publish` 的自动化边界要明确：
+
+1. 一台构建机执行一次 `release:build`，只会生成当前平台的一份 `latest.json`。
+2. 一台构建机执行一次 `release:publish`，只会上传当前工作区里的这份单平台 `latest.json` 和本地计划文件里的资产。
+3. 因此如果你同时支持 macOS 和 Windows updater，不能简单在两台机器上各自执行一遍 `release:publish` 就结束；这样会让最后一次上传的 `latest.json` 覆盖前一平台。
+
+### macOS + Windows 双平台 updater 推荐流程 {#github-updater-hosting-macos-windows-flow}
+
+如果本次版本需要同时支持 macOS 和 Windows 的应用内更新，推荐按下面顺序执行：
+
+#### 1. 先固定源码版本
+
+在一台主控机器上完成：
+
+```bash
+corepack pnpm prepare:release v0.x.y
+git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json src/config/appReleaseMetadata.json
+git commit -m "Release v0.x.y"
+git push github main
+git push origin main
+git rev-parse -q --verify refs/tags/v0.x.y >/dev/null || git tag v0.x.y
+git push github v0.x.y
+git push origin v0.x.y
+```
+
+这一步完成后，后续 macOS 和 Windows 打包机都应该基于同一个 release commit 或同一个 `v0.x.y` tag 来构建。
+
+#### 2. 在 macOS 上构建并保留产物
+
+```bash
+corepack pnpm release:build v0.x.y
+```
+
+至少保留下面四类文件：
+
+1. `src-tauri/target/release/bundle/macos/MyNote.app.tar.gz`
+2. `src-tauri/target/release/bundle/macos/MyNote.app.tar.gz.sig`
+3. `src-tauri/target/release/bundle/dmg/*.dmg`
+4. `release/updater/publish-plan.json`
+
+#### 3. 在 Windows 上构建并保留产物
+
+```powershell
+corepack pnpm release:build v0.x.y
+```
+
+至少保留下面四类文件：
+
+1. `src-tauri/target/release/bundle/nsis/*.exe`
+2. `src-tauri/target/release/bundle/nsis/*.exe.sig`
+3. `src-tauri/target/release/bundle/msi/*.msi`
+4. `release/updater/publish-plan.json`
+
+#### 4. 先上传平台资产，再最后上传合并后的 `latest.json`
+
+这一阶段不要直接把两台机器各自生成的 `latest.json` 当作最终结果。正确做法是：
+
+1. 先把 macOS 和 Windows 的平台资产都上传到同一个 GitHub Release。
+2. 最后生成一份同时包含 `darwin-*` 和 `windows-*` 两组平台键的合并 `latest.json`。
+3. 再把这份合并后的 `latest.json` 上传到 GitHub Release，并覆盖同名资产。
+
+可以直接使用仓库里的 `updater:manifest` 来生成合并 manifest，例如：
+
+```bash
+corepack pnpm updater:manifest 0.x.y \
+	--platform darwin-aarch64=https://github.com/lijun2212/MyNote/releases/download/v0.x.y/MyNote.app.tar.gz::src-tauri/target/release/bundle/macos/MyNote.app.tar.gz.sig \
+	--platform windows-x86_64=https://github.com/lijun2212/MyNote/releases/download/v0.x.y/MyNote_0.x.y_x64-setup.exe::src-tauri/target/release/bundle/nsis/MyNote_0.x.y_x64-setup.exe.sig \
+	--output release/updater/latest.json
+```
+
+如果 Windows 实际上以 `.msi` 作为 updater 资产，就把对应的 URL 和 `.sig` 文件替换成 `.msi` 版本。
+
+#### 5. 最终校验标准
+
+最终上传完成后，`latest.json` 里至少应同时看到：
+
+1. `darwin-aarch64` 或你实际支持的 macOS 平台键。
+2. `windows-x86_64` 或你实际支持的 Windows 平台键。
+
+只要缺少其中任意一个，那个平台的应用内更新就不会命中对应资产。
+
 原生 updater 的公钥已经写入配置，默认 provider 也已经切到 `tauri-updater`：
 
 1. [src-tauri/tauri.conf.json](src-tauri/tauri.conf.json) 和 [src/config/appUpdateConfig.json](src/config/appUpdateConfig.json) 已经回填同一份真实 updater 公钥。
 2. 当前默认 provider 已切到 `tauri-updater`，因为 GitHub Release 上的 `latest.json` 和对应安装包资产已经完成首次托管。
-3. 只要后续版本继续沿用同一把 updater 私钥签名，并通过 `release:build` + `release:publish` 发版，这条更新链就能持续工作。
+3. 只要后续版本继续沿用同一把 updater 私钥签名，并保证最终上传到 GitHub Release 的 `latest.json` 同时包含所有受支持平台，这条更新链就能持续工作。
 4. Windows 需要额外记住一点：`latest.json` 里的平台键必须是 `windows-*`，不能写成 `win32-*`，否则客户端即使拿到了 manifest 也不会命中对应平台资产。
 
 ## 双远端同步顺序 {#dual-remote-release-flow}
@@ -868,36 +966,45 @@ corepack pnpm updater:manifest 0.2.3 \
 
 ```bash
 git status
+corepack pnpm prepare:release v0.x.y
+git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json src/config/appReleaseMetadata.json
+git commit -m "Release v0.x.y"
 git push github main
 git push origin main
-corepack pnpm release:build v0.x.y
 git rev-parse -q --verify refs/tags/v0.x.y >/dev/null || git tag v0.x.y
-corepack pnpm release:publish
 git push github v0.x.y
 git push origin v0.x.y
-git commit -m "Release v0.x.y"
 ```
+
+如果这次只做单平台 updater，后续再在对应平台机器上继续执行：
+
+```bash
+corepack pnpm release:build v0.x.y
+corepack pnpm release:publish
+```
+
+如果这次要同时支持 macOS 和 Windows updater，不要在这里直接结束，而应继续执行上文 [macOS + Windows 双平台 updater 推荐流程](#github-updater-hosting-macos-windows-flow) 中的双平台构建、资产上传和合并 `latest.json` 步骤。
 
 上面每一步的含义分别是：
 
 1. `git status`
 	确认工作区干净，避免把未提交改动混进发布构建。
-2. `git push github main`
-	先把最新源码推到 GitHub，保证公开仓库的源码与即将发布的 release 对齐。
-3. `git push origin main`
+2. `corepack pnpm prepare:release v0.x.y`
+	先把版本号和发布时间同步到受版本控制的文件里，但这一步本身还不创建 tag，也不上传任何资产。
+3. `git add ... && git commit -m "Release v0.x.y"`
+	先把 release 元数据固定成一个明确 commit；后面的 tag 和 GitHub Release 都应对齐到这个 commit，而不是对齐到一份未提交工作区修改。
+4. `git push github main`
+	先把 release commit 推到 GitHub，保证后面 GitHub Release 如果自动创建，`--target HEAD` 指向的是 GitHub 已可见的 commit。
+5. `git push origin main`
 	再把同一份源码同步到内网 GitLab，保证内网镜像不落后。
-4. `corepack pnpm release:build v0.x.y`
-	同步版本号和发布时间，并生成当前版本的安装包、签名和 `latest.json`。
-5. `git rev-parse -q --verify refs/tags/v0.x.y >/dev/null || git tag v0.x.y`
+6. `git rev-parse -q --verify refs/tags/v0.x.y >/dev/null || git tag v0.x.y`
 	在本地创建本次发布 tag；这是后续 `git push github v0.x.y` 和 `git push origin v0.x.y` 能成功的前提，这个命令输出可能正常为空，表示 tag 已存在。
-6. `corepack pnpm release:publish`
-	自动创建或更新 GitHub Release，并上传 `MyNote.app.tar.gz`、`latest.json`、`dmg` 等资产。
 7. `git push github v0.x.y`
 	把版本 tag 推到 GitHub，保证源码 tag 与 release tag 对齐。
 8. `git push origin v0.x.y`
 	把同一版本 tag 也同步到内网 GitLab，方便内网按 tag 检出源码。
-9. `git commit -m "Release v0.x.y"`
-	如果你想要保持代码和发布的版本严格对齐，可以在发版后提交一次专门的 commit，明确说明这是针对 `v0.x.y` 的发布提交。
+
+后续平台构建和 GitHub Release 资产上传，应根据你是做单平台 updater，还是做 macOS + Windows 双平台 updater，分别进入上面的对应流程。
 
 ### 最小日常同步顺序 {#dual-remote-release-flow-daily}
 

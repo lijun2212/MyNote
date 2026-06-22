@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { execCorepack } from "./lib/execCorepack.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -37,7 +38,7 @@ if (dryRun) {
   process.exit(0);
 }
 
-execFileSync("corepack", commandArgs, {
+execCorepack(commandArgs, {
   cwd: repoRoot,
   stdio: "inherit",
   env: process.env,

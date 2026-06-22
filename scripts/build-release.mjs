@@ -3,21 +3,33 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import appUpdateConfig from "../src/config/appUpdateConfig.json" with { type: "json" };
+import { execCorepack } from "./lib/execCorepack.mjs";
 import { buildGitHubUpdaterPlan, renderGitHubUpdaterPlanMarkdown, writeUpdaterManifestFromPlan } from "./lib/updaterReleasePlan.mjs";
 import { withDefaultUpdaterSigningEnv } from "./lib/updaterSigningEnv.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..");
+const noUpdaterArtifactsConfigPath = path.join(repoRoot, "src-tauri", "tauri.no-updater-artifacts.conf.json");
 
 function readJson(relativePath) {
   return JSON.parse(fs.readFileSync(path.join(repoRoot, relativePath), "utf8"));
 }
 
+function removeStaleUpdaterOutputs(updaterDirectory) {
+  for (const fileName of ["latest.json", "publish-plan.json", "publish-plan.md"]) {
+    const filePath = path.join(updaterDirectory, fileName);
+    if (fs.existsSync(filePath)) {
+      fs.rmSync(filePath, { force: true });
+    }
+  }
+}
+
 const rawArgs = process.argv.slice(2);
 const dryRun = rawArgs.includes("--dry-run");
 const buildEnv = withDefaultUpdaterSigningEnv(process.env, repoRoot);
-const usingDefaultLocalUpdaterKey = !process.env.TAURI_SIGNING_PRIVATE_KEY && !process.env.TAURI_SIGNING_PRIVATE_KEY_PATH && !!buildEnv.TAURI_SIGNING_PRIVATE_KEY;
+const hasSigningKey = !!buildEnv.TAURI_SIGNING_PRIVATE_KEY || !!buildEnv.TAURI_SIGNING_PRIVATE_KEY_PATH;
+const usingDefaultLocalUpdaterKey = !process.env.TAURI_SIGNING_PRIVATE_KEY && !process.env.TAURI_SIGNING_PRIVATE_KEY_PATH && hasSigningKey;
 
 const prepareScriptPath = path.join(repoRoot, "scripts", "prepare-release-from-tag.mjs");
 const prepareArgs = [prepareScriptPath, ...rawArgs];
@@ -57,7 +69,14 @@ if (dryRun) {
 }
 
 console.log("Step 2/3: building Tauri bundle");
-execFileSync("corepack", ["pnpm", "tauri", "build"], {
+const tauriBuildArgs = ["pnpm", "tauri", "build"];
+if (!hasSigningKey) {
+  console.log("No updater private key found; building installers without updater artifacts.");
+  console.log("Set TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PATH, or .local/updater/updater.key to enable signed updater bundles.");
+  tauriBuildArgs.push("--config", noUpdaterArtifactsConfigPath);
+}
+
+execCorepack(tauriBuildArgs, {
   cwd: repoRoot,
   stdio: "inherit",
   env: buildEnv,
@@ -66,6 +85,13 @@ execFileSync("corepack", ["pnpm", "tauri", "build"], {
 const releaseTag = `v${packageJson.version}`;
 const updaterDirectory = path.join(repoRoot, "release", "updater");
 fs.mkdirSync(updaterDirectory, { recursive: true });
+
+if (!hasSigningKey) {
+  removeStaleUpdaterOutputs(updaterDirectory);
+  console.log("Step 3/3: skipped updater manifest and publish plan");
+  console.log("Reason: no updater private key was provided, so no signed updater bundle was produced.");
+  process.exit(0);
+}
 
 try {
   const updaterPlan = buildGitHubUpdaterPlan({
@@ -96,6 +122,7 @@ try {
   console.log(`- ${path.relative(repoRoot, path.join(updaterDirectory, "publish-plan.json"))}`);
   console.log(`- ${path.relative(repoRoot, path.join(updaterDirectory, "publish-plan.md"))}`);
 } catch (error) {
+  removeStaleUpdaterOutputs(updaterDirectory);
   const message = error instanceof Error ? error.message : String(error);
   console.log("Step 3/3: skipped updater manifest and publish plan");
   console.log(`Reason: ${message}`);

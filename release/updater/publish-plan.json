@@ -1,5 +1,5 @@
 {
-  "manifestOutputPath": "/Users/lijun/mynote/release/updater/latest.json",
+  "manifestOutputPath": "D:\\apps\\mynote\\release\\updater\\latest.json",
   "releaseTag": "v0.2.8",
   "repository": "lijun2212/MyNote",
   "releasePageUrl": "https://github.com/lijun2212/MyNote/releases",
@@ -8,21 +8,21 @@
   "manifestAssetDownloadUrl": "https://github.com/lijun2212/MyNote/releases/download/v0.2.8/latest.json",
   "manifestPlatforms": [
     {
-      "target": "darwin-aarch64",
-      "url": "https://github.com/lijun2212/MyNote/releases/download/v0.2.8/MyNote.app.tar.gz",
-      "signaturePath": "/Users/lijun/mynote/src-tauri/target/release/bundle/macos/MyNote.app.tar.gz.sig"
+      "target": "windows-x86_64",
+      "url": "https://github.com/lijun2212/MyNote/releases/download/v0.2.8/MyNote_0.2.8_x64-setup.exe",
+      "signaturePath": "D:\\apps\\mynote\\src-tauri\\target\\release\\bundle\\nsis\\MyNote_0.2.8_x64-setup.exe.sig"
     }
   ],
   "releaseAssets": [
     {
-      "localPath": "/Users/lijun/mynote/src-tauri/target/release/bundle/macos/MyNote.app.tar.gz",
-      "assetName": "MyNote.app.tar.gz",
-      "downloadUrl": "https://github.com/lijun2212/MyNote/releases/download/v0.2.8/MyNote.app.tar.gz"
+      "localPath": "D:\\apps\\mynote\\src-tauri\\target\\release\\bundle\\nsis\\MyNote_0.2.8_x64-setup.exe",
+      "assetName": "MyNote_0.2.8_x64-setup.exe",
+      "downloadUrl": "https://github.com/lijun2212/MyNote/releases/download/v0.2.8/MyNote_0.2.8_x64-setup.exe"
     },
     {
-      "localPath": "/Users/lijun/mynote/src-tauri/target/release/bundle/dmg/MyNote_0.2.8_aarch64.dmg",
-      "assetName": "MyNote_0.2.8_aarch64.dmg",
-      "downloadUrl": "https://github.com/lijun2212/MyNote/releases/download/v0.2.8/MyNote_0.2.8_aarch64.dmg"
+      "localPath": "D:\\apps\\mynote\\src-tauri\\target\\release\\bundle\\msi\\MyNote_0.2.8_x64_en-US.msi",
+      "assetName": "MyNote_0.2.8_x64_en-US.msi",
+      "downloadUrl": "https://github.com/lijun2212/MyNote/releases/download/v0.2.8/MyNote_0.2.8_x64_en-US.msi"
     }
   ]
 }

@@ -11,11 +11,54 @@ const rawArgs = process.argv.slice(2);
 const dryRun = rawArgs.includes("--dry-run");
 const planPathArg = rawArgs.find((arg) => !arg.startsWith("--"));
 const planPath = path.resolve(repoRoot, planPathArg ?? path.join("release", "updater", "publish-plan.json"));
+const winGetLinksPath = process.platform === "win32"
+  ? path.join(process.env.LOCALAPPDATA ?? "", "Microsoft", "WinGet", "Links")
+  : null;
 
 function fail(message) {
   console.error(message);
   process.exit(1);
 }
+
+function buildGhEnv() {
+  if (process.platform !== "win32" || !winGetLinksPath) {
+    return process.env;
+  }
+
+  const currentPath = process.env.Path ?? process.env.PATH ?? "";
+  const pathSegments = currentPath.split(path.delimiter).filter(Boolean);
+  if (pathSegments.includes(winGetLinksPath)) {
+    return process.env;
+  }
+
+  return {
+    ...process.env,
+    Path: `${winGetLinksPath}${path.delimiter}${currentPath}`,
+  };
+}
+
+function resolveGhCommand() {
+  const configuredPath = process.env.GITHUB_CLI_PATH;
+  if (configuredPath && fs.existsSync(configuredPath)) {
+    return configuredPath;
+  }
+
+  if (process.platform !== "win32") {
+    return "gh";
+  }
+
+  const candidatePaths = [
+    winGetLinksPath ? path.join(winGetLinksPath, "gh.exe") : null,
+    path.join(process.env.ProgramFiles ?? "", "GitHub CLI", "gh.exe"),
+    path.join(process.env.LOCALAPPDATA ?? "", "Programs", "GitHub CLI", "gh.exe"),
+  ].filter(Boolean);
+
+  const existingPath = candidatePaths.find((candidatePath) => fs.existsSync(candidatePath));
+  return existingPath ?? "gh";
+}
+
+const ghCommand = resolveGhCommand();
+const ghEnv = buildGhEnv();
 
 function readPlan() {
   if (!fs.existsSync(planPath)) {
@@ -35,11 +78,11 @@ function readPlan() {
 
 function runGh(args, options = {}) {
   try {
-    return execFileSync("gh", args, {
+    return execFileSync(ghCommand, args, {
       cwd: repoRoot,
       encoding: options.encoding ?? "utf8",
       stdio: options.stdio ?? ["ignore", "pipe", "pipe"],
-      env: process.env,
+      env: options.env ?? ghEnv,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -57,10 +100,8 @@ function ensureGitHubAuth() {
 
 function releaseExists(plan) {
   try {
-    execFileSync("gh", ["release", "view", plan.releaseTag, "--repo", plan.repository, "--json", "url"], {
-      cwd: repoRoot,
+    runGh(["release", "view", plan.releaseTag, "--repo", plan.repository, "--json", "url"], {
       stdio: ["ignore", "pipe", "pipe"],
-      env: process.env,
     });
     return true;
   } catch {
@@ -73,6 +114,20 @@ function getUploadAssets(plan) {
     ...plan.releaseAssets.map((asset) => asset.localPath),
     plan.manifestOutputPath,
   ];
+}
+
+function ensureUploadAssetsExist(assetPaths) {
+  const missingAssetPaths = assetPaths.filter((assetPath) => !fs.existsSync(assetPath));
+  if (missingAssetPaths.length === 0) {
+    return;
+  }
+
+  fail([
+    "Publish plan references local assets that do not exist on this machine.",
+    ...missingAssetPaths.map((assetPath) => `- ${assetPath}`),
+    "Re-run `corepack pnpm release:build <version>` on the current machine to generate a fresh publish plan.",
+    "If you are publishing updater assets, make sure a matching updater signing private key is available so Step 3/3 can produce signed bundles.",
+  ].join("\n"));
 }
 
 function createRelease(plan) {
@@ -110,6 +165,7 @@ if (dryRun) {
   process.exit(0);
 }
 
+ensureUploadAssetsExist(uploadAssets);
 ensureGitHubCliAvailable();
 ensureGitHubAuth();
 
