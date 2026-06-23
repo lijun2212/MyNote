@@ -11,7 +11,9 @@ node_modules
 dist
 dist-ssr
 test-results
+tests
 playwright-report
+playwright.config.ts
 .local/
 *.local
 .worktrees/
@@ -26,3 +28,9 @@ playwright-report
 *.njsproj
 *.sln
 *.sw?
+
+# docs
+docs/*
+!docs/usage-help.md
+!docs/personal-knowledge-base-design.md
+.superpowers/*
